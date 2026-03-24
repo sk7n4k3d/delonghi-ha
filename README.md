@@ -80,7 +80,9 @@ Any De'Longhi WiFi-connected coffee machine that works with the **De'Longhi Coff
 | `button.brew_espresso` | Brew an espresso |
 | `button.brew_cappuccino` | Brew a cappuccino |
 | `button.brew_latte_macchiato` | Brew a latte macchiato |
-| ... | One button per available beverage (auto-discovered from machine) |
+| ... | 50+ buttons, one per available beverage (auto-discovered) |
+
+> **Known limitation:** Currently only the **Espresso** brew button is fully functional. Other beverages are detected and displayed but their brew commands are still being reverse-engineered. The stored recipe format (0xA6) differs from the brew command format (0x83) and we're working on the correct conversion. Power On/Off work for all models. See [#4](https://github.com/sk7n4k3d/delonghi-ha/issues/4) for progress.
 
 ## Screenshots
 
