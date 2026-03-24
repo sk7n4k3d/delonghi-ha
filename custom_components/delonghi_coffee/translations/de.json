@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "De'Longhi Coffee Link",
+        "description": "Geben Sie Ihre De'Longhi Coffee Link Anmeldedaten ein.",
+        "data": {
+          "region": "Region",
+          "email": "Email",
+          "password": "Passwort"
+        }
+      },
+      "reauth_confirm": {
+        "title": "De'Longhi Coffee erneut authentifizieren",
+        "description": "Ihre Anmeldedaten für {email} sind nicht mehr gültig. Bitte geben Sie Ihr neues Passwort ein.",
+        "data": {
+          "password": "Passwort"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ungültige Email oder Passwort",
+      "cannot_connect": "Verbindung zu De'Longhi-Servern nicht möglich",
+      "no_devices": "Keine Kaffeemaschinen in diesem Konto gefunden",
+      "unknown": "Unerwarteter Fehler"
+    },
+    "abort": {
+      "already_configured": "Dieses Konto ist bereits konfiguriert",
+      "reauth_successful": "Erneute Authentifizierung erfolgreich"
+    }
+  }
+}

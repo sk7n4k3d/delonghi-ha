@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "De'Longhi Coffee Link",
+        "description": "Введіть облікові дані вашого акаунту De'Longhi Coffee Link.",
+        "data": {
+          "region": "Регіон",
+          "email": "Email",
+          "password": "Пароль"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Повторна автентифікація De'Longhi Coffee",
+        "description": "Ваші облікові дані для {email} більше не дійсні. Будь ласка, введіть новий пароль.",
+        "data": {
+          "password": "Пароль"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Невірний email або пароль",
+      "cannot_connect": "Не вдається підключитися до серверів De'Longhi",
+      "no_devices": "Кавоварки не знайдено в цьому акаунті",
+      "unknown": "Неочікувана помилка"
+    },
+    "abort": {
+      "already_configured": "Цей акаунт вже налаштовано",
+      "reauth_successful": "Повторна автентифікація успішна"
+    }
+  }
+}

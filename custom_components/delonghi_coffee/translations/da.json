@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "De'Longhi Coffee Link",
+        "description": "Indtast dine De'Longhi Coffee Link kontooplysninger.",
+        "data": {
+          "region": "Region",
+          "email": "Email",
+          "password": "Adgangskode"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Genautentificer De'Longhi Coffee",
+        "description": "Dine loginoplysninger for {email} er ikke længere gyldige. Indtast venligst din nye adgangskode.",
+        "data": {
+          "password": "Adgangskode"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ugyldig email eller adgangskode",
+      "cannot_connect": "Kan ikke oprette forbindelse til De'Longhis servere",
+      "no_devices": "Ingen kaffemaskiner fundet på denne konto",
+      "unknown": "Uventet fejl"
+    },
+    "abort": {
+      "already_configured": "Denne konto er allerede konfigureret",
+      "reauth_successful": "Genautentificering gennemført"
+    }
+  }
+}
