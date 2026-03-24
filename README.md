@@ -73,21 +73,175 @@ Any De'Longhi WiFi-connected coffee machine that works with the **De'Longhi Coff
 
 ### Buttons
 
-One button per available beverage on your machine (Espresso, Cappuccino, Latte Macchiato, etc.). Beverages are auto-discovered from your machine's stored recipes.
+| Entity | Description |
+|--------|-------------|
+| `button.power_on` | Wake machine from standby |
+| `button.power_off` | Put machine in standby |
+| `button.brew_espresso` | Brew an espresso |
+| `button.brew_cappuccino` | Brew a cappuccino |
+| `button.brew_latte_macchiato` | Brew a latte macchiato |
+| ... | One button per available beverage (auto-discovered from machine) |
 
 ## Screenshots
 
 *Coming soon*
 
-## Technical Details
+## Protocol Documentation
 
-This integration communicates with the De'Longhi Coffee Link cloud service:
+### Architecture
 
-1. **Authentication**: Gigya (identity provider) -> JWT -> Ayla Networks token
-2. **Device control**: Ayla Networks IoT cloud API (device properties, ECAM commands)
-3. **Protocol**: ECAM binary commands wrapped in Base64, sent via Ayla datapoints
+```
+┌──────────┐     ┌──────────────┐     ┌──────────────┐     ┌─────────────┐
+│  Home    │────▶│   Gigya SSO  │────▶│ Ayla Networks│────▶│  Coffee     │
+│Assistant │     │ (De'Longhi)  │     │  IoT Cloud   │     │  Machine    │
+└──────────┘     └──────────────┘     └──────────────┘     └─────────────┘
+     │            accounts.eu1.        ads-eu.ayla           WiFi (Ayla
+     │            gigya.com            networks.com          agent ESP32)
+     │                                      │
+     │  1. Login (email/password)           │
+     │  2. Get JWT token                    │
+     │  3. Ayla token_sign_in               │
+     │  4. Read/Write device properties     │
+     └─────────────────────────────────────┘
+```
+
+### Authentication Flow
+
+1. **Gigya Login** — `POST accounts.eu1.gigya.com/accounts.login` with email, password, API key
+2. **Get JWT** — `POST accounts.eu1.gigya.com/accounts.getJWT` with session token
+3. **Ayla Token** — `POST user-field-eu.aylanetworks.com/api/v1/token_sign_in` with app_id, app_secret, JWT
+4. Returns `access_token` (valid 24h) + `refresh_token`
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/apiv1/devices.json` | List all devices (DSN, model, IP, status) |
+| `GET` | `/apiv1/dsns/{DSN}/properties.json` | Get all device properties |
+| `GET` | `/apiv1/dsns/{DSN}/properties/{name}.json` | Get single property |
+| `POST` | `/apiv1/dsns/{DSN}/properties/{name}/datapoints.json` | Write a property value |
+
+Base URL: `https://ads-eu.aylanetworks.com`
+Auth header: `Authorization: auth_token {token}`
+
+### Key Properties
+
+| Property | Direction | Description |
+|----------|-----------|-------------|
+| `app_data_request` | input | Send ECAM commands (Base64 encoded) |
+| `app_data_response` | output | Machine response to commands |
+| `app_device_connected` | input | Ping to force data refresh |
+| `app_device_status` | output | Cloud status (RUN, etc.) |
+| `d302_monitor_machine` | output | Real-time monitor (binary, MonitorDataV2) |
+| `d510_ground_cnt_percentage` | output | Grounds container fill % |
+| `d5xx_*` | output | Machine settings and maintenance |
+| `d7xx_*` | output | Beverage counters |
+| `d1xx_rec_*` | output | Recipe data (Base64 ECAM) |
+
+### ECAM Packet Format
+
+```
+┌─────────┬────────┬─────────────┬───────────┬────────────┬───────────┐
+│Direction│ Length │ Packet Data │ Checksum  │ Timestamp  │  App ID   │
+│  1 byte │ 1 byte│  N bytes    │  2 bytes  │  4 bytes   │  4 bytes  │
+└─────────┴────────┴─────────────┴───────────┴────────────┴───────────┘
+│◄──────── Base64 encoded ──────────────────────────────────────────►│
+```
+
+- **Direction**: `0x0D` (13) for queries, `0xD0` (208) for answers
+- **Length**: N + 3 (packet data + length + checksum bytes)
+- **Checksum**: CRC-16/SPI-FUJITSU over Direction + Length + Packet Data
+- **Timestamp**: Unix time in seconds (4 bytes big-endian)
+- **App ID**: `0x204035EF` (constant app signature)
+
+### CRC-16 Algorithm
+
+```python
+def crc16(data: bytes) -> bytes:
+    crc = 0x1D0F
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc = crc << 1
+    crc &= 0xFFFF
+    return crc.to_bytes(2, byteorder='big')
+```
+
+### ECAM Commands
+
+| Request ID | Hex | Name | Contents | Description |
+|------------|-----|------|----------|-------------|
+| 132 | 0x84 | Application Control | `0x02, 0x01` | **Power On** (wake from standby) |
+| 132 | 0x84 | Application Control | `0x01, 0x01` | **Power Off** (enter standby) |
+| 132 | 0x84 | Application Control | `0x03, 0x02` | Connection refresh |
+| 131 | 0x83 | Brew Beverage | *recipe data* | Prepare a beverage |
+| 117 | 0x75 | MonitorV2 | *(none)* | Request machine status |
+
+### Monitor Data (MonitorDataV2)
+
+The `d302_monitor_machine` property contains a Base64-encoded binary with this layout:
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 1 | Accessory | Connected accessory (0=none, 1=hot water, 2=latte crema hot...) |
+| 1-2 | 2 | Switches | Bit field — water tank, motor, spout, door, etc. |
+| 3-4 | 2 | Alarms[0-1] | Bit field — water empty, grounds full, descale, beans... |
+| 5 | 1 | Status | Machine state (0=standby, 2=going to sleep, 7=ready, 3=brewing...) |
+| 6 | 1 | Step | Current action step |
+| 7 | 1 | Progress | Brew progress 0-100% |
+| 8-9 | 2 | Alarms[2-3] | More alarm bits (cleaning needed, hopper absent...) |
+| 10-11 | 2 | Reserved | Always 0x00 |
+| 12 | 1 | Reserved | Always 0x00 |
+
+### Machine States
+
+| Value | State |
+|-------|-------|
+| 0 | Standby |
+| 1 | Waking up |
+| 2 | Going to sleep |
+| 4 | Descaling |
+| 5 | Preparing steam |
+| 7 | Ready |
+| 8 | Rinsing |
+| 10 | Preparing milk |
+| 11 | Dispensing hot water |
+
+### Alarm Bits (32-bit word)
+
+| Bit | Alarm |
+|-----|-------|
+| 0 | Water tank empty |
+| 1 | Grounds container full |
+| 2 | Descale needed |
+| 3 | Replace water filter |
+| 4 | Coffee ground too fine |
+| 5 | Coffee beans empty |
+| 6 | Machine service required |
+| 7 | Heater probe failure |
+| 13 | Water tank not in position |
+| 16 | Cleaning needed |
+
+### Forcing Data Refresh
+
+The machine only pushes counter/stat updates when pinged:
+
+```
+POST /apiv1/dsns/{DSN}/properties/app_device_connected/datapoints.json
+Body: {"datapoint": {"value": "<base64 of timestamp + app_id>"}}
+```
+
+Wait 5-10 seconds, then read properties — counters will be fresh.
+
+### API Credentials
 
 The API credentials in the code are **public app-level keys** — they are the same keys embedded in the official De'Longhi Coffee Link Android app and are shared by all users. They are not user secrets.
+
+- **Gigya API Key**: identifies the De'Longhi app to the Gigya identity platform
+- **Ayla app_id / app_secret**: identifies the Coffee Link app to the Ayla IoT cloud
 
 ## Automations Examples
 
@@ -123,9 +277,11 @@ automation:
 
 ## Credits
 
-- Reverse-engineered from the De'Longhi Coffee Link Android app
-- Built on the Ayla Networks IoT platform API
-- ECAM protocol analysis via MITM capture
+- Reverse-engineered from the De'Longhi Coffee Link Android app via MITM + jadx decompilation
+- Protocol documentation by [MattG-K](https://framagit.org/mattgk/dlghiot) (CRC-16 algorithm, standby command, monitor data format)
+- Built on the [Ayla Networks](https://www.aylanetworks.com/) IoT platform API
+- [ayla-iot-unofficial](https://github.com/rewardone/ayla-iot-unofficial) Python library for reference
+- [AylaLocalAPI](https://github.com/jakecrowley/AylaLocalAPI) for LAN protocol reference
 
 ## License
 
