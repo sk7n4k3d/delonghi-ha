@@ -31,61 +31,313 @@
   },
   "entity": {
     "sensor": {
-      "machine_status": { "name": "Maskinstatus" },
-      "total_beverages": { "name": "Totalt antall drikker" },
-      "total_espressos": { "name": "Totalt antall espresso" },
-      "espresso": { "name": "Espresso" },
-      "coffee": { "name": "Kaffe" },
-      "long_coffee": { "name": "Lang kaffe" },
-      "doppio": { "name": "Doppio" },
-      "americano": { "name": "Americano" },
-      "cappuccino": { "name": "Cappuccino" },
-      "latte_macchiato": { "name": "Latte Macchiato" },
-      "caffe_latte": { "name": "Caffè Latte" },
-      "flat_white": { "name": "Flat White" },
-      "espresso_macchiato": { "name": "Espresso Macchiato" },
-      "hot_milk": { "name": "Varm melk" },
-      "cappuccino_doppio": { "name": "Cappuccino Doppio" },
-      "cappuccino_mix": { "name": "Cappuccino Mix" },
-      "hot_water": { "name": "Varmt vann" },
-      "tea": { "name": "Te" },
-      "coffee_pot": { "name": "Kaffekanner" },
-      "brew_over_ice": { "name": "Iskaffe" },
-      "grounds_count": { "name": "Grut kastet" },
-      "grounds_percentage": { "name": "Grutbeholder" },
-      "descale_count": { "name": "Avkalkinger utført" },
-      "descale_progress": { "name": "Avkalkingsfremdrift" },
-      "total_water_ml": { "name": "Totalt vann brukt" },
-      "filter_percentage": { "name": "Vannfilterbruk" },
-      "filter_replacements": { "name": "Filterbytter" },
-      "water_through_filter_ml": { "name": "Vann gjennom filter" },
-      "usage_tot_custom_b_bw": { "name": "Egendefinerte drikker" },
-      "other_tot_bev_other": { "name": "Andre drikker" }
+      "machine_status": {
+        "name": "Maskinstatus"
+      },
+      "total_beverages": {
+        "name": "Totalt antall drikker"
+      },
+      "total_espressos": {
+        "name": "Totalt antall espresso"
+      },
+      "espresso": {
+        "name": "Espresso"
+      },
+      "coffee": {
+        "name": "Kaffe"
+      },
+      "long_coffee": {
+        "name": "Lang kaffe"
+      },
+      "doppio": {
+        "name": "Doppio"
+      },
+      "americano": {
+        "name": "Americano"
+      },
+      "cappuccino": {
+        "name": "Cappuccino"
+      },
+      "latte_macchiato": {
+        "name": "Latte Macchiato"
+      },
+      "caffe_latte": {
+        "name": "Caffè Latte"
+      },
+      "flat_white": {
+        "name": "Flat White"
+      },
+      "espresso_macchiato": {
+        "name": "Espresso Macchiato"
+      },
+      "hot_milk": {
+        "name": "Varm melk"
+      },
+      "cappuccino_doppio": {
+        "name": "Cappuccino Doppio"
+      },
+      "cappuccino_mix": {
+        "name": "Cappuccino Mix"
+      },
+      "hot_water": {
+        "name": "Varmt vann"
+      },
+      "tea": {
+        "name": "Te"
+      },
+      "coffee_pot": {
+        "name": "Kaffekanner"
+      },
+      "brew_over_ice": {
+        "name": "Iskaffe"
+      },
+      "grounds_count": {
+        "name": "Grut kastet"
+      },
+      "grounds_percentage": {
+        "name": "Grutbeholder"
+      },
+      "descale_count": {
+        "name": "Avkalkinger utført"
+      },
+      "descale_progress": {
+        "name": "Avkalkingsfremdrift"
+      },
+      "total_water_ml": {
+        "name": "Totalt vann brukt"
+      },
+      "filter_percentage": {
+        "name": "Vannfilterbruk"
+      },
+      "filter_replacements": {
+        "name": "Filterbytter"
+      },
+      "water_through_filter_ml": {
+        "name": "Vann gjennom filter"
+      },
+      "usage_tot_custom_b_bw": {
+        "name": "Egendefinerte drikker"
+      },
+      "other_tot_bev_other": {
+        "name": "Andre drikker"
+      }
     },
     "binary_sensor": {
-      "alarm_0": { "name": "Vanntank tom" },
-      "alarm_1": { "name": "Grutbeholder full" },
-      "alarm_2": { "name": "Avkalking nødvendig" },
-      "alarm_3": { "name": "Bytt vannfilter" },
-      "alarm_4": { "name": "Kaffe malt for fint" },
-      "alarm_5": { "name": "Kaffebønner tomme" },
-      "alarm_6": { "name": "Maskinservice nødvendig" },
-      "alarm_7": { "name": "Varmeprobefeil" },
-      "alarm_8": { "name": "For mye kaffe" },
-      "alarm_9": { "name": "Bryggemotorfeil" },
-      "alarm_10": { "name": "Dampprobefeil" },
-      "alarm_11": { "name": "Dryppskål mangler" },
-      "alarm_12": { "name": "Hydraulisk problem" },
-      "alarm_13": { "name": "Tank på plass" },
-      "alarm_14": { "name": "Rengjør melkedyse" },
-      "alarm_15": { "name": "Kaffebønner tomme 2" },
-      "alarm_16": { "name": "Rengjøring nødvendig" },
-      "alarm_17": { "name": "Bønnebeholder mangler" },
-      "alarm_18": { "name": "Rist på plass" }
+      "alarm_0": {
+        "name": "Vanntank tom"
+      },
+      "alarm_1": {
+        "name": "Grutbeholder full"
+      },
+      "alarm_2": {
+        "name": "Avkalking nødvendig"
+      },
+      "alarm_3": {
+        "name": "Bytt vannfilter"
+      },
+      "alarm_4": {
+        "name": "Kaffe malt for fint"
+      },
+      "alarm_5": {
+        "name": "Kaffebønner tomme"
+      },
+      "alarm_6": {
+        "name": "Maskinservice nødvendig"
+      },
+      "alarm_7": {
+        "name": "Varmeprobefeil"
+      },
+      "alarm_8": {
+        "name": "For mye kaffe"
+      },
+      "alarm_9": {
+        "name": "Bryggemotorfeil"
+      },
+      "alarm_10": {
+        "name": "Dampprobefeil"
+      },
+      "alarm_11": {
+        "name": "Dryppskål mangler"
+      },
+      "alarm_12": {
+        "name": "Hydraulisk problem"
+      },
+      "alarm_13": {
+        "name": "Tank på plass"
+      },
+      "alarm_14": {
+        "name": "Rengjør melkedyse"
+      },
+      "alarm_15": {
+        "name": "Kaffebønner tomme 2"
+      },
+      "alarm_16": {
+        "name": "Rengjøring nødvendig"
+      },
+      "alarm_17": {
+        "name": "Bønnebeholder mangler"
+      },
+      "alarm_18": {
+        "name": "Rist på plass"
+      }
     },
     "button": {
-      "power_on": { "name": "Slå på" },
-      "power_off": { "name": "Slå av" }
+      "power_on": {
+        "name": "Slå på"
+      },
+      "power_off": {
+        "name": "Slå av"
+      },
+      "brew_espresso": {
+        "name": "Espresso"
+      },
+      "brew_regular": {
+        "name": "Kaffe"
+      },
+      "brew_long_coffee": {
+        "name": "Lang kaffe"
+      },
+      "brew_2x_espresso": {
+        "name": "Double Espresso"
+      },
+      "brew_doppio_pl": {
+        "name": "Doppio+"
+      },
+      "brew_americano": {
+        "name": "Americano"
+      },
+      "brew_cappuccino": {
+        "name": "Cappuccino"
+      },
+      "brew_latte_macch": {
+        "name": "Latte Macchiato"
+      },
+      "brew_caffelatte": {
+        "name": "Caffè Latte"
+      },
+      "brew_flat_white": {
+        "name": "Flat White"
+      },
+      "brew_espr_macch": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_hot_milk": {
+        "name": "Varm melk"
+      },
+      "brew_capp_doppio_pl": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_capp_reverse": {
+        "name": "Cappuccino Mix"
+      },
+      "brew_hot_water": {
+        "name": "Varmt vann"
+      },
+      "brew_tea": {
+        "name": "Te"
+      },
+      "brew_coffee_pot": {
+        "name": "Kaffekanne"
+      },
+      "brew_cortado": {
+        "name": "Cortado"
+      },
+      "brew_brew_over_ice": {
+        "name": "Iskaffe"
+      },
+      "brew_over_ice_espr": {
+        "name": "Is-Espresso"
+      },
+      "brew_i_americano": {
+        "name": "Is-Americano"
+      },
+      "brew_i_cappuccino": {
+        "name": "Is-Cappuccino"
+      },
+      "brew_i_latte_macch": {
+        "name": "Is-Latte Macchiato"
+      },
+      "brew_i_capp_mix": {
+        "name": "Is-Cappuccino Mix"
+      },
+      "brew_i_flatwhite": {
+        "name": "Is-Flat White"
+      },
+      "brew_i_coldmilk": {
+        "name": "Kald melk"
+      },
+      "brew_i_caffelatte": {
+        "name": "Is-Caffè Latte"
+      },
+      "brew_m_americano": {
+        "name": "Min Americano"
+      },
+      "brew_m_cappuccino": {
+        "name": "Min Cappuccino"
+      },
+      "brew_m_latte_macch": {
+        "name": "Min Latte Macchiato"
+      },
+      "brew_m_caffelatte": {
+        "name": "Min Caffè Latte"
+      },
+      "brew_m_capp_mix": {
+        "name": "Min Cappuccino Mix"
+      },
+      "brew_m_flat_white": {
+        "name": "Min Flat White"
+      },
+      "brew_m_hot_milk": {
+        "name": "Min Varme melk"
+      },
+      "brew_mi_over_ice": {
+        "name": "Min Is"
+      },
+      "brew_mi_americano": {
+        "name": "Min Is-Americano"
+      },
+      "brew_mi_capp": {
+        "name": "Min Is-Cappuccino"
+      },
+      "brew_mi_latte_macch": {
+        "name": "Min Is-Latte Macchiato"
+      },
+      "brew_mi_cafflatt": {
+        "name": "Min Is-Caffè Latte"
+      },
+      "brew_mi_capp_mix": {
+        "name": "Min Is-Cappuccino Mix"
+      },
+      "brew_mi_flat_white": {
+        "name": "Min Is-Flat White"
+      },
+      "brew_mi_cold_milk": {
+        "name": "Min Kalde melk"
+      },
+      "brew_a_cb_coffee": {
+        "name": "Cold Brew Coffee"
+      },
+      "brew_b_cb_coffee_ess": {
+        "name": "Cold Brew Espresso"
+      },
+      "brew_c_cb_coffee_pot": {
+        "name": "Cold Brew Pot"
+      },
+      "brew_d_cb_latte": {
+        "name": "Cold Brew Latte"
+      },
+      "brew_e_cb_cappuccino": {
+        "name": "Cold Brew Cappuccino"
+      },
+      "brew_f_cb_mug": {
+        "name": "Cold Brew Mug"
+      },
+      "brew_g_cb_latte_mug": {
+        "name": "Cold Brew Latte Mug"
+      },
+      "brew_h_cb_capp_mug": {
+        "name": "Cold Brew Cappuccino Mug"
+      }
     }
   }
 }

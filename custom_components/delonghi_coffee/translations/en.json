@@ -31,61 +31,313 @@
   },
   "entity": {
     "sensor": {
-      "machine_status": { "name": "Machine Status" },
-      "total_beverages": { "name": "Total Beverages" },
-      "total_espressos": { "name": "Total Espressos" },
-      "espresso": { "name": "Espressos" },
-      "coffee": { "name": "Coffees" },
-      "long_coffee": { "name": "Long Coffees" },
-      "doppio": { "name": "Doppios" },
-      "americano": { "name": "Americanos" },
-      "cappuccino": { "name": "Cappuccinos" },
-      "latte_macchiato": { "name": "Latte Macchiatos" },
-      "caffe_latte": { "name": "Caffè Lattes" },
-      "flat_white": { "name": "Flat Whites" },
-      "espresso_macchiato": { "name": "Espresso Macchiatos" },
-      "hot_milk": { "name": "Hot Milks" },
-      "cappuccino_doppio": { "name": "Cappuccino Doppios" },
-      "cappuccino_mix": { "name": "Cappuccino Mix" },
-      "hot_water": { "name": "Hot Waters" },
-      "tea": { "name": "Teas" },
-      "coffee_pot": { "name": "Coffee Pots" },
-      "brew_over_ice": { "name": "Brew Over Ice" },
-      "grounds_count": { "name": "Grounds Ejected" },
-      "grounds_percentage": { "name": "Grounds Container" },
-      "descale_count": { "name": "Descales Done" },
-      "descale_progress": { "name": "Descale Progress" },
-      "total_water_ml": { "name": "Total Water Used" },
-      "filter_percentage": { "name": "Water Filter Usage" },
-      "filter_replacements": { "name": "Filter Replacements" },
-      "water_through_filter_ml": { "name": "Water Through Filter" },
-      "usage_tot_custom_b_bw": { "name": "Custom Beverages" },
-      "other_tot_bev_other": { "name": "Other Beverages" }
+      "machine_status": {
+        "name": "Machine Status"
+      },
+      "total_beverages": {
+        "name": "Total Beverages"
+      },
+      "total_espressos": {
+        "name": "Total Espressos"
+      },
+      "espresso": {
+        "name": "Espressos"
+      },
+      "coffee": {
+        "name": "Coffees"
+      },
+      "long_coffee": {
+        "name": "Long Coffees"
+      },
+      "doppio": {
+        "name": "Doppios"
+      },
+      "americano": {
+        "name": "Americanos"
+      },
+      "cappuccino": {
+        "name": "Cappuccinos"
+      },
+      "latte_macchiato": {
+        "name": "Latte Macchiatos"
+      },
+      "caffe_latte": {
+        "name": "Caffè Lattes"
+      },
+      "flat_white": {
+        "name": "Flat Whites"
+      },
+      "espresso_macchiato": {
+        "name": "Espresso Macchiatos"
+      },
+      "hot_milk": {
+        "name": "Hot Milks"
+      },
+      "cappuccino_doppio": {
+        "name": "Cappuccino Doppios"
+      },
+      "cappuccino_mix": {
+        "name": "Cappuccino Mix"
+      },
+      "hot_water": {
+        "name": "Hot Waters"
+      },
+      "tea": {
+        "name": "Teas"
+      },
+      "coffee_pot": {
+        "name": "Coffee Pots"
+      },
+      "brew_over_ice": {
+        "name": "Brew Over Ice"
+      },
+      "grounds_count": {
+        "name": "Grounds Ejected"
+      },
+      "grounds_percentage": {
+        "name": "Grounds Container"
+      },
+      "descale_count": {
+        "name": "Descales Done"
+      },
+      "descale_progress": {
+        "name": "Descale Progress"
+      },
+      "total_water_ml": {
+        "name": "Total Water Used"
+      },
+      "filter_percentage": {
+        "name": "Water Filter Usage"
+      },
+      "filter_replacements": {
+        "name": "Filter Replacements"
+      },
+      "water_through_filter_ml": {
+        "name": "Water Through Filter"
+      },
+      "usage_tot_custom_b_bw": {
+        "name": "Custom Beverages"
+      },
+      "other_tot_bev_other": {
+        "name": "Other Beverages"
+      }
     },
     "binary_sensor": {
-      "alarm_0": { "name": "Water Tank Empty" },
-      "alarm_1": { "name": "Grounds Container Full" },
-      "alarm_2": { "name": "Descale Needed" },
-      "alarm_3": { "name": "Replace Water Filter" },
-      "alarm_4": { "name": "Coffee Ground Too Fine" },
-      "alarm_5": { "name": "Coffee Beans Empty" },
-      "alarm_6": { "name": "Machine Service Required" },
-      "alarm_7": { "name": "Heater Probe Failure" },
-      "alarm_8": { "name": "Too Much Coffee" },
-      "alarm_9": { "name": "Infuser Motor Failure" },
-      "alarm_10": { "name": "Steamer Probe Failure" },
-      "alarm_11": { "name": "Drip Tray Missing" },
-      "alarm_12": { "name": "Hydraulic Problem" },
-      "alarm_13": { "name": "Tank In Position" },
-      "alarm_14": { "name": "Clean Milk Knob" },
-      "alarm_15": { "name": "Coffee Beans Empty 2" },
-      "alarm_16": { "name": "Cleaning Needed" },
-      "alarm_17": { "name": "Bean Hopper Absent" },
-      "alarm_18": { "name": "Grid Present" }
+      "alarm_0": {
+        "name": "Water Tank Empty"
+      },
+      "alarm_1": {
+        "name": "Grounds Container Full"
+      },
+      "alarm_2": {
+        "name": "Descale Needed"
+      },
+      "alarm_3": {
+        "name": "Replace Water Filter"
+      },
+      "alarm_4": {
+        "name": "Coffee Ground Too Fine"
+      },
+      "alarm_5": {
+        "name": "Coffee Beans Empty"
+      },
+      "alarm_6": {
+        "name": "Machine Service Required"
+      },
+      "alarm_7": {
+        "name": "Heater Probe Failure"
+      },
+      "alarm_8": {
+        "name": "Too Much Coffee"
+      },
+      "alarm_9": {
+        "name": "Infuser Motor Failure"
+      },
+      "alarm_10": {
+        "name": "Steamer Probe Failure"
+      },
+      "alarm_11": {
+        "name": "Drip Tray Missing"
+      },
+      "alarm_12": {
+        "name": "Hydraulic Problem"
+      },
+      "alarm_13": {
+        "name": "Tank In Position"
+      },
+      "alarm_14": {
+        "name": "Clean Milk Knob"
+      },
+      "alarm_15": {
+        "name": "Coffee Beans Empty 2"
+      },
+      "alarm_16": {
+        "name": "Cleaning Needed"
+      },
+      "alarm_17": {
+        "name": "Bean Hopper Absent"
+      },
+      "alarm_18": {
+        "name": "Grid Present"
+      }
     },
     "button": {
-      "power_on": { "name": "Power On" },
-      "power_off": { "name": "Power Off" }
+      "power_on": {
+        "name": "Power On"
+      },
+      "power_off": {
+        "name": "Power Off"
+      },
+      "brew_espresso": {
+        "name": "Espresso"
+      },
+      "brew_regular": {
+        "name": "Coffee"
+      },
+      "brew_long_coffee": {
+        "name": "Long Coffee"
+      },
+      "brew_2x_espresso": {
+        "name": "Double Espresso"
+      },
+      "brew_doppio_pl": {
+        "name": "Doppio+"
+      },
+      "brew_americano": {
+        "name": "Americano"
+      },
+      "brew_cappuccino": {
+        "name": "Cappuccino"
+      },
+      "brew_latte_macch": {
+        "name": "Latte Macchiato"
+      },
+      "brew_caffelatte": {
+        "name": "Caffè Latte"
+      },
+      "brew_flat_white": {
+        "name": "Flat White"
+      },
+      "brew_espr_macch": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_hot_milk": {
+        "name": "Hot Milk"
+      },
+      "brew_capp_doppio_pl": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_capp_reverse": {
+        "name": "Cappuccino Mix"
+      },
+      "brew_hot_water": {
+        "name": "Hot Water"
+      },
+      "brew_tea": {
+        "name": "Tea"
+      },
+      "brew_coffee_pot": {
+        "name": "Coffee Pot"
+      },
+      "brew_cortado": {
+        "name": "Cortado"
+      },
+      "brew_brew_over_ice": {
+        "name": "Brew Over Ice"
+      },
+      "brew_over_ice_espr": {
+        "name": "Iced Espresso"
+      },
+      "brew_i_americano": {
+        "name": "Iced Americano"
+      },
+      "brew_i_cappuccino": {
+        "name": "Iced Cappuccino"
+      },
+      "brew_i_latte_macch": {
+        "name": "Iced Latte Macchiato"
+      },
+      "brew_i_capp_mix": {
+        "name": "Iced Cappuccino Mix"
+      },
+      "brew_i_flatwhite": {
+        "name": "Iced Flat White"
+      },
+      "brew_i_coldmilk": {
+        "name": "Iced Cold Milk"
+      },
+      "brew_i_caffelatte": {
+        "name": "Iced Caffè Latte"
+      },
+      "brew_m_americano": {
+        "name": "My Americano"
+      },
+      "brew_m_cappuccino": {
+        "name": "My Cappuccino"
+      },
+      "brew_m_latte_macch": {
+        "name": "My Latte Macchiato"
+      },
+      "brew_m_caffelatte": {
+        "name": "My Caffè Latte"
+      },
+      "brew_m_capp_mix": {
+        "name": "My Cappuccino Mix"
+      },
+      "brew_m_flat_white": {
+        "name": "My Flat White"
+      },
+      "brew_m_hot_milk": {
+        "name": "My Hot Milk"
+      },
+      "brew_mi_over_ice": {
+        "name": "My Iced"
+      },
+      "brew_mi_americano": {
+        "name": "My Iced Americano"
+      },
+      "brew_mi_capp": {
+        "name": "My Iced Cappuccino"
+      },
+      "brew_mi_latte_macch": {
+        "name": "My Iced Latte Macchiato"
+      },
+      "brew_mi_cafflatt": {
+        "name": "My Iced Caffè Latte"
+      },
+      "brew_mi_capp_mix": {
+        "name": "My Iced Cappuccino Mix"
+      },
+      "brew_mi_flat_white": {
+        "name": "My Iced Flat White"
+      },
+      "brew_mi_cold_milk": {
+        "name": "My Iced Cold Milk"
+      },
+      "brew_a_cb_coffee": {
+        "name": "Cold Brew Coffee"
+      },
+      "brew_b_cb_coffee_ess": {
+        "name": "Cold Brew Espresso"
+      },
+      "brew_c_cb_coffee_pot": {
+        "name": "Cold Brew Pot"
+      },
+      "brew_d_cb_latte": {
+        "name": "Cold Brew Latte"
+      },
+      "brew_e_cb_cappuccino": {
+        "name": "Cold Brew Cappuccino"
+      },
+      "brew_f_cb_mug": {
+        "name": "Cold Brew Mug"
+      },
+      "brew_g_cb_latte_mug": {
+        "name": "Cold Brew Latte Mug"
+      },
+      "brew_h_cb_capp_mug": {
+        "name": "Cold Brew Cappuccino Mug"
+      }
     }
   }
 }

@@ -31,61 +31,313 @@
   },
   "entity": {
     "sensor": {
-      "machine_status": { "name": "Estado da máquina" },
-      "total_beverages": { "name": "Total de bebidas" },
-      "total_espressos": { "name": "Total de espressos" },
-      "espresso": { "name": "Espressos" },
-      "coffee": { "name": "Cafés" },
-      "long_coffee": { "name": "Cafés longos" },
-      "doppio": { "name": "Doppios" },
-      "americano": { "name": "Americanos" },
-      "cappuccino": { "name": "Cappuccinos" },
-      "latte_macchiato": { "name": "Latte Macchiatos" },
-      "caffe_latte": { "name": "Caffè Lattes" },
-      "flat_white": { "name": "Flat Whites" },
-      "espresso_macchiato": { "name": "Espresso Macchiatos" },
-      "hot_milk": { "name": "Leites quentes" },
-      "cappuccino_doppio": { "name": "Cappuccino Doppios" },
-      "cappuccino_mix": { "name": "Cappuccino Mix" },
-      "hot_water": { "name": "Águas quentes" },
-      "tea": { "name": "Chás" },
-      "coffee_pot": { "name": "Cafeteiras" },
-      "brew_over_ice": { "name": "Café gelado" },
-      "grounds_count": { "name": "Borras ejetadas" },
-      "grounds_percentage": { "name": "Contentor de borras" },
-      "descale_count": { "name": "Descalcificações realizadas" },
-      "descale_progress": { "name": "Progresso descalcificação" },
-      "total_water_ml": { "name": "Água total usada" },
-      "filter_percentage": { "name": "Uso do filtro de água" },
-      "filter_replacements": { "name": "Substituições de filtro" },
-      "water_through_filter_ml": { "name": "Água pelo filtro" },
-      "usage_tot_custom_b_bw": { "name": "Bebidas personalizadas" },
-      "other_tot_bev_other": { "name": "Outras bebidas" }
+      "machine_status": {
+        "name": "Estado da máquina"
+      },
+      "total_beverages": {
+        "name": "Total de bebidas"
+      },
+      "total_espressos": {
+        "name": "Total de espressos"
+      },
+      "espresso": {
+        "name": "Espressos"
+      },
+      "coffee": {
+        "name": "Cafés"
+      },
+      "long_coffee": {
+        "name": "Cafés longos"
+      },
+      "doppio": {
+        "name": "Doppios"
+      },
+      "americano": {
+        "name": "Americanos"
+      },
+      "cappuccino": {
+        "name": "Cappuccinos"
+      },
+      "latte_macchiato": {
+        "name": "Latte Macchiatos"
+      },
+      "caffe_latte": {
+        "name": "Caffè Lattes"
+      },
+      "flat_white": {
+        "name": "Flat Whites"
+      },
+      "espresso_macchiato": {
+        "name": "Espresso Macchiatos"
+      },
+      "hot_milk": {
+        "name": "Leites quentes"
+      },
+      "cappuccino_doppio": {
+        "name": "Cappuccino Doppios"
+      },
+      "cappuccino_mix": {
+        "name": "Cappuccino Mix"
+      },
+      "hot_water": {
+        "name": "Águas quentes"
+      },
+      "tea": {
+        "name": "Chás"
+      },
+      "coffee_pot": {
+        "name": "Cafeteiras"
+      },
+      "brew_over_ice": {
+        "name": "Café gelado"
+      },
+      "grounds_count": {
+        "name": "Borras ejetadas"
+      },
+      "grounds_percentage": {
+        "name": "Contentor de borras"
+      },
+      "descale_count": {
+        "name": "Descalcificações realizadas"
+      },
+      "descale_progress": {
+        "name": "Progresso descalcificação"
+      },
+      "total_water_ml": {
+        "name": "Água total usada"
+      },
+      "filter_percentage": {
+        "name": "Uso do filtro de água"
+      },
+      "filter_replacements": {
+        "name": "Substituições de filtro"
+      },
+      "water_through_filter_ml": {
+        "name": "Água pelo filtro"
+      },
+      "usage_tot_custom_b_bw": {
+        "name": "Bebidas personalizadas"
+      },
+      "other_tot_bev_other": {
+        "name": "Outras bebidas"
+      }
     },
     "binary_sensor": {
-      "alarm_0": { "name": "Depósito de água vazio" },
-      "alarm_1": { "name": "Contentor de borras cheio" },
-      "alarm_2": { "name": "Descalcificação necessária" },
-      "alarm_3": { "name": "Substituir filtro de água" },
-      "alarm_4": { "name": "Moagem demasiado fina" },
-      "alarm_5": { "name": "Grãos de café vazios" },
-      "alarm_6": { "name": "Manutenção da máquina necessária" },
-      "alarm_7": { "name": "Falha da sonda de aquecimento" },
-      "alarm_8": { "name": "Demasiado café" },
-      "alarm_9": { "name": "Falha do motor do infusor" },
-      "alarm_10": { "name": "Falha da sonda de vapor" },
-      "alarm_11": { "name": "Bandeja de gotejamento ausente" },
-      "alarm_12": { "name": "Problema hidráulico" },
-      "alarm_13": { "name": "Depósito em posição" },
-      "alarm_14": { "name": "Limpar bico de leite" },
-      "alarm_15": { "name": "Grãos de café vazios 2" },
-      "alarm_16": { "name": "Limpeza necessária" },
-      "alarm_17": { "name": "Tremonha de grãos ausente" },
-      "alarm_18": { "name": "Grelha presente" }
+      "alarm_0": {
+        "name": "Depósito de água vazio"
+      },
+      "alarm_1": {
+        "name": "Contentor de borras cheio"
+      },
+      "alarm_2": {
+        "name": "Descalcificação necessária"
+      },
+      "alarm_3": {
+        "name": "Substituir filtro de água"
+      },
+      "alarm_4": {
+        "name": "Moagem demasiado fina"
+      },
+      "alarm_5": {
+        "name": "Grãos de café vazios"
+      },
+      "alarm_6": {
+        "name": "Manutenção da máquina necessária"
+      },
+      "alarm_7": {
+        "name": "Falha da sonda de aquecimento"
+      },
+      "alarm_8": {
+        "name": "Demasiado café"
+      },
+      "alarm_9": {
+        "name": "Falha do motor do infusor"
+      },
+      "alarm_10": {
+        "name": "Falha da sonda de vapor"
+      },
+      "alarm_11": {
+        "name": "Bandeja de gotejamento ausente"
+      },
+      "alarm_12": {
+        "name": "Problema hidráulico"
+      },
+      "alarm_13": {
+        "name": "Depósito em posição"
+      },
+      "alarm_14": {
+        "name": "Limpar bico de leite"
+      },
+      "alarm_15": {
+        "name": "Grãos de café vazios 2"
+      },
+      "alarm_16": {
+        "name": "Limpeza necessária"
+      },
+      "alarm_17": {
+        "name": "Tremonha de grãos ausente"
+      },
+      "alarm_18": {
+        "name": "Grelha presente"
+      }
     },
     "button": {
-      "power_on": { "name": "Ligar" },
-      "power_off": { "name": "Desligar" }
+      "power_on": {
+        "name": "Ligar"
+      },
+      "power_off": {
+        "name": "Desligar"
+      },
+      "brew_espresso": {
+        "name": "Espresso"
+      },
+      "brew_regular": {
+        "name": "Café"
+      },
+      "brew_long_coffee": {
+        "name": "Café longo"
+      },
+      "brew_2x_espresso": {
+        "name": "Double Espresso"
+      },
+      "brew_doppio_pl": {
+        "name": "Doppio+"
+      },
+      "brew_americano": {
+        "name": "Americano"
+      },
+      "brew_cappuccino": {
+        "name": "Cappuccino"
+      },
+      "brew_latte_macch": {
+        "name": "Latte Macchiato"
+      },
+      "brew_caffelatte": {
+        "name": "Caffè Latte"
+      },
+      "brew_flat_white": {
+        "name": "Flat White"
+      },
+      "brew_espr_macch": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_hot_milk": {
+        "name": "Leite quente"
+      },
+      "brew_capp_doppio_pl": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_capp_reverse": {
+        "name": "Cappuccino Mix"
+      },
+      "brew_hot_water": {
+        "name": "Água quente"
+      },
+      "brew_tea": {
+        "name": "Chá"
+      },
+      "brew_coffee_pot": {
+        "name": "Cafeteira"
+      },
+      "brew_cortado": {
+        "name": "Cortado"
+      },
+      "brew_brew_over_ice": {
+        "name": "Café gelado"
+      },
+      "brew_over_ice_espr": {
+        "name": "Espresso gelado"
+      },
+      "brew_i_americano": {
+        "name": "Americano gelado"
+      },
+      "brew_i_cappuccino": {
+        "name": "Cappuccino gelado"
+      },
+      "brew_i_latte_macch": {
+        "name": "Latte Macchiato gelado"
+      },
+      "brew_i_capp_mix": {
+        "name": "Cappuccino Mix gelado"
+      },
+      "brew_i_flatwhite": {
+        "name": "Flat White gelado"
+      },
+      "brew_i_coldmilk": {
+        "name": "Leite frio"
+      },
+      "brew_i_caffelatte": {
+        "name": "Caffè Latte gelado"
+      },
+      "brew_m_americano": {
+        "name": "Meu Americano"
+      },
+      "brew_m_cappuccino": {
+        "name": "Meu Cappuccino"
+      },
+      "brew_m_latte_macch": {
+        "name": "Meu Latte Macchiato"
+      },
+      "brew_m_caffelatte": {
+        "name": "Meu Caffè Latte"
+      },
+      "brew_m_capp_mix": {
+        "name": "Meu Cappuccino Mix"
+      },
+      "brew_m_flat_white": {
+        "name": "Meu Flat White"
+      },
+      "brew_m_hot_milk": {
+        "name": "Meu Leite quente"
+      },
+      "brew_mi_over_ice": {
+        "name": "Meu Gelado"
+      },
+      "brew_mi_americano": {
+        "name": "Meu Americano gelado"
+      },
+      "brew_mi_capp": {
+        "name": "Meu Cappuccino gelado"
+      },
+      "brew_mi_latte_macch": {
+        "name": "Meu Latte Macchiato gelado"
+      },
+      "brew_mi_cafflatt": {
+        "name": "Meu Caffè Latte gelado"
+      },
+      "brew_mi_capp_mix": {
+        "name": "Meu Cappuccino Mix gelado"
+      },
+      "brew_mi_flat_white": {
+        "name": "Meu Flat White gelado"
+      },
+      "brew_mi_cold_milk": {
+        "name": "Meu Leite frio"
+      },
+      "brew_a_cb_coffee": {
+        "name": "Cold Brew Coffee"
+      },
+      "brew_b_cb_coffee_ess": {
+        "name": "Cold Brew Espresso"
+      },
+      "brew_c_cb_coffee_pot": {
+        "name": "Cold Brew Pot"
+      },
+      "brew_d_cb_latte": {
+        "name": "Cold Brew Latte"
+      },
+      "brew_e_cb_cappuccino": {
+        "name": "Cold Brew Cappuccino"
+      },
+      "brew_f_cb_mug": {
+        "name": "Cold Brew Mug"
+      },
+      "brew_g_cb_latte_mug": {
+        "name": "Cold Brew Latte Mug"
+      },
+      "brew_h_cb_capp_mug": {
+        "name": "Cold Brew Cappuccino Mug"
+      }
     }
   }
 }

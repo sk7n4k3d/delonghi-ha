@@ -31,61 +31,313 @@
   },
   "entity": {
     "sensor": {
-      "machine_status": { "name": "Maschinenstatus" },
-      "total_beverages": { "name": "Getränke gesamt" },
-      "total_espressos": { "name": "Espressos gesamt" },
-      "espresso": { "name": "Espressos" },
-      "coffee": { "name": "Kaffees" },
-      "long_coffee": { "name": "Lange Kaffees" },
-      "doppio": { "name": "Doppios" },
-      "americano": { "name": "Americanos" },
-      "cappuccino": { "name": "Cappuccinos" },
-      "latte_macchiato": { "name": "Latte Macchiatos" },
-      "caffe_latte": { "name": "Caffè Lattes" },
-      "flat_white": { "name": "Flat Whites" },
-      "espresso_macchiato": { "name": "Espresso Macchiatos" },
-      "hot_milk": { "name": "Heiße Milch" },
-      "cappuccino_doppio": { "name": "Cappuccino Doppios" },
-      "cappuccino_mix": { "name": "Cappuccino Mix" },
-      "hot_water": { "name": "Heißes Wasser" },
-      "tea": { "name": "Tees" },
-      "coffee_pot": { "name": "Kaffeekannen" },
-      "brew_over_ice": { "name": "Eiskaffee" },
-      "grounds_count": { "name": "Trester ausgeworfen" },
-      "grounds_percentage": { "name": "Tresterbehälter" },
-      "descale_count": { "name": "Entkalkungen durchgeführt" },
-      "descale_progress": { "name": "Entkalkungsfortschritt" },
-      "total_water_ml": { "name": "Wasser gesamt verbraucht" },
-      "filter_percentage": { "name": "Wasserfilternutzung" },
-      "filter_replacements": { "name": "Filterwechsel" },
-      "water_through_filter_ml": { "name": "Wasser durch Filter" },
-      "usage_tot_custom_b_bw": { "name": "Individuelle Getränke" },
-      "other_tot_bev_other": { "name": "Andere Getränke" }
+      "machine_status": {
+        "name": "Maschinenstatus"
+      },
+      "total_beverages": {
+        "name": "Getränke gesamt"
+      },
+      "total_espressos": {
+        "name": "Espressos gesamt"
+      },
+      "espresso": {
+        "name": "Espressos"
+      },
+      "coffee": {
+        "name": "Kaffees"
+      },
+      "long_coffee": {
+        "name": "Lange Kaffees"
+      },
+      "doppio": {
+        "name": "Doppios"
+      },
+      "americano": {
+        "name": "Americanos"
+      },
+      "cappuccino": {
+        "name": "Cappuccinos"
+      },
+      "latte_macchiato": {
+        "name": "Latte Macchiatos"
+      },
+      "caffe_latte": {
+        "name": "Caffè Lattes"
+      },
+      "flat_white": {
+        "name": "Flat Whites"
+      },
+      "espresso_macchiato": {
+        "name": "Espresso Macchiatos"
+      },
+      "hot_milk": {
+        "name": "Heiße Milch"
+      },
+      "cappuccino_doppio": {
+        "name": "Cappuccino Doppios"
+      },
+      "cappuccino_mix": {
+        "name": "Cappuccino Mix"
+      },
+      "hot_water": {
+        "name": "Heißes Wasser"
+      },
+      "tea": {
+        "name": "Tees"
+      },
+      "coffee_pot": {
+        "name": "Kaffeekannen"
+      },
+      "brew_over_ice": {
+        "name": "Eiskaffee"
+      },
+      "grounds_count": {
+        "name": "Trester ausgeworfen"
+      },
+      "grounds_percentage": {
+        "name": "Tresterbehälter"
+      },
+      "descale_count": {
+        "name": "Entkalkungen durchgeführt"
+      },
+      "descale_progress": {
+        "name": "Entkalkungsfortschritt"
+      },
+      "total_water_ml": {
+        "name": "Wasser gesamt verbraucht"
+      },
+      "filter_percentage": {
+        "name": "Wasserfilternutzung"
+      },
+      "filter_replacements": {
+        "name": "Filterwechsel"
+      },
+      "water_through_filter_ml": {
+        "name": "Wasser durch Filter"
+      },
+      "usage_tot_custom_b_bw": {
+        "name": "Individuelle Getränke"
+      },
+      "other_tot_bev_other": {
+        "name": "Andere Getränke"
+      }
     },
     "binary_sensor": {
-      "alarm_0": { "name": "Wassertank leer" },
-      "alarm_1": { "name": "Tresterbehälter voll" },
-      "alarm_2": { "name": "Entkalkung erforderlich" },
-      "alarm_3": { "name": "Wasserfilter wechseln" },
-      "alarm_4": { "name": "Mahlgrad zu fein" },
-      "alarm_5": { "name": "Kaffeebohnen leer" },
-      "alarm_6": { "name": "Maschinenwartung erforderlich" },
-      "alarm_7": { "name": "Heizsondenfehler" },
-      "alarm_8": { "name": "Zu viel Kaffee" },
-      "alarm_9": { "name": "Brühgruppenmotorfehler" },
-      "alarm_10": { "name": "Dampfsondenfehler" },
-      "alarm_11": { "name": "Abtropfschale fehlt" },
-      "alarm_12": { "name": "Hydraulisches Problem" },
-      "alarm_13": { "name": "Tank in Position" },
-      "alarm_14": { "name": "Milchdüse reinigen" },
-      "alarm_15": { "name": "Kaffeebohnen leer 2" },
-      "alarm_16": { "name": "Reinigung erforderlich" },
-      "alarm_17": { "name": "Bohnenbehälter fehlt" },
-      "alarm_18": { "name": "Gitter vorhanden" }
+      "alarm_0": {
+        "name": "Wassertank leer"
+      },
+      "alarm_1": {
+        "name": "Tresterbehälter voll"
+      },
+      "alarm_2": {
+        "name": "Entkalkung erforderlich"
+      },
+      "alarm_3": {
+        "name": "Wasserfilter wechseln"
+      },
+      "alarm_4": {
+        "name": "Mahlgrad zu fein"
+      },
+      "alarm_5": {
+        "name": "Kaffeebohnen leer"
+      },
+      "alarm_6": {
+        "name": "Maschinenwartung erforderlich"
+      },
+      "alarm_7": {
+        "name": "Heizsondenfehler"
+      },
+      "alarm_8": {
+        "name": "Zu viel Kaffee"
+      },
+      "alarm_9": {
+        "name": "Brühgruppenmotorfehler"
+      },
+      "alarm_10": {
+        "name": "Dampfsondenfehler"
+      },
+      "alarm_11": {
+        "name": "Abtropfschale fehlt"
+      },
+      "alarm_12": {
+        "name": "Hydraulisches Problem"
+      },
+      "alarm_13": {
+        "name": "Tank in Position"
+      },
+      "alarm_14": {
+        "name": "Milchdüse reinigen"
+      },
+      "alarm_15": {
+        "name": "Kaffeebohnen leer 2"
+      },
+      "alarm_16": {
+        "name": "Reinigung erforderlich"
+      },
+      "alarm_17": {
+        "name": "Bohnenbehälter fehlt"
+      },
+      "alarm_18": {
+        "name": "Gitter vorhanden"
+      }
     },
     "button": {
-      "power_on": { "name": "Einschalten" },
-      "power_off": { "name": "Ausschalten" }
+      "power_on": {
+        "name": "Einschalten"
+      },
+      "power_off": {
+        "name": "Ausschalten"
+      },
+      "brew_espresso": {
+        "name": "Espresso"
+      },
+      "brew_regular": {
+        "name": "Kaffee"
+      },
+      "brew_long_coffee": {
+        "name": "Langer Kaffee"
+      },
+      "brew_2x_espresso": {
+        "name": "Double Espresso"
+      },
+      "brew_doppio_pl": {
+        "name": "Doppio+"
+      },
+      "brew_americano": {
+        "name": "Americano"
+      },
+      "brew_cappuccino": {
+        "name": "Cappuccino"
+      },
+      "brew_latte_macch": {
+        "name": "Latte Macchiato"
+      },
+      "brew_caffelatte": {
+        "name": "Caffè Latte"
+      },
+      "brew_flat_white": {
+        "name": "Flat White"
+      },
+      "brew_espr_macch": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_hot_milk": {
+        "name": "Heiße Milch"
+      },
+      "brew_capp_doppio_pl": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_capp_reverse": {
+        "name": "Cappuccino Mix"
+      },
+      "brew_hot_water": {
+        "name": "Heißes Wasser"
+      },
+      "brew_tea": {
+        "name": "Tee"
+      },
+      "brew_coffee_pot": {
+        "name": "Kaffeekanne"
+      },
+      "brew_cortado": {
+        "name": "Cortado"
+      },
+      "brew_brew_over_ice": {
+        "name": "Eiskaffee"
+      },
+      "brew_over_ice_espr": {
+        "name": "Eis-Espresso"
+      },
+      "brew_i_americano": {
+        "name": "Eis-Americano"
+      },
+      "brew_i_cappuccino": {
+        "name": "Eis-Cappuccino"
+      },
+      "brew_i_latte_macch": {
+        "name": "Eis-Latte Macchiato"
+      },
+      "brew_i_capp_mix": {
+        "name": "Eis-Cappuccino Mix"
+      },
+      "brew_i_flatwhite": {
+        "name": "Eis-Flat White"
+      },
+      "brew_i_coldmilk": {
+        "name": "Kalte Milch"
+      },
+      "brew_i_caffelatte": {
+        "name": "Eis-Caffè Latte"
+      },
+      "brew_m_americano": {
+        "name": "Mein Americano"
+      },
+      "brew_m_cappuccino": {
+        "name": "Mein Cappuccino"
+      },
+      "brew_m_latte_macch": {
+        "name": "Mein Latte Macchiato"
+      },
+      "brew_m_caffelatte": {
+        "name": "Mein Caffè Latte"
+      },
+      "brew_m_capp_mix": {
+        "name": "Mein Cappuccino Mix"
+      },
+      "brew_m_flat_white": {
+        "name": "Mein Flat White"
+      },
+      "brew_m_hot_milk": {
+        "name": "Meine Heiße Milch"
+      },
+      "brew_mi_over_ice": {
+        "name": "Mein Eis"
+      },
+      "brew_mi_americano": {
+        "name": "Mein Eis-Americano"
+      },
+      "brew_mi_capp": {
+        "name": "Mein Eis-Cappuccino"
+      },
+      "brew_mi_latte_macch": {
+        "name": "Mein Eis-Latte Macchiato"
+      },
+      "brew_mi_cafflatt": {
+        "name": "Mein Eis-Caffè Latte"
+      },
+      "brew_mi_capp_mix": {
+        "name": "Mein Eis-Cappuccino Mix"
+      },
+      "brew_mi_flat_white": {
+        "name": "Mein Eis-Flat White"
+      },
+      "brew_mi_cold_milk": {
+        "name": "Meine Kalte Milch"
+      },
+      "brew_a_cb_coffee": {
+        "name": "Cold Brew Coffee"
+      },
+      "brew_b_cb_coffee_ess": {
+        "name": "Cold Brew Espresso"
+      },
+      "brew_c_cb_coffee_pot": {
+        "name": "Cold Brew Pot"
+      },
+      "brew_d_cb_latte": {
+        "name": "Cold Brew Latte"
+      },
+      "brew_e_cb_cappuccino": {
+        "name": "Cold Brew Cappuccino"
+      },
+      "brew_f_cb_mug": {
+        "name": "Cold Brew Mug"
+      },
+      "brew_g_cb_latte_mug": {
+        "name": "Cold Brew Latte Mug"
+      },
+      "brew_h_cb_capp_mug": {
+        "name": "Cold Brew Cappuccino Mug"
+      }
     }
   }
 }

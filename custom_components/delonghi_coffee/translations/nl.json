@@ -31,61 +31,313 @@
   },
   "entity": {
     "sensor": {
-      "machine_status": { "name": "Machinestatus" },
-      "total_beverages": { "name": "Totaal dranken" },
-      "total_espressos": { "name": "Totaal espresso's" },
-      "espresso": { "name": "Espresso's" },
-      "coffee": { "name": "Koffie" },
-      "long_coffee": { "name": "Lange koffie" },
-      "doppio": { "name": "Doppio's" },
-      "americano": { "name": "Americano's" },
-      "cappuccino": { "name": "Cappuccino's" },
-      "latte_macchiato": { "name": "Latte Macchiato's" },
-      "caffe_latte": { "name": "Caffè Latte's" },
-      "flat_white": { "name": "Flat Whites" },
-      "espresso_macchiato": { "name": "Espresso Macchiato's" },
-      "hot_milk": { "name": "Warme melk" },
-      "cappuccino_doppio": { "name": "Cappuccino Doppio's" },
-      "cappuccino_mix": { "name": "Cappuccino Mix" },
-      "hot_water": { "name": "Warm water" },
-      "tea": { "name": "Thee" },
-      "coffee_pot": { "name": "Koffiekannen" },
-      "brew_over_ice": { "name": "IJskoffie" },
-      "grounds_count": { "name": "Koffiedik uitgeworpen" },
-      "grounds_percentage": { "name": "Koffiedikbak" },
-      "descale_count": { "name": "Ontkalkingen uitgevoerd" },
-      "descale_progress": { "name": "Ontkalkingsvoortgang" },
-      "total_water_ml": { "name": "Totaal water gebruikt" },
-      "filter_percentage": { "name": "Waterfiltergebruik" },
-      "filter_replacements": { "name": "Filtervervangingen" },
-      "water_through_filter_ml": { "name": "Water door filter" },
-      "usage_tot_custom_b_bw": { "name": "Aangepaste dranken" },
-      "other_tot_bev_other": { "name": "Andere dranken" }
+      "machine_status": {
+        "name": "Machinestatus"
+      },
+      "total_beverages": {
+        "name": "Totaal dranken"
+      },
+      "total_espressos": {
+        "name": "Totaal espresso's"
+      },
+      "espresso": {
+        "name": "Espresso's"
+      },
+      "coffee": {
+        "name": "Koffie"
+      },
+      "long_coffee": {
+        "name": "Lange koffie"
+      },
+      "doppio": {
+        "name": "Doppio's"
+      },
+      "americano": {
+        "name": "Americano's"
+      },
+      "cappuccino": {
+        "name": "Cappuccino's"
+      },
+      "latte_macchiato": {
+        "name": "Latte Macchiato's"
+      },
+      "caffe_latte": {
+        "name": "Caffè Latte's"
+      },
+      "flat_white": {
+        "name": "Flat Whites"
+      },
+      "espresso_macchiato": {
+        "name": "Espresso Macchiato's"
+      },
+      "hot_milk": {
+        "name": "Warme melk"
+      },
+      "cappuccino_doppio": {
+        "name": "Cappuccino Doppio's"
+      },
+      "cappuccino_mix": {
+        "name": "Cappuccino Mix"
+      },
+      "hot_water": {
+        "name": "Warm water"
+      },
+      "tea": {
+        "name": "Thee"
+      },
+      "coffee_pot": {
+        "name": "Koffiekannen"
+      },
+      "brew_over_ice": {
+        "name": "IJskoffie"
+      },
+      "grounds_count": {
+        "name": "Koffiedik uitgeworpen"
+      },
+      "grounds_percentage": {
+        "name": "Koffiedikbak"
+      },
+      "descale_count": {
+        "name": "Ontkalkingen uitgevoerd"
+      },
+      "descale_progress": {
+        "name": "Ontkalkingsvoortgang"
+      },
+      "total_water_ml": {
+        "name": "Totaal water gebruikt"
+      },
+      "filter_percentage": {
+        "name": "Waterfiltergebruik"
+      },
+      "filter_replacements": {
+        "name": "Filtervervangingen"
+      },
+      "water_through_filter_ml": {
+        "name": "Water door filter"
+      },
+      "usage_tot_custom_b_bw": {
+        "name": "Aangepaste dranken"
+      },
+      "other_tot_bev_other": {
+        "name": "Andere dranken"
+      }
     },
     "binary_sensor": {
-      "alarm_0": { "name": "Watertank leeg" },
-      "alarm_1": { "name": "Koffiedikbak vol" },
-      "alarm_2": { "name": "Ontkalking nodig" },
-      "alarm_3": { "name": "Waterfilter vervangen" },
-      "alarm_4": { "name": "Maalgraad te fijn" },
-      "alarm_5": { "name": "Koffiebonen leeg" },
-      "alarm_6": { "name": "Machineonderhoud vereist" },
-      "alarm_7": { "name": "Verwarmingssonde storing" },
-      "alarm_8": { "name": "Te veel koffie" },
-      "alarm_9": { "name": "Zetgroepmotor storing" },
-      "alarm_10": { "name": "Stoomsonde storing" },
-      "alarm_11": { "name": "Lekbak ontbreekt" },
-      "alarm_12": { "name": "Hydraulisch probleem" },
-      "alarm_13": { "name": "Tank in positie" },
-      "alarm_14": { "name": "Melksproeier reinigen" },
-      "alarm_15": { "name": "Koffiebonen leeg 2" },
-      "alarm_16": { "name": "Reiniging nodig" },
-      "alarm_17": { "name": "Bonenreservoir ontbreekt" },
-      "alarm_18": { "name": "Rooster aanwezig" }
+      "alarm_0": {
+        "name": "Watertank leeg"
+      },
+      "alarm_1": {
+        "name": "Koffiedikbak vol"
+      },
+      "alarm_2": {
+        "name": "Ontkalking nodig"
+      },
+      "alarm_3": {
+        "name": "Waterfilter vervangen"
+      },
+      "alarm_4": {
+        "name": "Maalgraad te fijn"
+      },
+      "alarm_5": {
+        "name": "Koffiebonen leeg"
+      },
+      "alarm_6": {
+        "name": "Machineonderhoud vereist"
+      },
+      "alarm_7": {
+        "name": "Verwarmingssonde storing"
+      },
+      "alarm_8": {
+        "name": "Te veel koffie"
+      },
+      "alarm_9": {
+        "name": "Zetgroepmotor storing"
+      },
+      "alarm_10": {
+        "name": "Stoomsonde storing"
+      },
+      "alarm_11": {
+        "name": "Lekbak ontbreekt"
+      },
+      "alarm_12": {
+        "name": "Hydraulisch probleem"
+      },
+      "alarm_13": {
+        "name": "Tank in positie"
+      },
+      "alarm_14": {
+        "name": "Melksproeier reinigen"
+      },
+      "alarm_15": {
+        "name": "Koffiebonen leeg 2"
+      },
+      "alarm_16": {
+        "name": "Reiniging nodig"
+      },
+      "alarm_17": {
+        "name": "Bonenreservoir ontbreekt"
+      },
+      "alarm_18": {
+        "name": "Rooster aanwezig"
+      }
     },
     "button": {
-      "power_on": { "name": "Inschakelen" },
-      "power_off": { "name": "Uitschakelen" }
+      "power_on": {
+        "name": "Inschakelen"
+      },
+      "power_off": {
+        "name": "Uitschakelen"
+      },
+      "brew_espresso": {
+        "name": "Espresso"
+      },
+      "brew_regular": {
+        "name": "Koffie"
+      },
+      "brew_long_coffee": {
+        "name": "Lange koffie"
+      },
+      "brew_2x_espresso": {
+        "name": "Double Espresso"
+      },
+      "brew_doppio_pl": {
+        "name": "Doppio+"
+      },
+      "brew_americano": {
+        "name": "Americano"
+      },
+      "brew_cappuccino": {
+        "name": "Cappuccino"
+      },
+      "brew_latte_macch": {
+        "name": "Latte Macchiato"
+      },
+      "brew_caffelatte": {
+        "name": "Caffè Latte"
+      },
+      "brew_flat_white": {
+        "name": "Flat White"
+      },
+      "brew_espr_macch": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_hot_milk": {
+        "name": "Warme melk"
+      },
+      "brew_capp_doppio_pl": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_capp_reverse": {
+        "name": "Cappuccino Mix"
+      },
+      "brew_hot_water": {
+        "name": "Warm water"
+      },
+      "brew_tea": {
+        "name": "Thee"
+      },
+      "brew_coffee_pot": {
+        "name": "Koffiekan"
+      },
+      "brew_cortado": {
+        "name": "Cortado"
+      },
+      "brew_brew_over_ice": {
+        "name": "IJskoffie"
+      },
+      "brew_over_ice_espr": {
+        "name": "IJs-Espresso"
+      },
+      "brew_i_americano": {
+        "name": "IJs-Americano"
+      },
+      "brew_i_cappuccino": {
+        "name": "IJs-Cappuccino"
+      },
+      "brew_i_latte_macch": {
+        "name": "IJs-Latte Macchiato"
+      },
+      "brew_i_capp_mix": {
+        "name": "IJs-Cappuccino Mix"
+      },
+      "brew_i_flatwhite": {
+        "name": "IJs-Flat White"
+      },
+      "brew_i_coldmilk": {
+        "name": "Koude melk"
+      },
+      "brew_i_caffelatte": {
+        "name": "IJs-Caffè Latte"
+      },
+      "brew_m_americano": {
+        "name": "Mijn Americano"
+      },
+      "brew_m_cappuccino": {
+        "name": "Mijn Cappuccino"
+      },
+      "brew_m_latte_macch": {
+        "name": "Mijn Latte Macchiato"
+      },
+      "brew_m_caffelatte": {
+        "name": "Mijn Caffè Latte"
+      },
+      "brew_m_capp_mix": {
+        "name": "Mijn Cappuccino Mix"
+      },
+      "brew_m_flat_white": {
+        "name": "Mijn Flat White"
+      },
+      "brew_m_hot_milk": {
+        "name": "Mijn Warme melk"
+      },
+      "brew_mi_over_ice": {
+        "name": "Mijn IJs"
+      },
+      "brew_mi_americano": {
+        "name": "Mijn IJs-Americano"
+      },
+      "brew_mi_capp": {
+        "name": "Mijn IJs-Cappuccino"
+      },
+      "brew_mi_latte_macch": {
+        "name": "Mijn IJs-Latte Macchiato"
+      },
+      "brew_mi_cafflatt": {
+        "name": "Mijn IJs-Caffè Latte"
+      },
+      "brew_mi_capp_mix": {
+        "name": "Mijn IJs-Cappuccino Mix"
+      },
+      "brew_mi_flat_white": {
+        "name": "Mijn IJs-Flat White"
+      },
+      "brew_mi_cold_milk": {
+        "name": "Mijn Koude melk"
+      },
+      "brew_a_cb_coffee": {
+        "name": "Cold Brew Coffee"
+      },
+      "brew_b_cb_coffee_ess": {
+        "name": "Cold Brew Espresso"
+      },
+      "brew_c_cb_coffee_pot": {
+        "name": "Cold Brew Pot"
+      },
+      "brew_d_cb_latte": {
+        "name": "Cold Brew Latte"
+      },
+      "brew_e_cb_cappuccino": {
+        "name": "Cold Brew Cappuccino"
+      },
+      "brew_f_cb_mug": {
+        "name": "Cold Brew Mug"
+      },
+      "brew_g_cb_latte_mug": {
+        "name": "Cold Brew Latte Mug"
+      },
+      "brew_h_cb_capp_mug": {
+        "name": "Cold Brew Cappuccino Mug"
+      }
     }
   }
 }

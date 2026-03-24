@@ -31,61 +31,313 @@
   },
   "entity": {
     "sensor": {
-      "machine_status": { "name": "Стан машини" },
-      "total_beverages": { "name": "Всього напоїв" },
-      "total_espressos": { "name": "Всього еспресо" },
-      "espresso": { "name": "Еспресо" },
-      "coffee": { "name": "Кава" },
-      "long_coffee": { "name": "Довга кава" },
-      "doppio": { "name": "Допіо" },
-      "americano": { "name": "Американо" },
-      "cappuccino": { "name": "Капучіно" },
-      "latte_macchiato": { "name": "Лате Макіато" },
-      "caffe_latte": { "name": "Кафе Лате" },
-      "flat_white": { "name": "Флет Вайт" },
-      "espresso_macchiato": { "name": "Еспресо Макіато" },
-      "hot_milk": { "name": "Гаряче молоко" },
-      "cappuccino_doppio": { "name": "Капучіно Допіо" },
-      "cappuccino_mix": { "name": "Капучіно Мікс" },
-      "hot_water": { "name": "Гаряча вода" },
-      "tea": { "name": "Чай" },
-      "coffee_pot": { "name": "Кавники" },
-      "brew_over_ice": { "name": "Кава з льодом" },
-      "grounds_count": { "name": "Гущу викинуто" },
-      "grounds_percentage": { "name": "Контейнер для гущі" },
-      "descale_count": { "name": "Очищень від накипу виконано" },
-      "descale_progress": { "name": "Прогрес очищення від накипу" },
-      "total_water_ml": { "name": "Всього води використано" },
-      "filter_percentage": { "name": "Використання водяного фільтра" },
-      "filter_replacements": { "name": "Заміни фільтра" },
-      "water_through_filter_ml": { "name": "Води через фільтр" },
-      "usage_tot_custom_b_bw": { "name": "Користувацькі напої" },
-      "other_tot_bev_other": { "name": "Інші напої" }
+      "machine_status": {
+        "name": "Стан машини"
+      },
+      "total_beverages": {
+        "name": "Всього напоїв"
+      },
+      "total_espressos": {
+        "name": "Всього еспресо"
+      },
+      "espresso": {
+        "name": "Еспресо"
+      },
+      "coffee": {
+        "name": "Кава"
+      },
+      "long_coffee": {
+        "name": "Довга кава"
+      },
+      "doppio": {
+        "name": "Допіо"
+      },
+      "americano": {
+        "name": "Американо"
+      },
+      "cappuccino": {
+        "name": "Капучіно"
+      },
+      "latte_macchiato": {
+        "name": "Лате Макіато"
+      },
+      "caffe_latte": {
+        "name": "Кафе Лате"
+      },
+      "flat_white": {
+        "name": "Флет Вайт"
+      },
+      "espresso_macchiato": {
+        "name": "Еспресо Макіато"
+      },
+      "hot_milk": {
+        "name": "Гаряче молоко"
+      },
+      "cappuccino_doppio": {
+        "name": "Капучіно Допіо"
+      },
+      "cappuccino_mix": {
+        "name": "Капучіно Мікс"
+      },
+      "hot_water": {
+        "name": "Гаряча вода"
+      },
+      "tea": {
+        "name": "Чай"
+      },
+      "coffee_pot": {
+        "name": "Кавники"
+      },
+      "brew_over_ice": {
+        "name": "Кава з льодом"
+      },
+      "grounds_count": {
+        "name": "Гущу викинуто"
+      },
+      "grounds_percentage": {
+        "name": "Контейнер для гущі"
+      },
+      "descale_count": {
+        "name": "Очищень від накипу виконано"
+      },
+      "descale_progress": {
+        "name": "Прогрес очищення від накипу"
+      },
+      "total_water_ml": {
+        "name": "Всього води використано"
+      },
+      "filter_percentage": {
+        "name": "Використання водяного фільтра"
+      },
+      "filter_replacements": {
+        "name": "Заміни фільтра"
+      },
+      "water_through_filter_ml": {
+        "name": "Води через фільтр"
+      },
+      "usage_tot_custom_b_bw": {
+        "name": "Користувацькі напої"
+      },
+      "other_tot_bev_other": {
+        "name": "Інші напої"
+      }
     },
     "binary_sensor": {
-      "alarm_0": { "name": "Бак для води порожній" },
-      "alarm_1": { "name": "Контейнер для гущі повний" },
-      "alarm_2": { "name": "Потрібне очищення від накипу" },
-      "alarm_3": { "name": "Замініть водяний фільтр" },
-      "alarm_4": { "name": "Занадто дрібний помел" },
-      "alarm_5": { "name": "Кавові зерна закінчилися" },
-      "alarm_6": { "name": "Потрібне обслуговування машини" },
-      "alarm_7": { "name": "Несправність датчика нагрівання" },
-      "alarm_8": { "name": "Занадто багато кави" },
-      "alarm_9": { "name": "Несправність мотора заварювального блоку" },
-      "alarm_10": { "name": "Несправність парового датчика" },
-      "alarm_11": { "name": "Піддон для крапель відсутній" },
-      "alarm_12": { "name": "Гідравлічна проблема" },
-      "alarm_13": { "name": "Бак на місці" },
-      "alarm_14": { "name": "Очистіть молочний носик" },
-      "alarm_15": { "name": "Кавові зерна закінчилися 2" },
-      "alarm_16": { "name": "Потрібне очищення" },
-      "alarm_17": { "name": "Бункер для зерен відсутній" },
-      "alarm_18": { "name": "Решітка на місці" }
+      "alarm_0": {
+        "name": "Бак для води порожній"
+      },
+      "alarm_1": {
+        "name": "Контейнер для гущі повний"
+      },
+      "alarm_2": {
+        "name": "Потрібне очищення від накипу"
+      },
+      "alarm_3": {
+        "name": "Замініть водяний фільтр"
+      },
+      "alarm_4": {
+        "name": "Занадто дрібний помел"
+      },
+      "alarm_5": {
+        "name": "Кавові зерна закінчилися"
+      },
+      "alarm_6": {
+        "name": "Потрібне обслуговування машини"
+      },
+      "alarm_7": {
+        "name": "Несправність датчика нагрівання"
+      },
+      "alarm_8": {
+        "name": "Занадто багато кави"
+      },
+      "alarm_9": {
+        "name": "Несправність мотора заварювального блоку"
+      },
+      "alarm_10": {
+        "name": "Несправність парового датчика"
+      },
+      "alarm_11": {
+        "name": "Піддон для крапель відсутній"
+      },
+      "alarm_12": {
+        "name": "Гідравлічна проблема"
+      },
+      "alarm_13": {
+        "name": "Бак на місці"
+      },
+      "alarm_14": {
+        "name": "Очистіть молочний носик"
+      },
+      "alarm_15": {
+        "name": "Кавові зерна закінчилися 2"
+      },
+      "alarm_16": {
+        "name": "Потрібне очищення"
+      },
+      "alarm_17": {
+        "name": "Бункер для зерен відсутній"
+      },
+      "alarm_18": {
+        "name": "Решітка на місці"
+      }
     },
     "button": {
-      "power_on": { "name": "Увімкнути" },
-      "power_off": { "name": "Вимкнути" }
+      "power_on": {
+        "name": "Увімкнути"
+      },
+      "power_off": {
+        "name": "Вимкнути"
+      },
+      "brew_espresso": {
+        "name": "Espresso"
+      },
+      "brew_regular": {
+        "name": "Кава"
+      },
+      "brew_long_coffee": {
+        "name": "Довга кава"
+      },
+      "brew_2x_espresso": {
+        "name": "Double Espresso"
+      },
+      "brew_doppio_pl": {
+        "name": "Doppio+"
+      },
+      "brew_americano": {
+        "name": "Americano"
+      },
+      "brew_cappuccino": {
+        "name": "Cappuccino"
+      },
+      "brew_latte_macch": {
+        "name": "Latte Macchiato"
+      },
+      "brew_caffelatte": {
+        "name": "Caffè Latte"
+      },
+      "brew_flat_white": {
+        "name": "Flat White"
+      },
+      "brew_espr_macch": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_hot_milk": {
+        "name": "Гаряче молоко"
+      },
+      "brew_capp_doppio_pl": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_capp_reverse": {
+        "name": "Cappuccino Mix"
+      },
+      "brew_hot_water": {
+        "name": "Гаряча вода"
+      },
+      "brew_tea": {
+        "name": "Чай"
+      },
+      "brew_coffee_pot": {
+        "name": "Кавник"
+      },
+      "brew_cortado": {
+        "name": "Cortado"
+      },
+      "brew_brew_over_ice": {
+        "name": "Кава з льодом"
+      },
+      "brew_over_ice_espr": {
+        "name": "Еспресо з льодом"
+      },
+      "brew_i_americano": {
+        "name": "Американо з льодом"
+      },
+      "brew_i_cappuccino": {
+        "name": "Капучіно з льодом"
+      },
+      "brew_i_latte_macch": {
+        "name": "Лате Макіато з льодом"
+      },
+      "brew_i_capp_mix": {
+        "name": "Капучіно Мікс з льодом"
+      },
+      "brew_i_flatwhite": {
+        "name": "Флет Вайт з льодом"
+      },
+      "brew_i_coldmilk": {
+        "name": "Холодне молоко"
+      },
+      "brew_i_caffelatte": {
+        "name": "Кафе Лате з льодом"
+      },
+      "brew_m_americano": {
+        "name": "Моє Американо"
+      },
+      "brew_m_cappuccino": {
+        "name": "Моє Капучіно"
+      },
+      "brew_m_latte_macch": {
+        "name": "Моє Лате Макіато"
+      },
+      "brew_m_caffelatte": {
+        "name": "Моє Кафе Лате"
+      },
+      "brew_m_capp_mix": {
+        "name": "Моє Капучіно Мікс"
+      },
+      "brew_m_flat_white": {
+        "name": "Моє Флет Вайт"
+      },
+      "brew_m_hot_milk": {
+        "name": "Моє Гаряче молоко"
+      },
+      "brew_mi_over_ice": {
+        "name": "Моє з льодом"
+      },
+      "brew_mi_americano": {
+        "name": "Моє Американо з льодом"
+      },
+      "brew_mi_capp": {
+        "name": "Моє Капучіно з льодом"
+      },
+      "brew_mi_latte_macch": {
+        "name": "Моє Лате Макіато з льодом"
+      },
+      "brew_mi_cafflatt": {
+        "name": "Моє Кафе Лате з льодом"
+      },
+      "brew_mi_capp_mix": {
+        "name": "Моє Капучіно Мікс з льодом"
+      },
+      "brew_mi_flat_white": {
+        "name": "Моє Флет Вайт з льодом"
+      },
+      "brew_mi_cold_milk": {
+        "name": "Моє Холодне молоко"
+      },
+      "brew_a_cb_coffee": {
+        "name": "Cold Brew Coffee"
+      },
+      "brew_b_cb_coffee_ess": {
+        "name": "Cold Brew Espresso"
+      },
+      "brew_c_cb_coffee_pot": {
+        "name": "Cold Brew Pot"
+      },
+      "brew_d_cb_latte": {
+        "name": "Cold Brew Latte"
+      },
+      "brew_e_cb_cappuccino": {
+        "name": "Cold Brew Cappuccino"
+      },
+      "brew_f_cb_mug": {
+        "name": "Cold Brew Mug"
+      },
+      "brew_g_cb_latte_mug": {
+        "name": "Cold Brew Latte Mug"
+      },
+      "brew_h_cb_capp_mug": {
+        "name": "Cold Brew Cappuccino Mug"
+      }
     }
   }
 }

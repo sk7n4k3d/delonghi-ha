@@ -31,61 +31,313 @@
   },
   "entity": {
     "sensor": {
-      "machine_status": { "name": "マシンの状態" },
-      "total_beverages": { "name": "合計飲料数" },
-      "total_espressos": { "name": "合計エスプレッソ数" },
-      "espresso": { "name": "エスプレッソ" },
-      "coffee": { "name": "コーヒー" },
-      "long_coffee": { "name": "ロングコーヒー" },
-      "doppio": { "name": "ドッピオ" },
-      "americano": { "name": "アメリカーノ" },
-      "cappuccino": { "name": "カプチーノ" },
-      "latte_macchiato": { "name": "ラテマキアート" },
-      "caffe_latte": { "name": "カフェラテ" },
-      "flat_white": { "name": "フラットホワイト" },
-      "espresso_macchiato": { "name": "エスプレッソマキアート" },
-      "hot_milk": { "name": "ホットミルク" },
-      "cappuccino_doppio": { "name": "カプチーノドッピオ" },
-      "cappuccino_mix": { "name": "カプチーノミックス" },
-      "hot_water": { "name": "お湯" },
-      "tea": { "name": "お茶" },
-      "coffee_pot": { "name": "コーヒーポット" },
-      "brew_over_ice": { "name": "アイスコーヒー" },
-      "grounds_count": { "name": "排出済みコーヒーかす" },
-      "grounds_percentage": { "name": "かす容器" },
-      "descale_count": { "name": "除石灰回数" },
-      "descale_progress": { "name": "除石灰進捗" },
-      "total_water_ml": { "name": "合計使用水量" },
-      "filter_percentage": { "name": "浄水フィルター使用率" },
-      "filter_replacements": { "name": "フィルター交換回数" },
-      "water_through_filter_ml": { "name": "フィルター通過水量" },
-      "usage_tot_custom_b_bw": { "name": "カスタム飲料" },
-      "other_tot_bev_other": { "name": "その他の飲料" }
+      "machine_status": {
+        "name": "マシンの状態"
+      },
+      "total_beverages": {
+        "name": "合計飲料数"
+      },
+      "total_espressos": {
+        "name": "合計エスプレッソ数"
+      },
+      "espresso": {
+        "name": "エスプレッソ"
+      },
+      "coffee": {
+        "name": "コーヒー"
+      },
+      "long_coffee": {
+        "name": "ロングコーヒー"
+      },
+      "doppio": {
+        "name": "ドッピオ"
+      },
+      "americano": {
+        "name": "アメリカーノ"
+      },
+      "cappuccino": {
+        "name": "カプチーノ"
+      },
+      "latte_macchiato": {
+        "name": "ラテマキアート"
+      },
+      "caffe_latte": {
+        "name": "カフェラテ"
+      },
+      "flat_white": {
+        "name": "フラットホワイト"
+      },
+      "espresso_macchiato": {
+        "name": "エスプレッソマキアート"
+      },
+      "hot_milk": {
+        "name": "ホットミルク"
+      },
+      "cappuccino_doppio": {
+        "name": "カプチーノドッピオ"
+      },
+      "cappuccino_mix": {
+        "name": "カプチーノミックス"
+      },
+      "hot_water": {
+        "name": "お湯"
+      },
+      "tea": {
+        "name": "お茶"
+      },
+      "coffee_pot": {
+        "name": "コーヒーポット"
+      },
+      "brew_over_ice": {
+        "name": "アイスコーヒー"
+      },
+      "grounds_count": {
+        "name": "排出済みコーヒーかす"
+      },
+      "grounds_percentage": {
+        "name": "かす容器"
+      },
+      "descale_count": {
+        "name": "除石灰回数"
+      },
+      "descale_progress": {
+        "name": "除石灰進捗"
+      },
+      "total_water_ml": {
+        "name": "合計使用水量"
+      },
+      "filter_percentage": {
+        "name": "浄水フィルター使用率"
+      },
+      "filter_replacements": {
+        "name": "フィルター交換回数"
+      },
+      "water_through_filter_ml": {
+        "name": "フィルター通過水量"
+      },
+      "usage_tot_custom_b_bw": {
+        "name": "カスタム飲料"
+      },
+      "other_tot_bev_other": {
+        "name": "その他の飲料"
+      }
     },
     "binary_sensor": {
-      "alarm_0": { "name": "水タンクが空" },
-      "alarm_1": { "name": "かす容器が満杯" },
-      "alarm_2": { "name": "除石灰が必要" },
-      "alarm_3": { "name": "浄水フィルター交換" },
-      "alarm_4": { "name": "コーヒーの挽きが細かすぎ" },
-      "alarm_5": { "name": "コーヒー豆が空" },
-      "alarm_6": { "name": "マシンのサービスが必要" },
-      "alarm_7": { "name": "ヒータープローブ故障" },
-      "alarm_8": { "name": "コーヒーが多すぎ" },
-      "alarm_9": { "name": "抽出モーター故障" },
-      "alarm_10": { "name": "スチームプローブ故障" },
-      "alarm_11": { "name": "ドリップトレイがない" },
-      "alarm_12": { "name": "油圧の問題" },
-      "alarm_13": { "name": "タンクが定位置" },
-      "alarm_14": { "name": "ミルクノズルを清掃" },
-      "alarm_15": { "name": "コーヒー豆が空 2" },
-      "alarm_16": { "name": "クリーニングが必要" },
-      "alarm_17": { "name": "豆ホッパーがない" },
-      "alarm_18": { "name": "グリッドあり" }
+      "alarm_0": {
+        "name": "水タンクが空"
+      },
+      "alarm_1": {
+        "name": "かす容器が満杯"
+      },
+      "alarm_2": {
+        "name": "除石灰が必要"
+      },
+      "alarm_3": {
+        "name": "浄水フィルター交換"
+      },
+      "alarm_4": {
+        "name": "コーヒーの挽きが細かすぎ"
+      },
+      "alarm_5": {
+        "name": "コーヒー豆が空"
+      },
+      "alarm_6": {
+        "name": "マシンのサービスが必要"
+      },
+      "alarm_7": {
+        "name": "ヒータープローブ故障"
+      },
+      "alarm_8": {
+        "name": "コーヒーが多すぎ"
+      },
+      "alarm_9": {
+        "name": "抽出モーター故障"
+      },
+      "alarm_10": {
+        "name": "スチームプローブ故障"
+      },
+      "alarm_11": {
+        "name": "ドリップトレイがない"
+      },
+      "alarm_12": {
+        "name": "油圧の問題"
+      },
+      "alarm_13": {
+        "name": "タンクが定位置"
+      },
+      "alarm_14": {
+        "name": "ミルクノズルを清掃"
+      },
+      "alarm_15": {
+        "name": "コーヒー豆が空 2"
+      },
+      "alarm_16": {
+        "name": "クリーニングが必要"
+      },
+      "alarm_17": {
+        "name": "豆ホッパーがない"
+      },
+      "alarm_18": {
+        "name": "グリッドあり"
+      }
     },
     "button": {
-      "power_on": { "name": "電源オン" },
-      "power_off": { "name": "電源オフ" }
+      "power_on": {
+        "name": "電源オン"
+      },
+      "power_off": {
+        "name": "電源オフ"
+      },
+      "brew_espresso": {
+        "name": "Espresso"
+      },
+      "brew_regular": {
+        "name": "コーヒー"
+      },
+      "brew_long_coffee": {
+        "name": "ロングコーヒー"
+      },
+      "brew_2x_espresso": {
+        "name": "Double Espresso"
+      },
+      "brew_doppio_pl": {
+        "name": "Doppio+"
+      },
+      "brew_americano": {
+        "name": "Americano"
+      },
+      "brew_cappuccino": {
+        "name": "Cappuccino"
+      },
+      "brew_latte_macch": {
+        "name": "Latte Macchiato"
+      },
+      "brew_caffelatte": {
+        "name": "Caffè Latte"
+      },
+      "brew_flat_white": {
+        "name": "Flat White"
+      },
+      "brew_espr_macch": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_hot_milk": {
+        "name": "ホットミルク"
+      },
+      "brew_capp_doppio_pl": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_capp_reverse": {
+        "name": "Cappuccino Mix"
+      },
+      "brew_hot_water": {
+        "name": "お湯"
+      },
+      "brew_tea": {
+        "name": "お茶"
+      },
+      "brew_coffee_pot": {
+        "name": "コーヒーポット"
+      },
+      "brew_cortado": {
+        "name": "Cortado"
+      },
+      "brew_brew_over_ice": {
+        "name": "アイスコーヒー"
+      },
+      "brew_over_ice_espr": {
+        "name": "アイスエスプレッソ"
+      },
+      "brew_i_americano": {
+        "name": "アイスアメリカーノ"
+      },
+      "brew_i_cappuccino": {
+        "name": "アイスカプチーノ"
+      },
+      "brew_i_latte_macch": {
+        "name": "アイスラテマキアート"
+      },
+      "brew_i_capp_mix": {
+        "name": "アイスカプチーノミックス"
+      },
+      "brew_i_flatwhite": {
+        "name": "アイスフラットホワイト"
+      },
+      "brew_i_coldmilk": {
+        "name": "アイスミルク"
+      },
+      "brew_i_caffelatte": {
+        "name": "アイスカフェラテ"
+      },
+      "brew_m_americano": {
+        "name": "マイ アメリカーノ"
+      },
+      "brew_m_cappuccino": {
+        "name": "マイ カプチーノ"
+      },
+      "brew_m_latte_macch": {
+        "name": "マイ ラテマキアート"
+      },
+      "brew_m_caffelatte": {
+        "name": "マイ カフェラテ"
+      },
+      "brew_m_capp_mix": {
+        "name": "マイ カプチーノミックス"
+      },
+      "brew_m_flat_white": {
+        "name": "マイ フラットホワイト"
+      },
+      "brew_m_hot_milk": {
+        "name": "マイ ホットミルク"
+      },
+      "brew_mi_over_ice": {
+        "name": "マイ アイス"
+      },
+      "brew_mi_americano": {
+        "name": "マイ アイスアメリカーノ"
+      },
+      "brew_mi_capp": {
+        "name": "マイ アイスカプチーノ"
+      },
+      "brew_mi_latte_macch": {
+        "name": "マイ アイスラテマキアート"
+      },
+      "brew_mi_cafflatt": {
+        "name": "マイ アイスカフェラテ"
+      },
+      "brew_mi_capp_mix": {
+        "name": "マイ アイスカプチーノミックス"
+      },
+      "brew_mi_flat_white": {
+        "name": "マイ アイスフラットホワイト"
+      },
+      "brew_mi_cold_milk": {
+        "name": "マイ アイスミルク"
+      },
+      "brew_a_cb_coffee": {
+        "name": "Cold Brew Coffee"
+      },
+      "brew_b_cb_coffee_ess": {
+        "name": "Cold Brew Espresso"
+      },
+      "brew_c_cb_coffee_pot": {
+        "name": "Cold Brew Pot"
+      },
+      "brew_d_cb_latte": {
+        "name": "Cold Brew Latte"
+      },
+      "brew_e_cb_cappuccino": {
+        "name": "Cold Brew Cappuccino"
+      },
+      "brew_f_cb_mug": {
+        "name": "Cold Brew Mug"
+      },
+      "brew_g_cb_latte_mug": {
+        "name": "Cold Brew Latte Mug"
+      },
+      "brew_h_cb_capp_mug": {
+        "name": "Cold Brew Cappuccino Mug"
+      }
     }
   }
 }
