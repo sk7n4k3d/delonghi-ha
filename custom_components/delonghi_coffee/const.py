@@ -62,6 +62,9 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
 # This is the exact command that successfully brewed coffee
 CAPTURED_BREW_ESPRESSO: Final = bytes.fromhex("0d1383f0010308000100281b01020527010651d7")
 
+# Power on / wake up command (captured from MITM — app only supports wake, not power off)
+POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")
+
 # Monitor V2 alarm bit definitions (32-bit word from bytes[7], [8], [12], [13])
 ALARMS: Final[dict[int, dict[str, str]]] = {
     0: {"name": "Water Tank Empty", "icon": "mdi:water-off"},
