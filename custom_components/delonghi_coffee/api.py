@@ -449,59 +449,24 @@ class DeLonghiApi:
         return counters
 
     def brew_beverage(self, dsn: str, beverage_key: str) -> bool:
-        """Brew a beverage by key using the captured ECAM command format.
+        """Brew a beverage by key.
 
-        The command format for WiFi models (cmd 0x83) was captured from the
-        official app via MITM. Recipe data is read from the machine's stored
-        properties, which contain the user's personalized settings.
+        For now, only espresso uses the verified captured MITM command.
+        Other beverages need their brew commands captured separately —
+        the stored recipe format (0xA6) is NOT the same as the brew
+        command format (0x83).
         """
-        props = self.get_properties(dsn)
+        if beverage_key == "espresso":
+            _LOGGER.info("Brewing espresso (captured command)")
+            return self.send_command(dsn, CAPTURED_BREW_ESPRESSO)
 
-        # Find the recipe property for profile 2 (main user profile)
-        recipe_prop: dict[str, Any] | None = None
-        for name, prop in props.items():
-            if f"_rec_2_{beverage_key}" in name and prop.get("value"):
-                recipe_prop = prop
-                break
-
-        if not recipe_prop:
-            # Fallback: try any profile
-            for name, prop in props.items():
-                if f"_rec_{beverage_key}" in name and prop.get("value"):
-                    val = prop["value"]
-                    if isinstance(val, str) and not val.startswith("{"):
-                        recipe_prop = prop
-                        break
-
-        if not recipe_prop:
-            # Fallback: use captured command for espresso
-            if beverage_key == "espresso":
-                _LOGGER.info("Using captured ECAM command for espresso")
-                return self.send_command(dsn, CAPTURED_BREW_ESPRESSO)
-            _LOGGER.error("Recipe not found for %s", beverage_key)
-            return False
-
-        recipe_b64: str = recipe_prop["value"]
-        try:
-            recipe_data = base64.b64decode(recipe_b64)
-        except (ValueError, base64.binascii.Error) as err:
-            _LOGGER.error("Cannot decode recipe data for %s: %s", beverage_key, err)
-            return False
-
-        # Sanity check
-        if len(recipe_data) < 5 or len(recipe_data) > 64:
-            _LOGGER.error(
-                "Recipe data for %s has unexpected length: %d bytes",
-                beverage_key,
-                len(recipe_data),
-            )
-            return False
-
-        # Recipe properties are stored in RESPONSE format (0xD0, cmd 0xA6).
-        # We need to convert to COMMAND format (0x0D, cmd 0x83) for brewing.
-        brew_cmd = self._recipe_to_brew_command(recipe_data)
-        _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
-        return self.send_command(dsn, brew_cmd)
+        _LOGGER.warning(
+            "Brew command for '%s' not yet captured — only espresso is supported. "
+            "Other beverages need MITM capture. See: "
+            "https://github.com/sk7n4k3d/delonghi-ha/issues/4",
+            beverage_key,
+        )
+        return False
 
     @staticmethod
     def _crc16(data: bytes) -> bytes:
@@ -521,23 +486,23 @@ class DeLonghiApi:
     def _recipe_to_brew_command(cls, recipe: bytes) -> bytes:
         """Convert stored recipe (0xD0/0xA6) to brew command (0x0D/0x83).
 
-        Recipe format:  [0xD0] [len] [0xA6] [flags] [profile] [bev_id] [params...] [CRC]
-        Brew format:    [0x0D] [len] [0x83] [flags] [profile] [action] [bev_id] [params...] [CRC]
+        The recipe body (everything between header and CRC) is identical
+        between response and command format. Only the direction byte (0xD0→0x0D)
+        and command ID (0xA6→0x83) change. CRC is recalculated.
         """
         if recipe[0] == 0x0D:
-            # Already a command format, return as-is
             return recipe
 
-        # Extract content from recipe (skip direction, length, cmd, flags, and CRC)
-        flags = recipe[3]
-        profile_id = recipe[4]
-        beverage_and_params = recipe[5:-2]  # beverage_id + recipe parameters
+        # Flip direction and command, keep everything else
+        brew = bytearray(recipe)
+        brew[0] = 0x0D  # direction: query
+        brew[2] = 0x83  # command: brew beverage
 
-        # Build brew command: insert action byte 0x03 (START) after profile_id
-        action = 0x03
-        brew_content = bytes([profile_id, action]) + beverage_and_params
-        brew_body = bytes([0x0D, len(brew_content) + 3, 0x83, flags]) + brew_content
-        return brew_body + cls._crc16(brew_body)
+        # Recalculate CRC-16 over everything except the last 2 bytes
+        new_crc = cls._crc16(bytes(brew[:-2]))
+        brew[-2:] = new_crc
+
+        return bytes(brew)
 
     def get_available_beverages(self, dsn: str) -> list[str]:
         """Get list of available beverage keys from device properties."""
