@@ -361,9 +361,11 @@ class DeLonghiApi:
         return result
 
     def get_counters(self, dsn: str) -> dict[str, Any]:
-        """Get beverage counters."""
+        """Get beverage counters, maintenance stats, and JSON sub-counters."""
         props = self.get_properties(dsn)
         counters: dict[str, Any] = {}
+
+        # Simple integer counters
         counter_map: dict[str, str] = {
             "d701_tot_bev_b": "total_beverages",
             "d704_tot_bev_espressi": "total_espressos",
@@ -376,12 +378,21 @@ class DeLonghiApi:
             "d711_id8_lattmacc": "latte_macchiato",
             "d712_id9_cafflatt": "caffe_latte",
             "d713_id10_flatwhite": "flat_white",
+            "d714_id11_esprmacc": "espresso_macchiato",
+            "d715_id12_hotmilk": "hot_milk",
+            "d716_id13_cappdoppio_p": "cappuccino_doppio",
+            "d717_id15_caprev": "cappuccino_mix",
             "d718_id16_hotwater": "hot_water",
             "d719_id22_tea": "tea",
+            "d720_tot_id23_coffee_pot": "coffee_pot",
+            "d730_tot_id27_brew_over_ice": "brew_over_ice",
             "d551_cnt_coffee_fondi": "grounds_count",
             "d552_cnt_calc_tot": "descale_count",
             "d553_water_tot_qty": "total_water_ml",
             "d510_ground_cnt_percentage": "grounds_percentage",
+            "d513_percentage_usage_fltr": "filter_percentage",
+            "d554_cnt_filter_tot": "filter_replacements",
+            "d555_water_filter_qty": "water_through_filter_ml",
         }
         for prop_name, friendly in counter_map.items():
             if prop_name in props:
@@ -391,6 +402,50 @@ class DeLonghiApi:
                         counters[friendly] = int(val)
                     except (ValueError, TypeError):
                         counters[friendly] = val
+
+        # JSON counters — parse sub-fields
+        json_props: dict[str, str] = {
+            "d702_tot_bev_other": "other",
+            "d733_tot_bev_counters": "mug",
+            "d734_tot_bev_usage": "usage",
+            "d735_iced_bev": "iced",
+            "d736_mug_bev": "mug_bev",
+            "d737_mug_iced_bev": "mug_iced",
+            "d738_cold_brew_bev": "cold_brew",
+            "d739_taste_bev": "taste",
+            "d740_water_qty_bev": "water_qty",
+        }
+        for prop_name, prefix in json_props.items():
+            if prop_name in props:
+                val = props[prop_name].get("value")
+                if val and isinstance(val, str) and val.startswith("{"):
+                    try:
+                        data = json.loads(val)
+                        for key, v in data.items():
+                            try:
+                                counters[f"{prefix}_{key}"] = int(v)
+                            except (ValueError, TypeError):
+                                counters[f"{prefix}_{key}"] = v
+                    except json.JSONDecodeError:
+                        pass
+
+        # Descale progress — calculate % from service parameters
+        if "d580_service_parameters" in props:
+            val = props["d580_service_parameters"].get("value")
+            if val and isinstance(val, str) and val.startswith("{"):
+                try:
+                    svc = json.loads(val)
+                    calc_qty = int(svc.get("last_4_water_calc_qty", 0))
+                    threshold = int(svc.get("last_4_calc_threshold", 1))
+                    descale_status = int(svc.get("descale_status", 0))
+                    if threshold > 0:
+                        counters["descale_progress"] = min(
+                            round(calc_qty / threshold * 100), 100
+                        )
+                    counters["descale_status"] = descale_status
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+
         return counters
 
     def brew_beverage(self, dsn: str, beverage_key: str) -> bool:

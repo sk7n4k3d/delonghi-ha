@@ -17,6 +17,7 @@ from .coordinator import DeLonghiCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 COUNTER_SENSORS: dict[str, dict[str, str]] = {
+    # Core counters
     "total_beverages": {"name": "Total Beverages", "icon": "mdi:coffee", "unit": "cups"},
     "total_espressos": {"name": "Total Espressos", "icon": "mdi:coffee", "unit": "cups"},
     "espresso": {"name": "Espressos", "icon": "mdi:coffee", "unit": "cups"},
@@ -28,12 +29,26 @@ COUNTER_SENSORS: dict[str, dict[str, str]] = {
     "latte_macchiato": {"name": "Latte Macchiatos", "icon": "mdi:glass-mug-variant", "unit": "cups"},
     "caffe_latte": {"name": "Caffe Lattes", "icon": "mdi:glass-mug-variant", "unit": "cups"},
     "flat_white": {"name": "Flat Whites", "icon": "mdi:coffee", "unit": "cups"},
+    "espresso_macchiato": {"name": "Espresso Macchiatos", "icon": "mdi:coffee", "unit": "cups"},
+    "hot_milk": {"name": "Hot Milks", "icon": "mdi:cup", "unit": "cups"},
+    "cappuccino_doppio": {"name": "Cappuccino Doppios", "icon": "mdi:coffee-maker-outline", "unit": "cups"},
+    "cappuccino_mix": {"name": "Cappuccino Mix", "icon": "mdi:coffee-maker-outline", "unit": "cups"},
     "hot_water": {"name": "Hot Waters", "icon": "mdi:water-boiler", "unit": "cups"},
     "tea": {"name": "Teas", "icon": "mdi:tea", "unit": "cups"},
+    "coffee_pot": {"name": "Coffee Pots", "icon": "mdi:coffee-maker", "unit": "cups"},
+    "brew_over_ice": {"name": "Brew Over Ice", "icon": "mdi:snowflake", "unit": "cups"},
+    # Maintenance
     "grounds_count": {"name": "Grounds Ejected", "icon": "mdi:delete-variant", "unit": "pucks"},
-    "descale_count": {"name": "Descales Done", "icon": "mdi:water-check", "unit": "times"},
-    "total_water_ml": {"name": "Total Water Used", "icon": "mdi:water", "unit": "mL"},
     "grounds_percentage": {"name": "Grounds Container", "icon": "mdi:delete-variant", "unit": "%"},
+    "descale_count": {"name": "Descales Done", "icon": "mdi:water-check", "unit": "times"},
+    "descale_progress": {"name": "Descale Progress", "icon": "mdi:water-alert", "unit": "%"},
+    "total_water_ml": {"name": "Total Water Used", "icon": "mdi:water", "unit": "mL"},
+    "filter_percentage": {"name": "Water Filter Usage", "icon": "mdi:filter", "unit": "%"},
+    "filter_replacements": {"name": "Filter Replacements", "icon": "mdi:filter-check", "unit": "times"},
+    "water_through_filter_ml": {"name": "Water Through Filter", "icon": "mdi:filter", "unit": "mL"},
+    # Custom / other
+    "usage_tot_custom_b_bw": {"name": "Custom Beverages", "icon": "mdi:coffee-to-go", "unit": "cups"},
+    "other_tot_bev_other": {"name": "Other Beverages", "icon": "mdi:cup", "unit": "cups"},
 }
 
 
