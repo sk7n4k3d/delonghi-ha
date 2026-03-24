@@ -19,6 +19,19 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entry to a new version."""
+    _LOGGER.debug("Migrating from version %s.%s", entry.version, entry.minor_version)
+
+    if entry.version == 1:
+        # v1 → v2: add region field (default EU for existing installs)
+        new_data = {**entry.data, "region": "EU"}
+        hass.config_entries.async_update_entry(entry, data=new_data, version=2)
+        _LOGGER.info("Migrated config entry to version 2 (added region=EU)")
+
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up De'Longhi Coffee from a config entry."""
     api = DeLonghiApi(
