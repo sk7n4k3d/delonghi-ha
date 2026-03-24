@@ -79,9 +79,16 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "brew_over_ice": {"name": "Brew Over Ice", "icon": "mdi:snowflake"},
 }
 
-# Captured working ECAM brew command from MITM (espresso, profile 1, normal strength)
-# This is the exact command that successfully brewed coffee
-CAPTURED_BREW_ESPRESSO: Final = bytes.fromhex("0d1383f0010308000100281b01020527010651d7")
+# Captured MITM brew commands — verified working, byte-for-byte exact
+CAPTURED_BREWS: Final[dict[str, bytes]] = {
+    "espresso": bytes.fromhex("0d1383f0010308000100281b01020527010651d7"),
+    "hot_water": bytes.fromhex("0d1183f010031c010f00961b012701061189"),
+    "tea": bytes.fromhex("0d1383f016031c010f00961b010d01270106b65b"),
+    "i_americano": bytes.fromhex("0d1083f032031b0102011f00270106ade8"),
+}
+
+# Legacy alias
+CAPTURED_BREW_ESPRESSO: Final = CAPTURED_BREWS["espresso"]
 
 # Power on / wake up command (Request ID 132, contents 0x02 0x01)
 POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")

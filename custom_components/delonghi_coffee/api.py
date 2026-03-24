@@ -15,7 +15,7 @@ from .const import (
     AYLA_APP_ID,
     AYLA_APP_SECRET,
     APP_SIGNATURE,
-    CAPTURED_BREW_ESPRESSO,
+    CAPTURED_BREWS,
     GIGYA_API_KEY,
     REGIONS,
     REQUEST_TIMEOUT,
@@ -449,15 +449,17 @@ class DeLonghiApi:
         return counters
 
     def brew_beverage(self, dsn: str, beverage_key: str) -> bool:
-        """Brew a beverage by converting stored recipe to brew command.
+        """Brew a beverage.
 
-        Recipe format (0xD0/0xA6) → Brew format (0x0D/0x83):
-        1. Take bev_id from recipe[5]
-        2. Take params from recipe[6:-2]
-        3. Remove recipe marker bytes (0x19 0x01)
-        4. Append brew suffix (0x27 0x01 0x06)
-        5. Build: [0x0D][len][0x83][0xF0][bev_id][0x03][params][CRC-16]
+        Uses MITM-captured commands when available (verified working).
+        Falls back to recipe conversion for uncaptured beverages.
         """
+        # Use captured command if available (verified byte-for-byte)
+        if beverage_key in CAPTURED_BREWS:
+            _LOGGER.info("Brewing %s (captured command)", beverage_key)
+            return self.send_command(dsn, CAPTURED_BREWS[beverage_key])
+
+        # Fallback: convert recipe to brew command
         props = self.get_properties(dsn)
 
         recipe_prop: dict[str, Any] | None = None
@@ -489,7 +491,7 @@ class DeLonghiApi:
             return False
 
         brew_cmd = self._recipe_to_brew_command(recipe_data)
-        _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
+        _LOGGER.info("Brewing %s (converted): %s", beverage_key, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
 
     @staticmethod
