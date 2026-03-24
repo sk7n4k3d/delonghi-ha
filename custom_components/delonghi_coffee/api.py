@@ -488,7 +488,7 @@ class DeLonghiApi:
             _LOGGER.error("Cannot decode recipe data for %s: %s", beverage_key, err)
             return False
 
-        # Sanity check — ECAM commands are typically 10-30 bytes
+        # Sanity check
         if len(recipe_data) < 5 or len(recipe_data) > 64:
             _LOGGER.error(
                 "Recipe data for %s has unexpected length: %d bytes",
@@ -497,8 +497,47 @@ class DeLonghiApi:
             )
             return False
 
-        _LOGGER.info("Brewing %s: %s", beverage_key, recipe_data.hex())
-        return self.send_command(dsn, recipe_data)
+        # Recipe properties are stored in RESPONSE format (0xD0, cmd 0xA6).
+        # We need to convert to COMMAND format (0x0D, cmd 0x83) for brewing.
+        brew_cmd = self._recipe_to_brew_command(recipe_data)
+        _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
+        return self.send_command(dsn, brew_cmd)
+
+    @staticmethod
+    def _crc16(data: bytes) -> bytes:
+        """CRC-16/SPI-FUJITSU checksum."""
+        crc = 0x1D0F
+        for byte in data:
+            crc ^= byte << 8
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = (crc << 1) ^ 0x1021
+                else:
+                    crc = crc << 1
+        crc &= 0xFFFF
+        return crc.to_bytes(2, byteorder="big")
+
+    @classmethod
+    def _recipe_to_brew_command(cls, recipe: bytes) -> bytes:
+        """Convert stored recipe (0xD0/0xA6) to brew command (0x0D/0x83).
+
+        Recipe format:  [0xD0] [len] [0xA6] [flags] [profile] [bev_id] [params...] [CRC]
+        Brew format:    [0x0D] [len] [0x83] [flags] [profile] [action] [bev_id] [params...] [CRC]
+        """
+        if recipe[0] == 0x0D:
+            # Already a command format, return as-is
+            return recipe
+
+        # Extract content from recipe (skip direction, length, cmd, flags, and CRC)
+        flags = recipe[3]
+        profile_id = recipe[4]
+        beverage_and_params = recipe[5:-2]  # beverage_id + recipe parameters
+
+        # Build brew command: insert action byte 0x03 (START) after profile_id
+        action = 0x03
+        brew_content = bytes([profile_id, action]) + beverage_and_params
+        brew_body = bytes([0x0D, len(brew_content) + 3, 0x83, flags]) + brew_content
+        return brew_body + cls._crc16(brew_body)
 
     def get_available_beverages(self, dsn: str) -> list[str]:
         """Get list of available beverage keys from device properties."""
