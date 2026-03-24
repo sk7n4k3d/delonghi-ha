@@ -62,8 +62,12 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
 # This is the exact command that successfully brewed coffee
 CAPTURED_BREW_ESPRESSO: Final = bytes.fromhex("0d1383f0010308000100281b01020527010651d7")
 
-# Power on / wake up command (captured from MITM — app only supports wake, not power off)
+# Power on / wake up command (Request ID 132, contents 0x02 0x01)
 POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")
+
+# Power off / standby command (Request ID 132, contents 0x01 0x01)
+# CRC-16/SPI-FUJITSU checksum. Credit: MattG-K (framagit.org/mattgk/dlghiot)
+POWER_OFF_CMD: Final = bytes.fromhex("0d07840f01010041")
 
 # Monitor V2 alarm bit definitions (32-bit word from bytes[7], [8], [12], [13])
 ALARMS: Final[dict[int, dict[str, str]]] = {
