@@ -1,0 +1,453 @@
+"""De'Longhi Coffee API — Gigya + Ayla Networks cloud integration."""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import struct
+import time
+from typing import Any
+
+import requests
+
+from .const import (
+    AYLA_ADS_EU,
+    AYLA_APP_ID,
+    AYLA_APP_SECRET,
+    AYLA_USER_EU,
+    APP_SIGNATURE,
+    CAPTURED_BREW_ESPRESSO,
+    GIGYA_API_KEY,
+    GIGYA_URL,
+    REQUEST_TIMEOUT,
+    RETRY_COUNT,
+    RETRY_DELAY,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class DeLonghiAuthError(Exception):
+    """Authentication error."""
+
+
+class DeLonghiApiError(Exception):
+    """API communication error."""
+
+
+def _retry(func):  # noqa: ANN001, ANN202
+    """Simple retry decorator with backoff (3 attempts, 2s delay)."""
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        last_err: Exception | None = None
+        for attempt in range(1, RETRY_COUNT + 1):
+            try:
+                return func(*args, **kwargs)
+            except DeLonghiAuthError:
+                raise
+            except (requests.RequestException, DeLonghiApiError) as err:
+                last_err = err
+                if attempt < RETRY_COUNT:
+                    _LOGGER.debug(
+                        "Attempt %d/%d failed for %s: %s — retrying in %ds",
+                        attempt, RETRY_COUNT, func.__name__, err, RETRY_DELAY,
+                    )
+                    time.sleep(RETRY_DELAY)
+        raise DeLonghiApiError(
+            f"{func.__name__} failed after {RETRY_COUNT} attempts: {last_err}"
+        ) from last_err
+    return wrapper
+
+
+class DeLonghiApi:
+    """API client for De'Longhi coffee machines via Ayla Networks."""
+
+    def __init__(self, email: str, password: str) -> None:
+        self._email = email
+        self._password = password
+        self._session = requests.Session()
+        self._ayla_token: str | None = None
+        self._ayla_refresh: str | None = None
+        self._token_expires: float = 0
+        self._devices: list[dict[str, Any]] = []
+        self._device_name: str | None = None
+        self._sw_version: str | None = None
+
+    @property
+    def device_name(self) -> str | None:
+        """Return device product name from last get_devices call."""
+        return self._device_name
+
+    @property
+    def sw_version(self) -> str | None:
+        """Return device software version from last get_devices call."""
+        return self._sw_version
+
+    def authenticate(self) -> bool:
+        """Full auth flow: Gigya login -> JWT -> Ayla token_sign_in."""
+        try:
+            # Step 1: Gigya login
+            gigya_resp = self._session.post(
+                f"{GIGYA_URL}/accounts.login",
+                data={
+                    "loginID": self._email,
+                    "password": self._password,
+                    "apiKey": GIGYA_API_KEY,
+                    "targetEnv": "mobile",
+                    "include": "id_token,profile,data,preferences",
+                    "sessionExpiration": "7776000",
+                    "httpStatusCodes": "true",
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            gigya_data = gigya_resp.json()
+
+            if gigya_resp.status_code != 200 or gigya_data.get("errorCode", 0) != 0:
+                _LOGGER.error(
+                    "Gigya login failed for %s: %s",
+                    self._email,
+                    gigya_data.get("errorMessage", "Unknown error"),
+                )
+                raise DeLonghiAuthError(
+                    f"Gigya login failed: {gigya_data.get('errorMessage', 'Unknown')}"
+                )
+
+            id_token: str | None = gigya_data.get("id_token")
+            if not id_token:
+                # Try from sessionInfo
+                id_token = gigya_data.get("sessionInfo", {}).get("sessionToken")
+
+            if not id_token:
+                _LOGGER.error("No id_token in Gigya response for %s", self._email)
+                raise DeLonghiAuthError("No id_token in Gigya response")
+
+            # Step 2: Get long-lived JWT
+            jwt_resp = self._session.post(
+                f"{GIGYA_URL}/accounts.getJWT",
+                data={
+                    "oauth_token": gigya_data["sessionInfo"]["sessionToken"],
+                    "secret": gigya_data["sessionInfo"]["sessionSecret"],
+                    "apiKey": GIGYA_API_KEY,
+                    "fields": "data.favoriteStoreId",
+                    "expiration": "7776000",
+                    "httpStatusCodes": "true",
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            jwt_data = jwt_resp.json()
+            jwt_token: str = jwt_data.get("id_token", id_token)
+
+            # Step 3: Ayla token_sign_in
+            ayla_resp = self._session.post(
+                f"{AYLA_USER_EU}/api/v1/token_sign_in",
+                data={
+                    "app_id": AYLA_APP_ID,
+                    "app_secret": AYLA_APP_SECRET,
+                    "token": jwt_token,
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+
+            if ayla_resp.status_code != 200:
+                _LOGGER.error(
+                    "Ayla auth failed: %s %s", ayla_resp.status_code, ayla_resp.text
+                )
+                raise DeLonghiAuthError(
+                    f"Ayla auth failed: {ayla_resp.status_code} {ayla_resp.text}"
+                )
+
+            ayla_data: dict[str, Any] = ayla_resp.json()
+            self._ayla_token = ayla_data["access_token"]
+            self._ayla_refresh = ayla_data.get("refresh_token")
+            self._token_expires = time.time() + ayla_data.get("expires_in", 86400)
+
+            _LOGGER.info("De'Longhi auth successful")
+            return True
+
+        except DeLonghiAuthError:
+            raise
+        except KeyError as err:
+            _LOGGER.error("Missing expected key in auth response: %s", err)
+            raise DeLonghiAuthError(f"Malformed auth response: {err}") from err
+        except ValueError as err:
+            _LOGGER.error("Invalid JSON in auth response: %s", err)
+            raise DeLonghiApiError(f"Invalid response: {err}") from err
+        except requests.RequestException as err:
+            _LOGGER.error("Network error during auth: %s", err)
+            raise DeLonghiApiError(f"Network error: {err}") from err
+
+    def _ensure_token(self) -> None:
+        """Refresh token if expired."""
+        if time.time() >= self._token_expires - 300:
+            if self._ayla_refresh:
+                try:
+                    resp = self._session.post(
+                        f"{AYLA_USER_EU}/users/refresh_token.json",
+                        json={"user": {"refresh_token": self._ayla_refresh}},
+                        timeout=REQUEST_TIMEOUT,
+                    )
+                    if resp.status_code == 200:
+                        data: dict[str, Any] = resp.json()
+                        self._ayla_token = data["access_token"]
+                        self._ayla_refresh = data.get("refresh_token", self._ayla_refresh)
+                        self._token_expires = time.time() + data.get("expires_in", 86400)
+                        return
+                except (requests.RequestException, KeyError, ValueError) as err:
+                    _LOGGER.debug("Token refresh failed, re-authenticating: %s", err)
+            self.authenticate()
+
+    def _headers(self) -> dict[str, str]:
+        self._ensure_token()
+        return {
+            "Authorization": f"auth_token {self._ayla_token}",
+            "Content-Type": "application/json",
+            "x-ayla-source": "Mobile",
+        }
+
+    @_retry
+    def get_devices(self) -> list[dict[str, Any]]:
+        """Get all De'Longhi devices."""
+        resp = self._session.get(
+            f"{AYLA_ADS_EU}/apiv1/devices.json",
+            headers=self._headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        self._devices = [d["device"] for d in resp.json()]
+
+        # Store device info from first device for device_info
+        if self._devices:
+            dev = self._devices[0]
+            self._device_name = dev.get("product_name")
+            self._sw_version = dev.get("sw_version")
+
+        return self._devices
+
+    @_retry
+    def get_properties(self, dsn: str) -> dict[str, Any]:
+        """Get all properties for a device."""
+        resp = self._session.get(
+            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties.json",
+            headers=self._headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return {p["property"]["name"]: p["property"] for p in resp.json()}
+
+    @_retry
+    def get_property(self, dsn: str, name: str) -> dict[str, Any]:
+        """Get a single property."""
+        resp = self._session.get(
+            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties/{name}.json",
+            headers=self._headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json().get("property", {})
+
+    def _build_packet(self, ecam_bytes: bytes) -> str:
+        """Build WiFi packet: ECAM + timestamp + app signature -> Base64."""
+        ts = struct.pack(">I", int(time.time()))
+        full = ecam_bytes + ts + APP_SIGNATURE
+        return base64.b64encode(full).decode()
+
+    @_retry
+    def send_command(self, dsn: str, ecam_bytes: bytes) -> bool:
+        """Send an ECAM command to the machine."""
+        b64 = self._build_packet(ecam_bytes)
+        resp = self._session.post(
+            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties/app_data_request/datapoints.json",
+            json={"datapoint": {"value": b64}},
+            headers=self._headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 201:
+            _LOGGER.info("Command sent: %s", ecam_bytes.hex())
+            return True
+        _LOGGER.error("Command failed: %s %s", resp.status_code, resp.text)
+        return False
+
+    @_retry
+    def ping_connected(self, dsn: str) -> bool:
+        """Send app_device_connected ping to force machine to push data updates."""
+        ts = struct.pack(">I", int(time.time()))
+        b64 = base64.b64encode(ts + APP_SIGNATURE).decode()
+        resp = self._session.post(
+            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties/app_device_connected/datapoints.json",
+            json={"datapoint": {"value": b64}},
+            headers=self._headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+        return resp.status_code == 201
+
+    def brew(self, dsn: str, recipe_ecam: bytes) -> bool:
+        """Send a brew command."""
+        return self.send_command(dsn, recipe_ecam)
+
+    def get_status(self, dsn: str) -> dict[str, Any]:
+        """Get machine status from monitor property (MonitorDataV2 format)."""
+        result: dict[str, Any] = {
+            "status": "UNKNOWN",
+            "machine_state": "Unknown",
+            "alarms": [],
+            "profile": 0,
+        }
+
+        try:
+            prop = self.get_property(dsn, "app_device_status")
+            result["status"] = prop.get("value", "UNKNOWN")
+        except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
+            _LOGGER.debug("Failed to get device status: %s", err)
+
+        try:
+            monitor = self.get_property(dsn, "d302_monitor_machine")
+            monitor_val = monitor.get("value")
+            if monitor_val:
+                raw = base64.b64decode(monitor_val)
+                result.update(self._parse_monitor_v2(raw))
+        except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
+            _LOGGER.debug("Monitor parse error: %s", err)
+
+        return result
+
+    @staticmethod
+    def _parse_monitor_v2(raw: bytes) -> dict[str, Any]:
+        """Parse MonitorDataV2 binary data.
+
+        Byte layout (type 2, Striker/Eletta Explore):
+        [0-3]  Header (0xD0, len, cmd, flags)
+        [4]    Active profile
+        [5-6]  Accessory/switch bits
+        [7]    Alarm byte 0 (bits 0-7)
+        [8]    Alarm byte 1 (bits 8-15)
+        [9]    Machine state (0=off, 6=heating, 7=ready, 3=brewing)
+        [10]   Sub-state
+        [11]   Extra data
+        [12]   Alarm byte 2 (bits 16-23)
+        [13]   Alarm byte 3 (bits 24-31)
+        [14+]  Additional data + timestamp
+        """
+        from .const import ALARMS, MACHINE_STATES
+
+        result: dict[str, Any] = {"alarms": [], "machine_state": "Unknown", "profile": 0}
+
+        if len(raw) < 14:
+            return result
+
+        result["profile"] = raw[4]
+
+        # Machine state
+        state_val = raw[9]
+        result["machine_state"] = MACHINE_STATES.get(state_val, f"Unknown ({state_val})")
+
+        # 32-bit alarm word from 4 bytes
+        alarm_word = (
+            (raw[7] & 0xFF)
+            | ((raw[8] & 0xFF) << 8)
+            | ((raw[12] & 0xFF) << 16)
+            | ((raw[13] & 0xFF) << 24)
+        )
+
+        active_alarms: list[dict[str, Any]] = []
+        for bit, meta in ALARMS.items():
+            if alarm_word & (1 << bit):
+                active_alarms.append({"bit": bit, **meta})
+
+        result["alarms"] = active_alarms
+        return result
+
+    def get_counters(self, dsn: str) -> dict[str, Any]:
+        """Get beverage counters."""
+        props = self.get_properties(dsn)
+        counters: dict[str, Any] = {}
+        counter_map: dict[str, str] = {
+            "d701_tot_bev_b": "total_beverages",
+            "d704_tot_bev_espressi": "total_espressos",
+            "d705_tot_id1_espr": "espresso",
+            "d706_tot_id2_coffee": "coffee",
+            "d707_tot_id3_long": "long_coffee",
+            "d708_tot_id5_doppio_p": "doppio",
+            "d709_id6_americano": "americano",
+            "d710_tot_id7_capp": "cappuccino",
+            "d711_id8_lattmacc": "latte_macchiato",
+            "d712_id9_cafflatt": "caffe_latte",
+            "d713_id10_flatwhite": "flat_white",
+            "d718_id16_hotwater": "hot_water",
+            "d719_id22_tea": "tea",
+            "d551_cnt_coffee_fondi": "grounds_count",
+            "d552_cnt_calc_tot": "descale_count",
+            "d553_water_tot_qty": "total_water_ml",
+            "d510_ground_cnt_percentage": "grounds_percentage",
+        }
+        for prop_name, friendly in counter_map.items():
+            if prop_name in props:
+                val = props[prop_name].get("value")
+                if val is not None:
+                    try:
+                        counters[friendly] = int(val)
+                    except (ValueError, TypeError):
+                        counters[friendly] = val
+        return counters
+
+    def brew_beverage(self, dsn: str, beverage_key: str) -> bool:
+        """Brew a beverage by key using the captured ECAM command format.
+
+        The command format for WiFi models (cmd 0x83) was captured from the
+        official app via MITM. Recipe data is read from the machine's stored
+        properties, which contain the user's personalized settings.
+        """
+        props = self.get_properties(dsn)
+
+        # Find the recipe property for profile 2 (main user profile)
+        recipe_prop: dict[str, Any] | None = None
+        for name, prop in props.items():
+            if f"_rec_2_{beverage_key}" in name and prop.get("value"):
+                recipe_prop = prop
+                break
+
+        if not recipe_prop:
+            # Fallback: try any profile
+            for name, prop in props.items():
+                if f"_rec_{beverage_key}" in name and prop.get("value"):
+                    val = prop["value"]
+                    if isinstance(val, str) and not val.startswith("{"):
+                        recipe_prop = prop
+                        break
+
+        if not recipe_prop:
+            # Fallback: use captured command for espresso
+            if beverage_key == "espresso":
+                _LOGGER.info("Using captured ECAM command for espresso")
+                return self.send_command(dsn, CAPTURED_BREW_ESPRESSO)
+            _LOGGER.error("Recipe not found for %s", beverage_key)
+            return False
+
+        recipe_b64: str = recipe_prop["value"]
+        try:
+            recipe_data = base64.b64decode(recipe_b64)
+        except (ValueError, base64.binascii.Error) as err:
+            _LOGGER.error("Cannot decode recipe data for %s: %s", beverage_key, err)
+            return False
+
+        # Sanity check — ECAM commands are typically 10-30 bytes
+        if len(recipe_data) < 5 or len(recipe_data) > 64:
+            _LOGGER.error(
+                "Recipe data for %s has unexpected length: %d bytes",
+                beverage_key,
+                len(recipe_data),
+            )
+            return False
+
+        _LOGGER.info("Brewing %s: %s", beverage_key, recipe_data.hex())
+        return self.send_command(dsn, recipe_data)
+
+    def get_available_beverages(self, dsn: str) -> list[str]:
+        """Get list of available beverage keys from device properties."""
+        props = self.get_properties(dsn)
+        beverages: set[str] = set()
+        for name in props:
+            # Match d1XX_rec_2_BEVERAGE pattern (profile 2 = user defaults)
+            if "_rec_2_" in name:
+                bev = name.split("_rec_2_", 1)[-1]
+                beverages.add(bev)
+        return sorted(beverages)

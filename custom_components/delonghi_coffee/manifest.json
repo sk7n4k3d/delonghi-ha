@@ -1,0 +1,11 @@
+{
+  "domain": "delonghi_coffee",
+  "name": "De'Longhi Coffee",
+  "codeowners": ["@sk7n4k3d"],
+  "config_flow": true,
+  "documentation": "https://github.com/sk7n4k3d/delonghi-ha",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/sk7n4k3d/delonghi-ha/issues",
+  "requirements": ["requests>=2.28.0"],
+  "version": "1.0.0"
+}

@@ -1,0 +1,139 @@
+"""Sensor platform for De'Longhi Coffee."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import DOMAIN
+from .coordinator import DeLonghiCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+COUNTER_SENSORS: dict[str, dict[str, str]] = {
+    "total_beverages": {"name": "Total Beverages", "icon": "mdi:coffee", "unit": "cups"},
+    "total_espressos": {"name": "Total Espressos", "icon": "mdi:coffee", "unit": "cups"},
+    "espresso": {"name": "Espressos", "icon": "mdi:coffee", "unit": "cups"},
+    "coffee": {"name": "Coffees", "icon": "mdi:coffee", "unit": "cups"},
+    "long_coffee": {"name": "Long Coffees", "icon": "mdi:coffee-outline", "unit": "cups"},
+    "doppio": {"name": "Doppios", "icon": "mdi:coffee", "unit": "cups"},
+    "americano": {"name": "Americanos", "icon": "mdi:coffee-outline", "unit": "cups"},
+    "cappuccino": {"name": "Cappuccinos", "icon": "mdi:coffee-maker-outline", "unit": "cups"},
+    "latte_macchiato": {"name": "Latte Macchiatos", "icon": "mdi:glass-mug-variant", "unit": "cups"},
+    "caffe_latte": {"name": "Caffe Lattes", "icon": "mdi:glass-mug-variant", "unit": "cups"},
+    "flat_white": {"name": "Flat Whites", "icon": "mdi:coffee", "unit": "cups"},
+    "hot_water": {"name": "Hot Waters", "icon": "mdi:water-boiler", "unit": "cups"},
+    "tea": {"name": "Teas", "icon": "mdi:tea", "unit": "cups"},
+    "grounds_count": {"name": "Grounds Ejected", "icon": "mdi:delete-variant", "unit": "pucks"},
+    "descale_count": {"name": "Descales Done", "icon": "mdi:water-check", "unit": "times"},
+    "total_water_ml": {"name": "Total Water Used", "icon": "mdi:water", "unit": "mL"},
+    "grounds_percentage": {"name": "Grounds Container", "icon": "mdi:delete-variant", "unit": "%"},
+}
+
+
+def _device_info(dsn: str, model: str, device_name: str, sw_version: str | None) -> dict[str, Any]:
+    """Build consistent device_info dict."""
+    info: dict[str, Any] = {
+        "identifiers": {(DOMAIN, dsn)},
+        "name": device_name,
+        "manufacturer": "De'Longhi",
+        "model": model,
+    }
+    if sw_version:
+        info["sw_version"] = sw_version
+    return info
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Set up sensor entities."""
+    data: dict[str, Any] = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DeLonghiCoordinator = data["coordinator"]
+    dsn: str = data["dsn"]
+    model: str = data["model"]
+    device_name: str = data["device_name"]
+    sw_version: str | None = data.get("sw_version")
+
+    entities: list[SensorEntity] = []
+
+    # Status sensor
+    entities.append(DeLonghiStatusSensor(coordinator, dsn, model, device_name, sw_version))
+
+    # Counter sensors
+    for key, meta in COUNTER_SENSORS.items():
+        entities.append(DeLonghiCounterSensor(coordinator, dsn, model, device_name, sw_version, key, meta))
+
+    async_add_entities(entities)
+
+
+class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
+    """Machine status sensor."""
+
+    def __init__(
+        self,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_status"
+        self._attr_name = "Coffee Machine Status"
+        self._attr_icon = "mdi:coffee-maker"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def native_value(self) -> str:
+        """Return current machine state."""
+        return self.coordinator.data.get("machine_state", "Unknown")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        alarms: list[dict[str, Any]] = self.coordinator.data.get("alarms", [])
+        return {
+            "cloud_status": self.coordinator.data.get("status", "UNKNOWN"),
+            "profile": self.coordinator.data.get("profile", 0),
+            "active_alarms": [a["name"] for a in alarms],
+            "alarm_count": len(alarms),
+        }
+
+
+class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
+    """Beverage counter sensor."""
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(
+        self,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+        counter_key: str,
+        meta: dict[str, str],
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsn = dsn
+        self._counter_key = counter_key
+        self._attr_unique_id = f"{dsn}_{counter_key}"
+        self._attr_name = f"Coffee {meta['name']}"
+        self._attr_icon = meta["icon"]
+        self._attr_native_unit_of_measurement = meta["unit"]
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def native_value(self) -> int | None:
+        """Return current counter value."""
+        counters: dict[str, Any] = self.coordinator.data.get("counters", {})
+        return counters.get(self._counter_key)
