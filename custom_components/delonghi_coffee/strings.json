@@ -28,5 +28,64 @@
       "already_configured": "This account is already configured",
       "reauth_successful": "Re-authentication successful"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Machine Status" },
+      "total_beverages": { "name": "Total Beverages" },
+      "total_espressos": { "name": "Total Espressos" },
+      "espresso": { "name": "Espressos" },
+      "coffee": { "name": "Coffees" },
+      "long_coffee": { "name": "Long Coffees" },
+      "doppio": { "name": "Doppios" },
+      "americano": { "name": "Americanos" },
+      "cappuccino": { "name": "Cappuccinos" },
+      "latte_macchiato": { "name": "Latte Macchiatos" },
+      "caffe_latte": { "name": "Caffè Lattes" },
+      "flat_white": { "name": "Flat Whites" },
+      "espresso_macchiato": { "name": "Espresso Macchiatos" },
+      "hot_milk": { "name": "Hot Milks" },
+      "cappuccino_doppio": { "name": "Cappuccino Doppios" },
+      "cappuccino_mix": { "name": "Cappuccino Mix" },
+      "hot_water": { "name": "Hot Waters" },
+      "tea": { "name": "Teas" },
+      "coffee_pot": { "name": "Coffee Pots" },
+      "brew_over_ice": { "name": "Brew Over Ice" },
+      "grounds_count": { "name": "Grounds Ejected" },
+      "grounds_percentage": { "name": "Grounds Container" },
+      "descale_count": { "name": "Descales Done" },
+      "descale_progress": { "name": "Descale Progress" },
+      "total_water_ml": { "name": "Total Water Used" },
+      "filter_percentage": { "name": "Water Filter Usage" },
+      "filter_replacements": { "name": "Filter Replacements" },
+      "water_through_filter_ml": { "name": "Water Through Filter" },
+      "usage_tot_custom_b_bw": { "name": "Custom Beverages" },
+      "other_tot_bev_other": { "name": "Other Beverages" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Water Tank Empty" },
+      "alarm_1": { "name": "Grounds Container Full" },
+      "alarm_2": { "name": "Descale Needed" },
+      "alarm_3": { "name": "Replace Water Filter" },
+      "alarm_4": { "name": "Coffee Ground Too Fine" },
+      "alarm_5": { "name": "Coffee Beans Empty" },
+      "alarm_6": { "name": "Machine Service Required" },
+      "alarm_7": { "name": "Heater Probe Failure" },
+      "alarm_8": { "name": "Too Much Coffee" },
+      "alarm_9": { "name": "Infuser Motor Failure" },
+      "alarm_10": { "name": "Steamer Probe Failure" },
+      "alarm_11": { "name": "Drip Tray Missing" },
+      "alarm_12": { "name": "Hydraulic Problem" },
+      "alarm_13": { "name": "Tank In Position" },
+      "alarm_14": { "name": "Clean Milk Knob" },
+      "alarm_15": { "name": "Coffee Beans Empty 2" },
+      "alarm_16": { "name": "Cleaning Needed" },
+      "alarm_17": { "name": "Bean Hopper Absent" },
+      "alarm_18": { "name": "Grid Present" }
+    },
+    "button": {
+      "power_on": { "name": "Power On" },
+      "power_off": { "name": "Power Off" }
+    }
   }
 }

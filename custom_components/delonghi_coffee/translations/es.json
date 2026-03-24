@@ -28,5 +28,64 @@
       "already_configured": "Esta cuenta ya está configurada",
       "reauth_successful": "Reautenticación exitosa"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Estado de la máquina" },
+      "total_beverages": { "name": "Total bebidas" },
+      "total_espressos": { "name": "Total espressos" },
+      "espresso": { "name": "Espressos" },
+      "coffee": { "name": "Cafés" },
+      "long_coffee": { "name": "Cafés largos" },
+      "doppio": { "name": "Doppios" },
+      "americano": { "name": "Americanos" },
+      "cappuccino": { "name": "Cappuccinos" },
+      "latte_macchiato": { "name": "Latte Macchiatos" },
+      "caffe_latte": { "name": "Caffè Lattes" },
+      "flat_white": { "name": "Flat Whites" },
+      "espresso_macchiato": { "name": "Espresso Macchiatos" },
+      "hot_milk": { "name": "Leches calientes" },
+      "cappuccino_doppio": { "name": "Cappuccino Doppios" },
+      "cappuccino_mix": { "name": "Cappuccino Mix" },
+      "hot_water": { "name": "Aguas calientes" },
+      "tea": { "name": "Tés" },
+      "coffee_pot": { "name": "Cafeteras" },
+      "brew_over_ice": { "name": "Café con hielo" },
+      "grounds_count": { "name": "Borras expulsadas" },
+      "grounds_percentage": { "name": "Contenedor de borras" },
+      "descale_count": { "name": "Descalcificaciones realizadas" },
+      "descale_progress": { "name": "Progreso descalcificación" },
+      "total_water_ml": { "name": "Agua total usada" },
+      "filter_percentage": { "name": "Uso del filtro de agua" },
+      "filter_replacements": { "name": "Reemplazos de filtro" },
+      "water_through_filter_ml": { "name": "Agua a través del filtro" },
+      "usage_tot_custom_b_bw": { "name": "Bebidas personalizadas" },
+      "other_tot_bev_other": { "name": "Otras bebidas" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Depósito de agua vacío" },
+      "alarm_1": { "name": "Contenedor de borras lleno" },
+      "alarm_2": { "name": "Descalcificación necesaria" },
+      "alarm_3": { "name": "Reemplazar filtro de agua" },
+      "alarm_4": { "name": "Molienda demasiado fina" },
+      "alarm_5": { "name": "Granos de café vacíos" },
+      "alarm_6": { "name": "Servicio de máquina requerido" },
+      "alarm_7": { "name": "Fallo de sonda de calentamiento" },
+      "alarm_8": { "name": "Demasiado café" },
+      "alarm_9": { "name": "Fallo del motor del infusor" },
+      "alarm_10": { "name": "Fallo de sonda de vapor" },
+      "alarm_11": { "name": "Bandeja de goteo ausente" },
+      "alarm_12": { "name": "Problema hidráulico" },
+      "alarm_13": { "name": "Depósito en posición" },
+      "alarm_14": { "name": "Limpiar boquilla de leche" },
+      "alarm_15": { "name": "Granos de café vacíos 2" },
+      "alarm_16": { "name": "Limpieza necesaria" },
+      "alarm_17": { "name": "Tolva de granos ausente" },
+      "alarm_18": { "name": "Rejilla presente" }
+    },
+    "button": {
+      "power_on": { "name": "Encender" },
+      "power_off": { "name": "Apagar" }
+    }
   }
 }

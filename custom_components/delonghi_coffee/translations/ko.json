@@ -28,5 +28,64 @@
       "already_configured": "이 계정은 이미 구성되어 있습니다",
       "reauth_successful": "재인증 성공"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "머신 상태" },
+      "total_beverages": { "name": "총 음료 수" },
+      "total_espressos": { "name": "총 에스프레소 수" },
+      "espresso": { "name": "에스프레소" },
+      "coffee": { "name": "커피" },
+      "long_coffee": { "name": "롱 커피" },
+      "doppio": { "name": "도피오" },
+      "americano": { "name": "아메리카노" },
+      "cappuccino": { "name": "카푸치노" },
+      "latte_macchiato": { "name": "라떼 마끼아또" },
+      "caffe_latte": { "name": "카페라떼" },
+      "flat_white": { "name": "플랫 화이트" },
+      "espresso_macchiato": { "name": "에스프레소 마끼아또" },
+      "hot_milk": { "name": "따뜻한 우유" },
+      "cappuccino_doppio": { "name": "카푸치노 도피오" },
+      "cappuccino_mix": { "name": "카푸치노 믹스" },
+      "hot_water": { "name": "뜨거운 물" },
+      "tea": { "name": "차" },
+      "coffee_pot": { "name": "커피 포트" },
+      "brew_over_ice": { "name": "아이스 커피" },
+      "grounds_count": { "name": "배출된 찌꺼기" },
+      "grounds_percentage": { "name": "찌꺼기 용기" },
+      "descale_count": { "name": "석회 제거 완료 횟수" },
+      "descale_progress": { "name": "석회 제거 진행률" },
+      "total_water_ml": { "name": "총 사용 수량" },
+      "filter_percentage": { "name": "정수 필터 사용률" },
+      "filter_replacements": { "name": "필터 교체 횟수" },
+      "water_through_filter_ml": { "name": "필터 통과 수량" },
+      "usage_tot_custom_b_bw": { "name": "사용자 정의 음료" },
+      "other_tot_bev_other": { "name": "기타 음료" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "물탱크 비어있음" },
+      "alarm_1": { "name": "찌꺼기 용기 가득 참" },
+      "alarm_2": { "name": "석회 제거 필요" },
+      "alarm_3": { "name": "정수 필터 교체" },
+      "alarm_4": { "name": "커피 분쇄 너무 가늘음" },
+      "alarm_5": { "name": "커피 원두 없음" },
+      "alarm_6": { "name": "머신 서비스 필요" },
+      "alarm_7": { "name": "히터 프로브 고장" },
+      "alarm_8": { "name": "커피 과다" },
+      "alarm_9": { "name": "추출 모터 고장" },
+      "alarm_10": { "name": "스팀 프로브 고장" },
+      "alarm_11": { "name": "드립 트레이 없음" },
+      "alarm_12": { "name": "수압 문제" },
+      "alarm_13": { "name": "탱크 제자리" },
+      "alarm_14": { "name": "우유 노즐 청소" },
+      "alarm_15": { "name": "커피 원두 없음 2" },
+      "alarm_16": { "name": "청소 필요" },
+      "alarm_17": { "name": "원두 호퍼 없음" },
+      "alarm_18": { "name": "그리드 있음" }
+    },
+    "button": {
+      "power_on": { "name": "전원 켜기" },
+      "power_off": { "name": "전원 끄기" }
+    }
   }
 }

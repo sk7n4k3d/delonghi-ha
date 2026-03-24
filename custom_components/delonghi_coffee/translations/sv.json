@@ -28,5 +28,64 @@
       "already_configured": "Detta konto är redan konfigurerat",
       "reauth_successful": "Återautentisering lyckades"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Maskinstatus" },
+      "total_beverages": { "name": "Totalt antal drycker" },
+      "total_espressos": { "name": "Totalt antal espresso" },
+      "espresso": { "name": "Espresso" },
+      "coffee": { "name": "Kaffe" },
+      "long_coffee": { "name": "Långkaffe" },
+      "doppio": { "name": "Doppio" },
+      "americano": { "name": "Americano" },
+      "cappuccino": { "name": "Cappuccino" },
+      "latte_macchiato": { "name": "Latte Macchiato" },
+      "caffe_latte": { "name": "Caffè Latte" },
+      "flat_white": { "name": "Flat White" },
+      "espresso_macchiato": { "name": "Espresso Macchiato" },
+      "hot_milk": { "name": "Varm mjölk" },
+      "cappuccino_doppio": { "name": "Cappuccino Doppio" },
+      "cappuccino_mix": { "name": "Cappuccino Mix" },
+      "hot_water": { "name": "Varmt vatten" },
+      "tea": { "name": "Te" },
+      "coffee_pot": { "name": "Kaffekannor" },
+      "brew_over_ice": { "name": "Iskaffe" },
+      "grounds_count": { "name": "Sump utmatad" },
+      "grounds_percentage": { "name": "Sumpbehållare" },
+      "descale_count": { "name": "Avkalkningar utförda" },
+      "descale_progress": { "name": "Avkalkningsförlopp" },
+      "total_water_ml": { "name": "Totalt vatten använt" },
+      "filter_percentage": { "name": "Vattenfilteranvändning" },
+      "filter_replacements": { "name": "Filterbyten" },
+      "water_through_filter_ml": { "name": "Vatten genom filter" },
+      "usage_tot_custom_b_bw": { "name": "Anpassade drycker" },
+      "other_tot_bev_other": { "name": "Andra drycker" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Vattentank tom" },
+      "alarm_1": { "name": "Sumpbehållare full" },
+      "alarm_2": { "name": "Avkalkning behövs" },
+      "alarm_3": { "name": "Byt vattenfilter" },
+      "alarm_4": { "name": "Kaffe malt för fint" },
+      "alarm_5": { "name": "Kaffebönor slut" },
+      "alarm_6": { "name": "Maskinservice krävs" },
+      "alarm_7": { "name": "Värmeprobfel" },
+      "alarm_8": { "name": "För mycket kaffe" },
+      "alarm_9": { "name": "Bryggmotorfel" },
+      "alarm_10": { "name": "Ångprobfel" },
+      "alarm_11": { "name": "Droppskål saknas" },
+      "alarm_12": { "name": "Hydrauliskt problem" },
+      "alarm_13": { "name": "Tank på plats" },
+      "alarm_14": { "name": "Rengör mjölkmunstycke" },
+      "alarm_15": { "name": "Kaffebönor slut 2" },
+      "alarm_16": { "name": "Rengöring behövs" },
+      "alarm_17": { "name": "Bönbehållare saknas" },
+      "alarm_18": { "name": "Galler på plats" }
+    },
+    "button": {
+      "power_on": { "name": "Slå på" },
+      "power_off": { "name": "Stäng av" }
+    }
   }
 }

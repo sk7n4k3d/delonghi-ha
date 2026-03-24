@@ -59,7 +59,8 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
         super().__init__(coordinator)
         self._alarm_bit = alarm_bit
         self._attr_unique_id = f"{dsn}_alarm_{alarm_bit}"
-        self._attr_name = f"Coffee {meta['name']}"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = f"alarm_{alarm_bit}"
         self._attr_icon = meta["icon"]
         self._attr_device_info: dict[str, Any] = {
             "identifiers": {(DOMAIN, dsn)},

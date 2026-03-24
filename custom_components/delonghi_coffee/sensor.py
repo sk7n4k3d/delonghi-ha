@@ -102,7 +102,8 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
         super().__init__(coordinator)
         self._dsn = dsn
         self._attr_unique_id = f"{dsn}_status"
-        self._attr_name = "Coffee Machine Status"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "machine_status"
         self._attr_icon = "mdi:coffee-maker"
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
@@ -142,7 +143,8 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         self._dsn = dsn
         self._counter_key = counter_key
         self._attr_unique_id = f"{dsn}_{counter_key}"
-        self._attr_name = f"Coffee {meta['name']}"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = counter_key
         self._attr_icon = meta["icon"]
         self._attr_native_unit_of_measurement = meta["unit"]
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)

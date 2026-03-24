@@ -78,6 +78,7 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         self._dsn = dsn
         self._beverage_key = beverage_key
         self._attr_unique_id = f"{dsn}_brew_{beverage_key}"
+        self._attr_has_entity_name = True
         self._attr_name = f"Brew {meta['name']}"
         self._attr_icon = meta["icon"]
         self._attr_device_info: dict[str, Any] = {
@@ -122,7 +123,8 @@ class DeLonghiPowerOnButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity
         self._api = api
         self._dsn = dsn
         self._attr_unique_id = f"{dsn}_power_on"
-        self._attr_name = "Power On"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "power_on"
         self._attr_icon = "mdi:power"
         self._attr_device_info: dict[str, Any] = {
             "identifiers": {(DOMAIN, dsn)},
@@ -162,7 +164,8 @@ class DeLonghiPowerOffButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntit
         self._api = api
         self._dsn = dsn
         self._attr_unique_id = f"{dsn}_power_off"
-        self._attr_name = "Power Off"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "power_off"
         self._attr_icon = "mdi:power-off"
         self._attr_device_info: dict[str, Any] = {
             "identifiers": {(DOMAIN, dsn)},

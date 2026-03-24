@@ -28,5 +28,64 @@
       "already_configured": "Questo account è già configurato",
       "reauth_successful": "Riautenticazione riuscita"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Stato della macchina" },
+      "total_beverages": { "name": "Totale bevande" },
+      "total_espressos": { "name": "Totale espressos" },
+      "espresso": { "name": "Espressos" },
+      "coffee": { "name": "Caffè" },
+      "long_coffee": { "name": "Caffè lunghi" },
+      "doppio": { "name": "Doppios" },
+      "americano": { "name": "Americanos" },
+      "cappuccino": { "name": "Cappuccini" },
+      "latte_macchiato": { "name": "Latte Macchiati" },
+      "caffe_latte": { "name": "Caffellatte" },
+      "flat_white": { "name": "Flat White" },
+      "espresso_macchiato": { "name": "Espresso Macchiati" },
+      "hot_milk": { "name": "Latte caldo" },
+      "cappuccino_doppio": { "name": "Cappuccino Doppio" },
+      "cappuccino_mix": { "name": "Cappuccino Mix" },
+      "hot_water": { "name": "Acqua calda" },
+      "tea": { "name": "Tè" },
+      "coffee_pot": { "name": "Caffettiere" },
+      "brew_over_ice": { "name": "Caffè freddo" },
+      "grounds_count": { "name": "Fondi espulsi" },
+      "grounds_percentage": { "name": "Contenitore fondi" },
+      "descale_count": { "name": "Decalcificazioni effettuate" },
+      "descale_progress": { "name": "Progresso decalcificazione" },
+      "total_water_ml": { "name": "Acqua totale usata" },
+      "filter_percentage": { "name": "Utilizzo filtro acqua" },
+      "filter_replacements": { "name": "Sostituzioni filtro" },
+      "water_through_filter_ml": { "name": "Acqua attraverso il filtro" },
+      "usage_tot_custom_b_bw": { "name": "Bevande personalizzate" },
+      "other_tot_bev_other": { "name": "Altre bevande" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Serbatoio acqua vuoto" },
+      "alarm_1": { "name": "Contenitore fondi pieno" },
+      "alarm_2": { "name": "Decalcificazione necessaria" },
+      "alarm_3": { "name": "Sostituire filtro acqua" },
+      "alarm_4": { "name": "Macinatura troppo fine" },
+      "alarm_5": { "name": "Chicchi di caffè esauriti" },
+      "alarm_6": { "name": "Manutenzione macchina richiesta" },
+      "alarm_7": { "name": "Guasto sonda riscaldamento" },
+      "alarm_8": { "name": "Troppo caffè" },
+      "alarm_9": { "name": "Guasto motore infusore" },
+      "alarm_10": { "name": "Guasto sonda vapore" },
+      "alarm_11": { "name": "Vaschetta raccogli gocce assente" },
+      "alarm_12": { "name": "Problema idraulico" },
+      "alarm_13": { "name": "Serbatoio in posizione" },
+      "alarm_14": { "name": "Pulire beccuccio latte" },
+      "alarm_15": { "name": "Chicchi di caffè esauriti 2" },
+      "alarm_16": { "name": "Pulizia necessaria" },
+      "alarm_17": { "name": "Tramoggia chicchi assente" },
+      "alarm_18": { "name": "Griglia presente" }
+    },
+    "button": {
+      "power_on": { "name": "Accendi" },
+      "power_off": { "name": "Spegni" }
+    }
   }
 }

@@ -28,5 +28,64 @@
       "already_configured": "Dit account is al geconfigureerd",
       "reauth_successful": "Herauthenticatie geslaagd"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Machinestatus" },
+      "total_beverages": { "name": "Totaal dranken" },
+      "total_espressos": { "name": "Totaal espresso's" },
+      "espresso": { "name": "Espresso's" },
+      "coffee": { "name": "Koffie" },
+      "long_coffee": { "name": "Lange koffie" },
+      "doppio": { "name": "Doppio's" },
+      "americano": { "name": "Americano's" },
+      "cappuccino": { "name": "Cappuccino's" },
+      "latte_macchiato": { "name": "Latte Macchiato's" },
+      "caffe_latte": { "name": "Caffè Latte's" },
+      "flat_white": { "name": "Flat Whites" },
+      "espresso_macchiato": { "name": "Espresso Macchiato's" },
+      "hot_milk": { "name": "Warme melk" },
+      "cappuccino_doppio": { "name": "Cappuccino Doppio's" },
+      "cappuccino_mix": { "name": "Cappuccino Mix" },
+      "hot_water": { "name": "Warm water" },
+      "tea": { "name": "Thee" },
+      "coffee_pot": { "name": "Koffiekannen" },
+      "brew_over_ice": { "name": "IJskoffie" },
+      "grounds_count": { "name": "Koffiedik uitgeworpen" },
+      "grounds_percentage": { "name": "Koffiedikbak" },
+      "descale_count": { "name": "Ontkalkingen uitgevoerd" },
+      "descale_progress": { "name": "Ontkalkingsvoortgang" },
+      "total_water_ml": { "name": "Totaal water gebruikt" },
+      "filter_percentage": { "name": "Waterfiltergebruik" },
+      "filter_replacements": { "name": "Filtervervangingen" },
+      "water_through_filter_ml": { "name": "Water door filter" },
+      "usage_tot_custom_b_bw": { "name": "Aangepaste dranken" },
+      "other_tot_bev_other": { "name": "Andere dranken" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Watertank leeg" },
+      "alarm_1": { "name": "Koffiedikbak vol" },
+      "alarm_2": { "name": "Ontkalking nodig" },
+      "alarm_3": { "name": "Waterfilter vervangen" },
+      "alarm_4": { "name": "Maalgraad te fijn" },
+      "alarm_5": { "name": "Koffiebonen leeg" },
+      "alarm_6": { "name": "Machineonderhoud vereist" },
+      "alarm_7": { "name": "Verwarmingssonde storing" },
+      "alarm_8": { "name": "Te veel koffie" },
+      "alarm_9": { "name": "Zetgroepmotor storing" },
+      "alarm_10": { "name": "Stoomsonde storing" },
+      "alarm_11": { "name": "Lekbak ontbreekt" },
+      "alarm_12": { "name": "Hydraulisch probleem" },
+      "alarm_13": { "name": "Tank in positie" },
+      "alarm_14": { "name": "Melksproeier reinigen" },
+      "alarm_15": { "name": "Koffiebonen leeg 2" },
+      "alarm_16": { "name": "Reiniging nodig" },
+      "alarm_17": { "name": "Bonenreservoir ontbreekt" },
+      "alarm_18": { "name": "Rooster aanwezig" }
+    },
+    "button": {
+      "power_on": { "name": "Inschakelen" },
+      "power_off": { "name": "Uitschakelen" }
+    }
   }
 }

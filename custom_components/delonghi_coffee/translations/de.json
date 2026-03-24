@@ -28,5 +28,64 @@
       "already_configured": "Dieses Konto ist bereits konfiguriert",
       "reauth_successful": "Erneute Authentifizierung erfolgreich"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Maschinenstatus" },
+      "total_beverages": { "name": "Getränke gesamt" },
+      "total_espressos": { "name": "Espressos gesamt" },
+      "espresso": { "name": "Espressos" },
+      "coffee": { "name": "Kaffees" },
+      "long_coffee": { "name": "Lange Kaffees" },
+      "doppio": { "name": "Doppios" },
+      "americano": { "name": "Americanos" },
+      "cappuccino": { "name": "Cappuccinos" },
+      "latte_macchiato": { "name": "Latte Macchiatos" },
+      "caffe_latte": { "name": "Caffè Lattes" },
+      "flat_white": { "name": "Flat Whites" },
+      "espresso_macchiato": { "name": "Espresso Macchiatos" },
+      "hot_milk": { "name": "Heiße Milch" },
+      "cappuccino_doppio": { "name": "Cappuccino Doppios" },
+      "cappuccino_mix": { "name": "Cappuccino Mix" },
+      "hot_water": { "name": "Heißes Wasser" },
+      "tea": { "name": "Tees" },
+      "coffee_pot": { "name": "Kaffeekannen" },
+      "brew_over_ice": { "name": "Eiskaffee" },
+      "grounds_count": { "name": "Trester ausgeworfen" },
+      "grounds_percentage": { "name": "Tresterbehälter" },
+      "descale_count": { "name": "Entkalkungen durchgeführt" },
+      "descale_progress": { "name": "Entkalkungsfortschritt" },
+      "total_water_ml": { "name": "Wasser gesamt verbraucht" },
+      "filter_percentage": { "name": "Wasserfilternutzung" },
+      "filter_replacements": { "name": "Filterwechsel" },
+      "water_through_filter_ml": { "name": "Wasser durch Filter" },
+      "usage_tot_custom_b_bw": { "name": "Individuelle Getränke" },
+      "other_tot_bev_other": { "name": "Andere Getränke" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Wassertank leer" },
+      "alarm_1": { "name": "Tresterbehälter voll" },
+      "alarm_2": { "name": "Entkalkung erforderlich" },
+      "alarm_3": { "name": "Wasserfilter wechseln" },
+      "alarm_4": { "name": "Mahlgrad zu fein" },
+      "alarm_5": { "name": "Kaffeebohnen leer" },
+      "alarm_6": { "name": "Maschinenwartung erforderlich" },
+      "alarm_7": { "name": "Heizsondenfehler" },
+      "alarm_8": { "name": "Zu viel Kaffee" },
+      "alarm_9": { "name": "Brühgruppenmotorfehler" },
+      "alarm_10": { "name": "Dampfsondenfehler" },
+      "alarm_11": { "name": "Abtropfschale fehlt" },
+      "alarm_12": { "name": "Hydraulisches Problem" },
+      "alarm_13": { "name": "Tank in Position" },
+      "alarm_14": { "name": "Milchdüse reinigen" },
+      "alarm_15": { "name": "Kaffeebohnen leer 2" },
+      "alarm_16": { "name": "Reinigung erforderlich" },
+      "alarm_17": { "name": "Bohnenbehälter fehlt" },
+      "alarm_18": { "name": "Gitter vorhanden" }
+    },
+    "button": {
+      "power_on": { "name": "Einschalten" },
+      "power_off": { "name": "Ausschalten" }
+    }
   }
 }

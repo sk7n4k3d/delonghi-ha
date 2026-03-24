@@ -28,5 +28,64 @@
       "already_configured": "此账户已配置",
       "reauth_successful": "重新验证成功"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "机器状态" },
+      "total_beverages": { "name": "总饮品数" },
+      "total_espressos": { "name": "总浓缩咖啡数" },
+      "espresso": { "name": "浓缩咖啡" },
+      "coffee": { "name": "咖啡" },
+      "long_coffee": { "name": "长咖啡" },
+      "doppio": { "name": "双份浓缩" },
+      "americano": { "name": "美式咖啡" },
+      "cappuccino": { "name": "卡布奇诺" },
+      "latte_macchiato": { "name": "拿铁玛奇朵" },
+      "caffe_latte": { "name": "拿铁咖啡" },
+      "flat_white": { "name": "馥芮白" },
+      "espresso_macchiato": { "name": "浓缩玛奇朵" },
+      "hot_milk": { "name": "热牛奶" },
+      "cappuccino_doppio": { "name": "双份卡布奇诺" },
+      "cappuccino_mix": { "name": "卡布奇诺混合" },
+      "hot_water": { "name": "热水" },
+      "tea": { "name": "茶" },
+      "coffee_pot": { "name": "咖啡壶" },
+      "brew_over_ice": { "name": "冰咖啡" },
+      "grounds_count": { "name": "咖啡渣排出" },
+      "grounds_percentage": { "name": "咖啡渣容器" },
+      "descale_count": { "name": "除垢完成次数" },
+      "descale_progress": { "name": "除垢进度" },
+      "total_water_ml": { "name": "总用水量" },
+      "filter_percentage": { "name": "滤水器使用率" },
+      "filter_replacements": { "name": "滤芯更换次数" },
+      "water_through_filter_ml": { "name": "经过滤器的水量" },
+      "usage_tot_custom_b_bw": { "name": "自定义饮品" },
+      "other_tot_bev_other": { "name": "其他饮品" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "水箱为空" },
+      "alarm_1": { "name": "咖啡渣容器已满" },
+      "alarm_2": { "name": "需要除垢" },
+      "alarm_3": { "name": "更换滤水器" },
+      "alarm_4": { "name": "咖啡研磨过细" },
+      "alarm_5": { "name": "咖啡豆用尽" },
+      "alarm_6": { "name": "需要机器维修" },
+      "alarm_7": { "name": "加热探头故障" },
+      "alarm_8": { "name": "咖啡过多" },
+      "alarm_9": { "name": "冲泡器电机故障" },
+      "alarm_10": { "name": "蒸汽探头故障" },
+      "alarm_11": { "name": "滴水盘缺失" },
+      "alarm_12": { "name": "液压问题" },
+      "alarm_13": { "name": "水箱就位" },
+      "alarm_14": { "name": "清洁牛奶喷嘴" },
+      "alarm_15": { "name": "咖啡豆用尽 2" },
+      "alarm_16": { "name": "需要清洁" },
+      "alarm_17": { "name": "豆仓缺失" },
+      "alarm_18": { "name": "网格就位" }
+    },
+    "button": {
+      "power_on": { "name": "开机" },
+      "power_off": { "name": "关机" }
+    }
   }
 }

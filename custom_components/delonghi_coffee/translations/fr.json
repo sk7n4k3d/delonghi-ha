@@ -28,5 +28,64 @@
       "already_configured": "Ce compte est deja configure",
       "reauth_successful": "Re-authentification reussie"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "État de la machine" },
+      "total_beverages": { "name": "Total boissons" },
+      "total_espressos": { "name": "Total espressos" },
+      "espresso": { "name": "Espressos" },
+      "coffee": { "name": "Cafés" },
+      "long_coffee": { "name": "Cafés longs" },
+      "doppio": { "name": "Doppios" },
+      "americano": { "name": "Americanos" },
+      "cappuccino": { "name": "Cappuccinos" },
+      "latte_macchiato": { "name": "Latte Macchiatos" },
+      "caffe_latte": { "name": "Caffè Lattes" },
+      "flat_white": { "name": "Flat Whites" },
+      "espresso_macchiato": { "name": "Espresso Macchiatos" },
+      "hot_milk": { "name": "Laits chauds" },
+      "cappuccino_doppio": { "name": "Cappuccino Doppios" },
+      "cappuccino_mix": { "name": "Cappuccino Mix" },
+      "hot_water": { "name": "Eaux chaudes" },
+      "tea": { "name": "Thés" },
+      "coffee_pot": { "name": "Cafetières" },
+      "brew_over_ice": { "name": "Cafés glacés" },
+      "grounds_count": { "name": "Marcs éjectés" },
+      "grounds_percentage": { "name": "Bac à marc" },
+      "descale_count": { "name": "Détartrages effectués" },
+      "descale_progress": { "name": "Progression détartrage" },
+      "total_water_ml": { "name": "Eau totale utilisée" },
+      "filter_percentage": { "name": "Utilisation filtre à eau" },
+      "filter_replacements": { "name": "Remplacements de filtre" },
+      "water_through_filter_ml": { "name": "Eau passée dans le filtre" },
+      "usage_tot_custom_b_bw": { "name": "Boissons personnalisées" },
+      "other_tot_bev_other": { "name": "Autres boissons" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Réservoir d'eau vide" },
+      "alarm_1": { "name": "Bac à marc plein" },
+      "alarm_2": { "name": "Détartrage nécessaire" },
+      "alarm_3": { "name": "Remplacer le filtre à eau" },
+      "alarm_4": { "name": "Mouture trop fine" },
+      "alarm_5": { "name": "Bac à grains vide" },
+      "alarm_6": { "name": "Entretien machine requis" },
+      "alarm_7": { "name": "Défaillance sonde chauffage" },
+      "alarm_8": { "name": "Trop de café" },
+      "alarm_9": { "name": "Défaillance moteur infuseur" },
+      "alarm_10": { "name": "Défaillance sonde vapeur" },
+      "alarm_11": { "name": "Bac d'égouttage absent" },
+      "alarm_12": { "name": "Problème hydraulique" },
+      "alarm_13": { "name": "Réservoir en position" },
+      "alarm_14": { "name": "Nettoyer la buse à lait" },
+      "alarm_15": { "name": "Bac à grains vide 2" },
+      "alarm_16": { "name": "Nettoyage nécessaire" },
+      "alarm_17": { "name": "Trémie à grains absente" },
+      "alarm_18": { "name": "Grille présente" }
+    },
+    "button": {
+      "power_on": { "name": "Allumer" },
+      "power_off": { "name": "Éteindre" }
+    }
   }
 }

@@ -28,5 +28,64 @@
       "already_configured": "Этот аккаунт уже настроен",
       "reauth_successful": "Повторная аутентификация выполнена успешно"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "Состояние машины" },
+      "total_beverages": { "name": "Всего напитков" },
+      "total_espressos": { "name": "Всего эспрессо" },
+      "espresso": { "name": "Эспрессо" },
+      "coffee": { "name": "Кофе" },
+      "long_coffee": { "name": "Длинный кофе" },
+      "doppio": { "name": "Доппио" },
+      "americano": { "name": "Американо" },
+      "cappuccino": { "name": "Капучино" },
+      "latte_macchiato": { "name": "Латте Макиато" },
+      "caffe_latte": { "name": "Кафе Латте" },
+      "flat_white": { "name": "Флэт Уайт" },
+      "espresso_macchiato": { "name": "Эспрессо Макиато" },
+      "hot_milk": { "name": "Горячее молоко" },
+      "cappuccino_doppio": { "name": "Капучино Доппио" },
+      "cappuccino_mix": { "name": "Капучино Микс" },
+      "hot_water": { "name": "Горячая вода" },
+      "tea": { "name": "Чай" },
+      "coffee_pot": { "name": "Кофейники" },
+      "brew_over_ice": { "name": "Кофе со льдом" },
+      "grounds_count": { "name": "Жмых выброшен" },
+      "grounds_percentage": { "name": "Контейнер для жмыха" },
+      "descale_count": { "name": "Очисток от накипи выполнено" },
+      "descale_progress": { "name": "Прогресс очистки от накипи" },
+      "total_water_ml": { "name": "Всего воды использовано" },
+      "filter_percentage": { "name": "Использование водяного фильтра" },
+      "filter_replacements": { "name": "Замены фильтра" },
+      "water_through_filter_ml": { "name": "Воды через фильтр" },
+      "usage_tot_custom_b_bw": { "name": "Пользовательские напитки" },
+      "other_tot_bev_other": { "name": "Другие напитки" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "Бак для воды пуст" },
+      "alarm_1": { "name": "Контейнер для жмыха полон" },
+      "alarm_2": { "name": "Требуется очистка от накипи" },
+      "alarm_3": { "name": "Замените водяной фильтр" },
+      "alarm_4": { "name": "Слишком мелкий помол" },
+      "alarm_5": { "name": "Кофейные зёрна закончились" },
+      "alarm_6": { "name": "Требуется обслуживание машины" },
+      "alarm_7": { "name": "Неисправность нагревательного датчика" },
+      "alarm_8": { "name": "Слишком много кофе" },
+      "alarm_9": { "name": "Неисправность мотора заварочного блока" },
+      "alarm_10": { "name": "Неисправность парового датчика" },
+      "alarm_11": { "name": "Поддон для капель отсутствует" },
+      "alarm_12": { "name": "Гидравлическая проблема" },
+      "alarm_13": { "name": "Бак на месте" },
+      "alarm_14": { "name": "Очистите молочный носик" },
+      "alarm_15": { "name": "Кофейные зёрна закончились 2" },
+      "alarm_16": { "name": "Требуется очистка" },
+      "alarm_17": { "name": "Бункер для зёрен отсутствует" },
+      "alarm_18": { "name": "Решётка на месте" }
+    },
+    "button": {
+      "power_on": { "name": "Включить" },
+      "power_off": { "name": "Выключить" }
+    }
   }
 }

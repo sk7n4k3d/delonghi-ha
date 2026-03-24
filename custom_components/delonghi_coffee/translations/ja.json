@@ -28,5 +28,64 @@
       "already_configured": "このアカウントは既に設定されています",
       "reauth_successful": "再認証に成功しました"
     }
+  },
+  "entity": {
+    "sensor": {
+      "machine_status": { "name": "マシンの状態" },
+      "total_beverages": { "name": "合計飲料数" },
+      "total_espressos": { "name": "合計エスプレッソ数" },
+      "espresso": { "name": "エスプレッソ" },
+      "coffee": { "name": "コーヒー" },
+      "long_coffee": { "name": "ロングコーヒー" },
+      "doppio": { "name": "ドッピオ" },
+      "americano": { "name": "アメリカーノ" },
+      "cappuccino": { "name": "カプチーノ" },
+      "latte_macchiato": { "name": "ラテマキアート" },
+      "caffe_latte": { "name": "カフェラテ" },
+      "flat_white": { "name": "フラットホワイト" },
+      "espresso_macchiato": { "name": "エスプレッソマキアート" },
+      "hot_milk": { "name": "ホットミルク" },
+      "cappuccino_doppio": { "name": "カプチーノドッピオ" },
+      "cappuccino_mix": { "name": "カプチーノミックス" },
+      "hot_water": { "name": "お湯" },
+      "tea": { "name": "お茶" },
+      "coffee_pot": { "name": "コーヒーポット" },
+      "brew_over_ice": { "name": "アイスコーヒー" },
+      "grounds_count": { "name": "排出済みコーヒーかす" },
+      "grounds_percentage": { "name": "かす容器" },
+      "descale_count": { "name": "除石灰回数" },
+      "descale_progress": { "name": "除石灰進捗" },
+      "total_water_ml": { "name": "合計使用水量" },
+      "filter_percentage": { "name": "浄水フィルター使用率" },
+      "filter_replacements": { "name": "フィルター交換回数" },
+      "water_through_filter_ml": { "name": "フィルター通過水量" },
+      "usage_tot_custom_b_bw": { "name": "カスタム飲料" },
+      "other_tot_bev_other": { "name": "その他の飲料" }
+    },
+    "binary_sensor": {
+      "alarm_0": { "name": "水タンクが空" },
+      "alarm_1": { "name": "かす容器が満杯" },
+      "alarm_2": { "name": "除石灰が必要" },
+      "alarm_3": { "name": "浄水フィルター交換" },
+      "alarm_4": { "name": "コーヒーの挽きが細かすぎ" },
+      "alarm_5": { "name": "コーヒー豆が空" },
+      "alarm_6": { "name": "マシンのサービスが必要" },
+      "alarm_7": { "name": "ヒータープローブ故障" },
+      "alarm_8": { "name": "コーヒーが多すぎ" },
+      "alarm_9": { "name": "抽出モーター故障" },
+      "alarm_10": { "name": "スチームプローブ故障" },
+      "alarm_11": { "name": "ドリップトレイがない" },
+      "alarm_12": { "name": "油圧の問題" },
+      "alarm_13": { "name": "タンクが定位置" },
+      "alarm_14": { "name": "ミルクノズルを清掃" },
+      "alarm_15": { "name": "コーヒー豆が空 2" },
+      "alarm_16": { "name": "クリーニングが必要" },
+      "alarm_17": { "name": "豆ホッパーがない" },
+      "alarm_18": { "name": "グリッドあり" }
+    },
+    "button": {
+      "power_on": { "name": "電源オン" },
+      "power_off": { "name": "電源オフ" }
+    }
   }
 }
