@@ -5,6 +5,7 @@
         "title": "De'Longhi Coffee Link",
         "description": "Enter your De'Longhi Coffee Link account credentials.",
         "data": {
+          "region": "Region",
           "email": "Email",
           "password": "Password"
         }

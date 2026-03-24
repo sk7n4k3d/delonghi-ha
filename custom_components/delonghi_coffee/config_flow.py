@@ -12,12 +12,15 @@ from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.data_entry_flow import FlowResult
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
-from .const import DOMAIN
+from .const import CONF_REGION, DOMAIN, REGIONS
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
+        vol.Required(CONF_REGION, default="EU"): vol.In(
+            {key: cfg["name"] for key, cfg in REGIONS.items()}
+        ),
         vol.Required(CONF_EMAIL): str,
         vol.Required(CONF_PASSWORD): str,
     }
@@ -33,7 +36,7 @@ STEP_REAUTH_DATA_SCHEMA = vol.Schema(
 class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for De'Longhi Coffee."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -46,8 +49,15 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            region = user_input[CONF_REGION]
+            region_cfg = REGIONS[region]
+
             try:
-                api = DeLonghiApi(user_input[CONF_EMAIL], user_input[CONF_PASSWORD])
+                api = DeLonghiApi(
+                    user_input[CONF_EMAIL],
+                    user_input[CONF_PASSWORD],
+                    region=region,
+                )
                 await self.hass.async_add_executor_job(api.authenticate)
                 devices = await self.hass.async_add_executor_job(api.get_devices)
 
@@ -63,6 +73,7 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data={
                             CONF_EMAIL: user_input[CONF_EMAIL],
                             CONF_PASSWORD: user_input[CONF_PASSWORD],
+                            CONF_REGION: region,
                             "dsn": device["dsn"],
                             "model": device.get("oem_model", "unknown"),
                             "device_name": device.get("product_name"),
@@ -100,10 +111,11 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None and self._reauth_entry is not None:
             email = self._reauth_entry.data[CONF_EMAIL]
+            region = self._reauth_entry.data.get(CONF_REGION, "EU")
             password = user_input[CONF_PASSWORD]
 
             try:
-                api = DeLonghiApi(email, password)
+                api = DeLonghiApi(email, password, region=region)
                 await self.hass.async_add_executor_job(api.authenticate)
 
                 self.hass.config_entries.async_update_entry(

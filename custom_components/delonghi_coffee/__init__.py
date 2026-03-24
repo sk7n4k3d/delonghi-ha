@@ -21,7 +21,11 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.B
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up De'Longhi Coffee from a config entry."""
-    api = DeLonghiApi(entry.data[CONF_EMAIL], entry.data[CONF_PASSWORD])
+    api = DeLonghiApi(
+        entry.data[CONF_EMAIL],
+        entry.data[CONF_PASSWORD],
+        region=entry.data.get("region", "EU"),
+    )
 
     try:
         await hass.async_add_executor_job(api.authenticate)

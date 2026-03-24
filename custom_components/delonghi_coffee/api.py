@@ -12,14 +12,12 @@ from typing import Any
 import requests
 
 from .const import (
-    AYLA_ADS_EU,
     AYLA_APP_ID,
     AYLA_APP_SECRET,
-    AYLA_USER_EU,
     APP_SIGNATURE,
     CAPTURED_BREW_ESPRESSO,
     GIGYA_API_KEY,
-    GIGYA_URL,
+    REGIONS,
     REQUEST_TIMEOUT,
     RETRY_COUNT,
     RETRY_DELAY,
@@ -62,7 +60,7 @@ def _retry(func):  # noqa: ANN001, ANN202
 class DeLonghiApi:
     """API client for De'Longhi coffee machines via Ayla Networks."""
 
-    def __init__(self, email: str, password: str) -> None:
+    def __init__(self, email: str, password: str, region: str = "EU") -> None:
         self._email = email
         self._password = password
         self._session = requests.Session()
@@ -72,6 +70,12 @@ class DeLonghiApi:
         self._devices: list[dict[str, Any]] = []
         self._device_name: str | None = None
         self._sw_version: str | None = None
+
+        # Region-specific endpoints
+        region_cfg = REGIONS.get(region, REGIONS["EU"])
+        self._gigya_url: str = region_cfg["gigya_url"]
+        self._ayla_user: str = region_cfg["ayla_user"]
+        self._ayla_ads: str = region_cfg["ayla_ads"]
 
     @property
     def device_name(self) -> str | None:
@@ -88,7 +92,7 @@ class DeLonghiApi:
         try:
             # Step 1: Gigya login
             gigya_resp = self._session.post(
-                f"{GIGYA_URL}/accounts.login",
+                f"{self._gigya_url}/accounts.login",
                 data={
                     "loginID": self._email,
                     "password": self._password,
@@ -123,7 +127,7 @@ class DeLonghiApi:
 
             # Step 2: Get long-lived JWT
             jwt_resp = self._session.post(
-                f"{GIGYA_URL}/accounts.getJWT",
+                f"{self._gigya_url}/accounts.getJWT",
                 data={
                     "oauth_token": gigya_data["sessionInfo"]["sessionToken"],
                     "secret": gigya_data["sessionInfo"]["sessionSecret"],
@@ -139,7 +143,7 @@ class DeLonghiApi:
 
             # Step 3: Ayla token_sign_in
             ayla_resp = self._session.post(
-                f"{AYLA_USER_EU}/api/v1/token_sign_in",
+                f"{self._ayla_user}/api/v1/token_sign_in",
                 data={
                     "app_id": AYLA_APP_ID,
                     "app_secret": AYLA_APP_SECRET,
@@ -182,7 +186,7 @@ class DeLonghiApi:
             if self._ayla_refresh:
                 try:
                     resp = self._session.post(
-                        f"{AYLA_USER_EU}/users/refresh_token.json",
+                        f"{self._ayla_user}/users/refresh_token.json",
                         json={"user": {"refresh_token": self._ayla_refresh}},
                         timeout=REQUEST_TIMEOUT,
                     )
@@ -208,7 +212,7 @@ class DeLonghiApi:
     def get_devices(self) -> list[dict[str, Any]]:
         """Get all De'Longhi devices."""
         resp = self._session.get(
-            f"{AYLA_ADS_EU}/apiv1/devices.json",
+            f"{self._ayla_ads}/apiv1/devices.json",
             headers=self._headers(),
             timeout=REQUEST_TIMEOUT,
         )
@@ -227,7 +231,7 @@ class DeLonghiApi:
     def get_properties(self, dsn: str) -> dict[str, Any]:
         """Get all properties for a device."""
         resp = self._session.get(
-            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties.json",
+            f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties.json",
             headers=self._headers(),
             timeout=REQUEST_TIMEOUT,
         )
@@ -238,7 +242,7 @@ class DeLonghiApi:
     def get_property(self, dsn: str, name: str) -> dict[str, Any]:
         """Get a single property."""
         resp = self._session.get(
-            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties/{name}.json",
+            f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/{name}.json",
             headers=self._headers(),
             timeout=REQUEST_TIMEOUT,
         )
@@ -256,7 +260,7 @@ class DeLonghiApi:
         """Send an ECAM command to the machine."""
         b64 = self._build_packet(ecam_bytes)
         resp = self._session.post(
-            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties/app_data_request/datapoints.json",
+            f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/app_data_request/datapoints.json",
             json={"datapoint": {"value": b64}},
             headers=self._headers(),
             timeout=REQUEST_TIMEOUT,
@@ -273,7 +277,7 @@ class DeLonghiApi:
         ts = struct.pack(">I", int(time.time()))
         b64 = base64.b64encode(ts + APP_SIGNATURE).decode()
         resp = self._session.post(
-            f"{AYLA_ADS_EU}/apiv1/dsns/{dsn}/properties/app_device_connected/datapoints.json",
+            f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/app_device_connected/datapoints.json",
             json={"datapoint": {"value": b64}},
             headers=self._headers(),
             timeout=REQUEST_TIMEOUT,

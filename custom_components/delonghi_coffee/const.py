@@ -14,13 +14,34 @@ DOMAIN: Final = "delonghi_coffee"
 
 # Gigya (De'Longhi identity provider)
 GIGYA_API_KEY: Final = "4_DRIMLu7jk9bkKwpRRoQOuw"
-GIGYA_URL: Final = "https://accounts.eu1.gigya.com"
 
 # Ayla Networks (IoT cloud platform)
 AYLA_APP_ID: Final = "DLonghiCoffeeIdKit-sQ-id"
 AYLA_APP_SECRET: Final = "DLonghiCoffeeIdKit-HT6b0VNd4y6CSha9ivM5k8navLw"
-AYLA_USER_EU: Final = "https://user-field-eu.aylanetworks.com"
-AYLA_ADS_EU: Final = "https://ads-eu.aylanetworks.com"
+
+# Region configurations
+CONF_REGION: Final = "region"
+
+REGIONS: Final[dict[str, dict[str, str]]] = {
+    "EU": {
+        "name": "Europe",
+        "gigya_url": "https://accounts.eu1.gigya.com",
+        "ayla_user": "https://user-field-eu.aylanetworks.com",
+        "ayla_ads": "https://ads-eu.aylanetworks.com",
+    },
+    "US": {
+        "name": "United States",
+        "gigya_url": "https://accounts.us1.gigya.com",
+        "ayla_user": "https://user-field.aylanetworks.com",
+        "ayla_ads": "https://ads-field.aylanetworks.com",
+    },
+    "CN": {
+        "name": "China",
+        "gigya_url": "https://accounts.cn1.gigya.com",
+        "ayla_user": "https://user-field.ayla.com.cn",
+        "ayla_ads": "https://ads-field.ayla.com.cn",
+    },
+}
 
 # App signature appended to every command
 APP_SIGNATURE: Final = bytes([0x20, 0x40, 0x35, 0xEF])
