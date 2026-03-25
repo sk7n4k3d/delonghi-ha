@@ -54,8 +54,11 @@ REGIONS: Final[dict[str, dict[str, str]]] = {
 # App signature appended to every command
 APP_SIGNATURE: Final = bytes([0x20, 0x40, 0x35, 0xEF])
 
-# Scan interval
-SCAN_INTERVAL_SECONDS: Final = 30
+# Scan interval — status polling (monitor only, lightweight)
+SCAN_INTERVAL_SECONDS: Final = 60
+
+# Full refresh interval — counters, profiles, beans (heavy, includes ping)
+FULL_REFRESH_INTERVAL: Final = 300  # 5 minutes
 
 # HTTP timeouts (connect, read) in seconds
 REQUEST_TIMEOUT: Final = (5, 15)
