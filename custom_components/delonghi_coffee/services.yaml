@@ -1,0 +1,79 @@
+brew_custom:
+  name: Brew Custom Beverage
+  description: Prepare a custom beverage with specific parameters
+  fields:
+    beverage:
+      name: Beverage
+      description: Base beverage type
+      required: true
+      selector:
+        select:
+          options:
+            - espresso
+            - coffee
+            - long_coffee
+            - doppio
+            - americano
+            - cappuccino
+            - latte_macchiato
+            - caffe_latte
+            - flat_white
+            - espresso_macchiato
+            - hot_milk
+            - hot_water
+            - tea
+            - cortado
+    coffee_qty:
+      name: Coffee Quantity (mL)
+      description: Amount of coffee in mL (20-240)
+      selector:
+        number:
+          min: 20
+          max: 240
+          step: 5
+          unit_of_measurement: mL
+    milk_qty:
+      name: Milk Quantity (mL)
+      description: Amount of milk in mL (0-500). Only for milk drinks.
+      selector:
+        number:
+          min: 0
+          max: 500
+          step: 5
+          unit_of_measurement: mL
+    water_qty:
+      name: Hot Water Quantity (mL)
+      description: Amount of hot water in mL (25-500). Only for water/tea/americano.
+      selector:
+        number:
+          min: 25
+          max: 500
+          step: 5
+          unit_of_measurement: mL
+    taste:
+      name: Taste / Strength
+      description: Coffee strength (1=mild, 5=strong)
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 1
+    milk_froth:
+      name: Milk Froth Level
+      description: "Milk froth (1=low froth, 2=high froth)"
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 3
+          step: 1
+    temperature:
+      name: Temperature
+      description: "Beverage temperature (0=low, 1=medium, 2=high)"
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 2
+          step: 1

@@ -82,6 +82,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Register custom brew service
+    async def handle_brew_custom(call) -> None:  # noqa: ANN001
+        """Handle the brew_custom service call."""
+        beverage = call.data["beverage"]
+        coffee_qty = call.data.get("coffee_qty")
+        milk_qty = call.data.get("milk_qty")
+        water_qty = call.data.get("water_qty")
+        taste = call.data.get("taste", 3)
+        milk_froth = call.data.get("milk_froth", 2)
+        temperature = call.data.get("temperature", 1)
+
+        await hass.async_add_executor_job(
+            api.brew_custom, dsn, beverage,
+            coffee_qty, milk_qty, water_qty,
+            taste, milk_froth, temperature,
+        )
+
+    hass.services.async_register(DOMAIN, "brew_custom", handle_brew_custom)
+
     return True
 
 

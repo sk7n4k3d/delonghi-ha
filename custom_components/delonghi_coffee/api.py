@@ -498,6 +498,91 @@ class DeLonghiApi:
         _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
 
+    # Beverage name → ID mapping for custom brew
+    _BEVERAGE_IDS: dict[str, int] = {
+        "espresso": 1, "coffee": 2, "long_coffee": 3, "doppio": 5,
+        "americano": 6, "cappuccino": 7, "latte_macchiato": 8,
+        "caffe_latte": 9, "flat_white": 10, "espresso_macchiato": 11,
+        "hot_milk": 12, "hot_water": 16, "tea": 22, "cortado": 24,
+    }
+
+    # Accessory required per beverage type (2=Latte Crema Hot)
+    _BEVERAGE_ACCESSORY: dict[str, int] = {
+        "cappuccino": 2, "latte_macchiato": 2, "caffe_latte": 2,
+        "flat_white": 2, "espresso_macchiato": 2, "hot_milk": 2,
+        "cortado": 2,
+    }
+
+    def brew_custom(
+        self,
+        dsn: str,
+        beverage: str,
+        coffee_qty: int | None = None,
+        milk_qty: int | None = None,
+        water_qty: int | None = None,
+        taste: int = 3,
+        milk_froth: int = 2,
+        temperature: int = 1,
+    ) -> bool:
+        """Brew a custom beverage with specific parameters."""
+        bev_id = self._BEVERAGE_IDS.get(beverage)
+        if bev_id is None:
+            raise DeLonghiApiError(f"Unknown beverage: {beverage}")
+
+        # Build param pairs
+        brew_params = bytearray()
+
+        # Accessory
+        acc = self._BEVERAGE_ACCESSORY.get(beverage, 0)
+        if acc:
+            brew_params += bytearray([28, acc])  # ACCESSORIO
+            brew_params += bytearray([11, milk_froth])  # MILK_FROTH
+
+        # DUExPER for espresso-type
+        if beverage in ("espresso", "doppio"):
+            brew_params += bytearray([8, 1 if beverage == "doppio" else 0])
+
+        # Coffee quantity (16-bit)
+        if coffee_qty is not None:
+            brew_params += bytearray([1, (coffee_qty >> 8) & 0xFF, coffee_qty & 0xFF])
+
+        # Hot water quantity (16-bit)
+        if water_qty is not None:
+            brew_params += bytearray([15, (water_qty >> 8) & 0xFF, water_qty & 0xFF])
+
+        # IDX_LEN
+        brew_params += bytearray([27, 1])
+
+        # Taste
+        brew_params += bytearray([2, taste])
+
+        # Milk quantity (16-bit)
+        if milk_qty is not None:
+            brew_params += bytearray([9, (milk_qty >> 8) & 0xFF, milk_qty & 0xFF])
+
+        # Tea temperature
+        if beverage == "tea":
+            brew_params += bytearray([13, temperature])
+
+        # RINSE
+        brew_params += bytearray([39, 1])
+
+        # profile_save = (1 << 2) | 2 = 6
+        total = 6 + len(brew_params) + 1 + 2
+        body = (
+            bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
+            + bytes(brew_params)
+            + bytes([6])
+        )
+        brew_cmd = body + self._crc16(body)
+
+        # Pre-brew check (build a fake recipe for accessory check)
+        fake_recipe = bytes([0xD0, 0, 0xA6, 0xF0, 1, bev_id, 28, acc, 0, 0])
+        self._pre_brew_check(dsn, fake_recipe, beverage)
+
+        _LOGGER.info("Brewing custom %s: %s", beverage, brew_cmd.hex())
+        return self.send_command(dsn, brew_cmd)
+
     def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str) -> None:
         """Check machine state before brewing. Raises DeLonghiApiError on problems."""
         try:
