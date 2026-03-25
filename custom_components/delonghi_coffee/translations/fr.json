@@ -130,7 +130,7 @@
         "name": "Bac à marc plein"
       },
       "alarm_2": {
-        "name": "Détartrage nécessaire"
+        "name": "Rappel détartrage"
       },
       "alarm_3": {
         "name": "Remplacer le filtre à eau"
@@ -172,7 +172,7 @@
         "name": "Bac à grains vide 2"
       },
       "alarm_16": {
-        "name": "Nettoyage nécessaire"
+        "name": "Rappel nettoyage"
       },
       "alarm_17": {
         "name": "Trémie à grains absente"

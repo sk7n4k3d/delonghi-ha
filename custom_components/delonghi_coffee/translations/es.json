@@ -130,7 +130,7 @@
         "name": "Contenedor de borras lleno"
       },
       "alarm_2": {
-        "name": "Descalcificación necesaria"
+        "name": "Recordatorio descalcificación"
       },
       "alarm_3": {
         "name": "Reemplazar filtro de agua"
@@ -172,7 +172,7 @@
         "name": "Granos de café vacíos 2"
       },
       "alarm_16": {
-        "name": "Limpieza necesaria"
+        "name": "Recordatorio limpieza"
       },
       "alarm_17": {
         "name": "Tolva de granos ausente"

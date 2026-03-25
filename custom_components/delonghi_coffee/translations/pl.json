@@ -130,7 +130,7 @@
         "name": "Pojemnik na fusy pełny"
       },
       "alarm_2": {
-        "name": "Wymagane odkamienianie"
+        "name": "Przypomnienie odkamieniania"
       },
       "alarm_3": {
         "name": "Wymień filtr wody"
@@ -172,7 +172,7 @@
         "name": "Brak ziaren kawy 2"
       },
       "alarm_16": {
-        "name": "Wymagane czyszczenie"
+        "name": "Przypomnienie czyszczenia"
       },
       "alarm_17": {
         "name": "Brak zasobnika na ziarna"

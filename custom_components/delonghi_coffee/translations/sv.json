@@ -130,7 +130,7 @@
         "name": "Sumpbehållare full"
       },
       "alarm_2": {
-        "name": "Avkalkning behövs"
+        "name": "Avkalkningspåminnelse"
       },
       "alarm_3": {
         "name": "Byt vattenfilter"
@@ -172,7 +172,7 @@
         "name": "Kaffebönor slut 2"
       },
       "alarm_16": {
-        "name": "Rengöring behövs"
+        "name": "Rengöringspåminnelse"
       },
       "alarm_17": {
         "name": "Bönbehållare saknas"

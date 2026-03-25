@@ -130,7 +130,7 @@
         "name": "Contentor de borras cheio"
       },
       "alarm_2": {
-        "name": "Descalcificação necessária"
+        "name": "Lembrete descalcificação"
       },
       "alarm_3": {
         "name": "Substituir filtro de água"
@@ -172,7 +172,7 @@
         "name": "Grãos de café vazios 2"
       },
       "alarm_16": {
-        "name": "Limpeza necessária"
+        "name": "Lembrete limpeza"
       },
       "alarm_17": {
         "name": "Tremonha de grãos ausente"

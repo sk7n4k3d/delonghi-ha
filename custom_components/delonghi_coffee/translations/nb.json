@@ -130,7 +130,7 @@
         "name": "Grutbeholder full"
       },
       "alarm_2": {
-        "name": "Avkalking nødvendig"
+        "name": "Avkalkingspåminnelse"
       },
       "alarm_3": {
         "name": "Bytt vannfilter"
@@ -172,7 +172,7 @@
         "name": "Kaffebønner tomme 2"
       },
       "alarm_16": {
-        "name": "Rengjøring nødvendig"
+        "name": "Rengjøringspåminnelse"
       },
       "alarm_17": {
         "name": "Bønnebeholder mangler"

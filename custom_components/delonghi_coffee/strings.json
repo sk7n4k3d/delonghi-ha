@@ -130,7 +130,7 @@
         "name": "Grounds Container Full"
       },
       "alarm_2": {
-        "name": "Descale Needed"
+        "name": "Descaling Reminder"
       },
       "alarm_3": {
         "name": "Replace Water Filter"
@@ -172,7 +172,7 @@
         "name": "Coffee Beans Empty 2"
       },
       "alarm_16": {
-        "name": "Cleaning Needed"
+        "name": "Cleaning Reminder"
       },
       "alarm_17": {
         "name": "Bean Hopper Absent"

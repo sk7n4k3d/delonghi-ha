@@ -130,7 +130,7 @@
         "name": "Contenitore fondi pieno"
       },
       "alarm_2": {
-        "name": "Decalcificazione necessaria"
+        "name": "Promemoria decalcificazione"
       },
       "alarm_3": {
         "name": "Sostituire filtro acqua"
@@ -172,7 +172,7 @@
         "name": "Chicchi di caffè esauriti 2"
       },
       "alarm_16": {
-        "name": "Pulizia necessaria"
+        "name": "Promemoria pulizia"
       },
       "alarm_17": {
         "name": "Tramoggia chicchi assente"

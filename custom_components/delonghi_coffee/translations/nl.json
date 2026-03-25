@@ -130,7 +130,7 @@
         "name": "Koffiedikbak vol"
       },
       "alarm_2": {
-        "name": "Ontkalking nodig"
+        "name": "Herinnering ontkalken"
       },
       "alarm_3": {
         "name": "Waterfilter vervangen"
@@ -172,7 +172,7 @@
         "name": "Koffiebonen leeg 2"
       },
       "alarm_16": {
-        "name": "Reiniging nodig"
+        "name": "Herinnering reinigen"
       },
       "alarm_17": {
         "name": "Bonenreservoir ontbreekt"
