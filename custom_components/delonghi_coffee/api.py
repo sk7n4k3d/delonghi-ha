@@ -17,6 +17,7 @@ from .const import (
     APP_SIGNATURE,
     CAPTURED_BREWS,
     GIGYA_API_KEY,
+    GIGYA_URL,
     REGIONS,
     REQUEST_TIMEOUT,
     RETRY_COUNT,
@@ -71,9 +72,11 @@ class DeLonghiApi:
         self._device_name: str | None = None
         self._sw_version: str | None = None
 
-        # Region-specific endpoints
+        # Gigya always uses EU1 (confirmed from app manifest)
+        self._gigya_url: str = GIGYA_URL
+
+        # Region-specific Ayla endpoints
         region_cfg = REGIONS.get(region, REGIONS["EU"])
-        self._gigya_url: str = region_cfg["gigya_url"]
         self._ayla_user: str = region_cfg["ayla_user"]
         self._ayla_ads: str = region_cfg["ayla_ads"]
 

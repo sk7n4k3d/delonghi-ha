@@ -22,22 +22,23 @@ AYLA_APP_SECRET: Final = "DLonghiCoffeeIdKit-HT6b0VNd4y6CSha9ivM5k8navLw"
 # Region configurations
 CONF_REGION: Final = "region"
 
+# Gigya always uses EU1 datacenter — confirmed from AndroidManifest.xml
+# Only Ayla endpoints change per region
+GIGYA_URL: Final = "https://accounts.eu1.gigya.com"
+
 REGIONS: Final[dict[str, dict[str, str]]] = {
     "EU": {
         "name": "Europe",
-        "gigya_url": "https://accounts.eu1.gigya.com",
         "ayla_user": "https://user-field-eu.aylanetworks.com",
         "ayla_ads": "https://ads-eu.aylanetworks.com",
     },
     "US": {
         "name": "United States",
-        "gigya_url": "https://accounts.us1.gigya.com",
         "ayla_user": "https://user-field.aylanetworks.com",
         "ayla_ads": "https://ads-field.aylanetworks.com",
     },
     "CN": {
         "name": "China",
-        "gigya_url": "https://accounts.cn1.gigya.com",
         "ayla_user": "https://user-field.ayla.com.cn",
         "ayla_ads": "https://ads-field.ayla.com.cn",
     },
