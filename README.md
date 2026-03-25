@@ -1,6 +1,8 @@
 # De'Longhi Coffee for Home Assistant
 
 > **AI Disclosure:** This integration was developed with the assistance of Claude (Anthropic). The protocol reverse engineering, code architecture, and implementation were produced in collaboration with AI. All code has been reviewed, tested on real hardware, and audited for security.
+>
+> **This repository is actively monitored by [Claude Code](https://claude.ai/claude-code).** Issues are triaged, code fixes are pushed, and responses are posted automatically. Bug reports are typically addressed within minutes. If you open an issue, expect a fast and detailed response — powered by AI, validated on real hardware.
 
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/v/release/sk7n4k3d/delonghi-ha)](https://github.com/sk7n4k3d/delonghi-ha/releases)
