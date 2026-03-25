@@ -121,6 +121,24 @@ ALARMS: Final[dict[int, dict[str, str]]] = {
 }
 
 # Machine state values (from MonitorDataV2.f() -> byte[9])
+# OEM model → friendly name mapping (from MachinesModels.json in Coffee Link APK)
+MODEL_NAMES: Final[dict[str, str]] = {
+    "DL-striker-cb": "Eletta Explore",
+    "DL-striker-best": "Eletta Explore",
+    "DL-pd-soul": "PrimaDonna Soul",
+    "DL-pd-soul-better": "PrimaDonna Soul",
+    "DL-pd-class-better": "PrimaDonna Class",
+    "DL-pd-class-top": "PrimaDonna Class",
+    "DL-pd-elite-better": "PrimaDonna Elite",
+    "DL-pd-elite-mid": "PrimaDonna Elite",
+    "DL-pd-elite-multi": "PrimaDonna Elite",
+    "DL-pd-elite-top": "PrimaDonna Elite",
+    "DL-pd-s-restyle": "PrimaDonna S",
+    "DL-dinamica-plus": "Dinamica Plus",
+    "DL-maestosa-best": "Maestosa",
+    "DL-maestosa-good": "Maestosa",
+}
+
 MACHINE_STATES: Final[dict[int, str]] = {
     0: "Off",
     1: "Turning On",

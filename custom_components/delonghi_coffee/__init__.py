@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
-from .const import DOMAIN
+from .const import DOMAIN, MODEL_NAMES
 from .coordinator import DeLonghiCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,12 +66,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = DeLonghiCoordinator(hass, api, dsn)
     await coordinator.async_config_entry_first_refresh()
 
+    # Resolve friendly model name from OEM model
+    oem_model = entry.data.get("model", "unknown")
+    friendly_model = MODEL_NAMES.get(oem_model, oem_model)
+    if not device_name or device_name == dsn:
+        device_name = f"De'Longhi {friendly_model}"
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "api": api,
         "coordinator": coordinator,
         "dsn": dsn,
-        "model": entry.data.get("model", "unknown"),
-        "device_name": device_name or "De'Longhi Coffee Machine",
+        "model": friendly_model,
+        "device_name": device_name,
         "sw_version": sw_version,
     }
 
