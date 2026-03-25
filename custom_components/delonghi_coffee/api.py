@@ -449,17 +449,14 @@ class DeLonghiApi:
         return counters
 
     def brew_beverage(self, dsn: str, beverage_key: str) -> bool:
-        """Brew a beverage.
+        """Brew a beverage by converting stored recipe to brew command.
 
-        Uses MITM-captured commands when available (verified working).
-        Falls back to recipe conversion for uncaptured beverages.
+        Universal conversion verified against 9 MITM captures:
+        - Normal drinks: all recipe params except VISIBLE(25)
+        - Iced drinks: exclude COFFEE/MILK/HOT_WATER quantities
+        - Cold brew: exclude quantities, add ICED=3 + INTENSITY
+        - Always append RINSE(39)=1 and profile_save byte
         """
-        # Use captured command if available (verified byte-for-byte)
-        if beverage_key in CAPTURED_BREWS:
-            _LOGGER.info("Brewing %s (captured command)", beverage_key)
-            return self.send_command(dsn, CAPTURED_BREWS[beverage_key])
-
-        # Fallback: convert recipe to brew command
         props = self.get_properties(dsn)
 
         recipe_prop: dict[str, Any] | None = None
@@ -490,8 +487,12 @@ class DeLonghiApi:
             _LOGGER.error("Recipe %s too short: %d bytes", beverage_key, len(recipe_data))
             return False
 
-        brew_cmd = self._recipe_to_brew_command(recipe_data)
-        _LOGGER.info("Brewing %s (converted): %s", beverage_key, brew_cmd.hex())
+        is_iced = beverage_key.startswith(("i_", "mi_", "over_ice"))
+        is_cold_brew = "_cb_" in beverage_key
+        brew_cmd = self._recipe_to_brew_command(
+            recipe_data, is_iced=is_iced, is_cold_brew=is_cold_brew
+        )
+        _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
 
     @staticmethod
@@ -508,34 +509,71 @@ class DeLonghiApi:
         crc &= 0xFFFF
         return crc.to_bytes(2, byteorder="big")
 
+    # 16-bit parameter IDs (quantities in mL)
+    _BIG_PARAMS: set[int] = {1, 9, 15}  # COFFEE, MILK, HOT_WATER
+
     @classmethod
-    def _recipe_to_brew_command(cls, recipe: bytes) -> bytes:
+    def _recipe_to_brew_command(
+        cls,
+        recipe: bytes,
+        is_iced: bool = False,
+        is_cold_brew: bool = False,
+        intensity: int = 1,
+    ) -> bytes:
         """Convert stored recipe (0xD0/0xA6) to brew command (0x0D/0x83).
 
-        Recipe: [0xD0][len][0xA6][flags][profile][bev_id][params][0x19 0x01 marker][more_params][CRC]
-        Brew:   [0x0D][len][0x83][0xF0][bev_id][0x03][params_without_marker][0x27 0x01 0x06][CRC]
+        Recipe params are [id][value] pairs (2 bytes) or [id][hi][lo] (3 bytes
+        for 16-bit params: COFFEE=1, MILK=9, HOT_WATER=15).
+
+        Rules verified against 9 MITM captures (espresso, hot_water, tea,
+        iced_americano, iced_cappuccino, cold_brew_original, cold_brew_intense,
+        cold_brew_to_mix, americano_froid):
+        - Exclude VISIBLE(25) — recipe-only
+        - For iced/cold_brew: also exclude COFFEE(1), MILK(9), HOT_WATER(15)
+        - For iced: append ICED(31)=0
+        - For cold_brew: append ICED(31)=3 + INTENSITY(38)=value
+        - Always append RINSE(39)=1
+        - End with profile_save = (1 << 2) | 2 = 6
         """
         if recipe[0] == 0x0D:
             return recipe
 
         bev_id = recipe[5]
-        params = bytearray(recipe[6:-2])
+        raw = recipe[6:-2]
 
-        # Remove recipe marker bytes (0x19 0x01)
-        for j in range(len(params) - 1):
-            if params[j] == 0x19 and params[j + 1] == 0x01:
-                params = params[:j] + params[j + 2:]
+        exclude: set[int] = {25}  # VISIBLE always excluded
+        if is_iced or is_cold_brew:
+            exclude.update({1, 9, 15})  # Exclude quantities
+
+        brew_params = bytearray()
+        i = 0
+        while i < len(raw):
+            pid = raw[i]
+            if pid in cls._BIG_PARAMS and i + 2 < len(raw):
+                if pid not in exclude:
+                    brew_params += raw[i:i + 3]
+                i += 3
+            elif i + 1 < len(raw):
+                if pid not in exclude:
+                    brew_params += raw[i:i + 2]
+                i += 2
+            else:
                 break
 
-        # Append brew suffix
-        params += bytearray([0x27, 0x01, 0x06])
+        if is_iced:
+            brew_params += bytearray([31, 0])
+        elif is_cold_brew:
+            brew_params += bytearray([31, 3, 38, intensity])
 
-        # Build command: len = total_size - 1
-        brew_body = bytes([0x0D, 0x00, 0x83, 0xF0, bev_id, 0x03]) + bytes(params)
-        total = len(brew_body) + 2  # +CRC
-        brew_body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03]) + bytes(params)
+        brew_params += bytearray([39, 1])  # RINSE=1
 
-        return brew_body + cls._crc16(brew_body)
+        total = 6 + len(brew_params) + 1 + 2
+        body = (
+            bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
+            + bytes(brew_params)
+            + bytes([6])  # profile_save = (1<<2)|2
+        )
+        return body + cls._crc16(body)
 
     def get_available_beverages(self, dsn: str) -> list[str]:
         """Get list of available beverage keys from device properties."""
