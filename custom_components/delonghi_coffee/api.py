@@ -260,18 +260,31 @@ class DeLonghiApi:
 
     @_retry
     def send_command(self, dsn: str, ecam_bytes: bytes) -> bool:
-        """Send an ECAM command to the machine."""
+        """Send an ECAM command to the machine.
+
+        Tries 'app_data_request' first (newer WiFi models like Eletta Explore),
+        falls back to 'data_request' (older WiFi models like PrimaDonna Soul).
+        """
         b64 = self._build_packet(ecam_bytes)
-        resp = self._session.post(
-            f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/app_data_request/datapoints.json",
-            json={"datapoint": {"value": b64}},
-            headers=self._headers(),
-            timeout=REQUEST_TIMEOUT,
-        )
-        if resp.status_code == 201:
-            _LOGGER.info("Command sent: %s", ecam_bytes.hex())
-            return True
-        _LOGGER.error("Command failed: %s %s", resp.status_code, resp.text)
+        headers = self._headers()
+
+        # Try newer property first
+        for prop_name in ("app_data_request", "data_request"):
+            resp = self._session.post(
+                f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/{prop_name}/datapoints.json",
+                json={"datapoint": {"value": b64}},
+                headers=headers,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 201:
+                _LOGGER.info("Command sent via %s: %s", prop_name, ecam_bytes.hex())
+                return True
+            if resp.status_code != 404:
+                _LOGGER.error("Command failed on %s: %s %s", prop_name, resp.status_code, resp.text)
+                return False
+            # 404 = property doesn't exist, try next
+
+        _LOGGER.error("Command failed: no valid request property found (tried app_data_request and data_request)")
         return False
 
     @_retry
@@ -307,7 +320,11 @@ class DeLonghiApi:
             _LOGGER.debug("Failed to get device status: %s", err)
 
         try:
-            monitor = self.get_property(dsn, "d302_monitor_machine")
+            # Try newer property first, fall back to older
+            try:
+                monitor = self.get_property(dsn, "d302_monitor_machine")
+            except (requests.RequestException, DeLonghiApiError):
+                monitor = self.get_property(dsn, "d302_monitor")
             monitor_val = monitor.get("value")
             if monitor_val:
                 raw = base64.b64decode(monitor_val)
