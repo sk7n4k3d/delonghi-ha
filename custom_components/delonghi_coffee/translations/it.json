@@ -120,6 +120,9 @@
       },
       "other_tot_bev_other": {
         "name": "Altre bevande"
+      },
+      "active_profile": {
+        "name": "Profilo attivo"
       }
     },
     "binary_sensor": {

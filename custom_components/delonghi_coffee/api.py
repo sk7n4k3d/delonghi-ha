@@ -746,6 +746,71 @@ class DeLonghiApi:
         )
         return body + cls._crc16(body)
 
+    def get_profiles(self, dsn: str) -> dict[str, Any]:
+        """Get user profiles (names, icons, active profile)."""
+        props = self.get_properties(dsn)
+        profiles: dict[int, dict[str, Any]] = {}
+        active = 1
+
+        colors = {0: "green", 1: "red", 2: "blue", 3: "orange"}
+        figures = {0: "woman", 1: "man", 2: "kid"}
+
+        # d051_profile_name1_3: profiles 1-3
+        if "d051_profile_name1_3" in props:
+            val = props["d051_profile_name1_3"].get("value")
+            if val:
+                try:
+                    raw = base64.b64decode(val)
+                    data = raw[6:-2]
+                    for i in range(3):
+                        offset = i * 21
+                        if offset + 20 <= len(data):
+                            name = data[offset:offset + 20].decode(
+                                "utf-16-be", errors="replace"
+                            ).replace("\x00", "")
+                            icon = data[offset + 20] if offset + 20 < len(data) else 0
+                            profiles[i + 1] = {
+                                "name": name,
+                                "color": colors.get(icon // 3, "unknown"),
+                                "figure": figures.get(icon % 3, "unknown"),
+                                "icon_id": icon,
+                            }
+                except (ValueError, UnicodeDecodeError):
+                    pass
+
+        # d052_profile_name4: profile 4
+        if "d052_profile_name4" in props:
+            val = props["d052_profile_name4"].get("value")
+            if val:
+                try:
+                    raw = base64.b64decode(val)
+                    data = raw[6:-2]
+                    if len(data) >= 20:
+                        name = data[:20].decode(
+                            "utf-16-be", errors="replace"
+                        ).replace("\x00", "")
+                        icon = data[20] if len(data) > 20 else 0
+                        profiles[4] = {
+                            "name": name,
+                            "color": colors.get(icon // 3, "unknown"),
+                            "figure": figures.get(icon % 3, "unknown"),
+                            "icon_id": icon,
+                        }
+                except (ValueError, UnicodeDecodeError):
+                    pass
+
+        # Active profile from d286_mach_sett_profile
+        if "d286_mach_sett_profile" in props:
+            val = props["d286_mach_sett_profile"].get("value")
+            if val:
+                try:
+                    raw = base64.b64decode(val)
+                    active = raw[4] if len(raw) > 4 else 1
+                except (ValueError, IndexError):
+                    pass
+
+        return {"active": active, "profiles": profiles}
+
     def get_available_beverages(self, dsn: str) -> list[str]:
         """Get list of available beverage keys from device properties."""
         props = self.get_properties(dsn)

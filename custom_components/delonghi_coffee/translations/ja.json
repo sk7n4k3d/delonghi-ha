@@ -120,6 +120,9 @@
       },
       "other_tot_bev_other": {
         "name": "その他の飲料"
+      },
+      "active_profile": {
+        "name": "アクティブプロファイル"
       }
     },
     "binary_sensor": {

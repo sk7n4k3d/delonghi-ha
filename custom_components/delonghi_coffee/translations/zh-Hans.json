@@ -120,6 +120,9 @@
       },
       "other_tot_bev_other": {
         "name": "其他饮品"
+      },
+      "active_profile": {
+        "name": "当前用户"
       }
     },
     "binary_sensor": {

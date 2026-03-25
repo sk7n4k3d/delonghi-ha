@@ -120,6 +120,9 @@
       },
       "other_tot_bev_other": {
         "name": "Andre drikke"
+      },
+      "active_profile": {
+        "name": "Aktiv profil"
       }
     },
     "binary_sensor": {

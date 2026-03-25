@@ -49,6 +49,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.api.get_available_beverages, self.dsn
                 )
 
+            profiles: dict[str, Any] = await self.hass.async_add_executor_job(
+                self.api.get_profiles, self.dsn
+            )
+
             return {
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": status.get("machine_state", "Unknown"),
@@ -56,6 +60,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "profile": status.get("profile", 0),
                 "counters": counters,
                 "beverages": self.beverages,
+                "active_profile": profiles.get("active", 1),
+                "profiles": profiles.get("profiles", {}),
             }
         except DeLonghiAuthError as err:
             raise UpdateFailed(f"Authentication error: {err}") from err

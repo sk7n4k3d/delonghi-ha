@@ -120,6 +120,9 @@
       },
       "other_tot_bev_other": {
         "name": "기타 음료"
+      },
+      "active_profile": {
+        "name": "활성 프로필"
       }
     },
     "binary_sensor": {

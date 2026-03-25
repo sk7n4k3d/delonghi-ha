@@ -81,6 +81,9 @@ async def async_setup_entry(
     # Status sensor
     entities.append(DeLonghiStatusSensor(coordinator, dsn, model, device_name, sw_version))
 
+    # Profile sensor
+    entities.append(DeLonghiProfileSensor(coordinator, dsn, model, device_name, sw_version))
+
     # Counter sensors
     for key, meta in COUNTER_SENSORS.items():
         entities.append(DeLonghiCounterSensor(coordinator, dsn, model, device_name, sw_version, key, meta))
@@ -154,3 +157,43 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         """Return current counter value."""
         counters: dict[str, Any] = self.coordinator.data.get("counters", {})
         return counters.get(self._counter_key)
+
+
+class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
+    """Active user profile sensor."""
+
+    def __init__(
+        self,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_active_profile"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "active_profile"
+        self._attr_icon = "mdi:account"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def native_value(self) -> str:
+        """Return active profile name."""
+        active = self.coordinator.data.get("active_profile", 1)
+        profiles = self.coordinator.data.get("profiles", {})
+        profile = profiles.get(active, {})
+        return profile.get("name", f"Profile {active}")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return all profiles as attributes."""
+        active = self.coordinator.data.get("active_profile", 1)
+        profiles = self.coordinator.data.get("profiles", {})
+        attrs: dict[str, Any] = {"active_profile_id": active}
+        for pid, pdata in profiles.items():
+            attrs[f"profile_{pid}_name"] = pdata.get("name", "")
+            attrs[f"profile_{pid}_color"] = pdata.get("color", "")
+            attrs[f"profile_{pid}_figure"] = pdata.get("figure", "")
+        return attrs
