@@ -301,16 +301,29 @@ class DeLonghiApi:
 
     @_retry
     def ping_connected(self, dsn: str) -> bool:
-        """Send app_device_connected ping to force machine to push data updates."""
+        """Send app_device_connected ping to force machine to push data updates.
+
+        Tries with app_id (newer models) then without (legacy models).
+        """
         ts = struct.pack(">I", int(time.time()))
-        b64 = base64.b64encode(ts + APP_SIGNATURE).decode()
-        resp = self._session.post(
-            f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/app_device_connected/datapoints.json",
-            json={"datapoint": {"value": b64}},
-            headers=self._headers(),
-            timeout=REQUEST_TIMEOUT,
-        )
-        return resp.status_code == 201
+        headers = self._headers()
+
+        # Try with app signature first (newer), then without (legacy)
+        for b64 in (
+            base64.b64encode(ts + APP_SIGNATURE).decode(),
+            base64.b64encode(ts).decode(),
+        ):
+            resp = self._session.post(
+                f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/app_device_connected/datapoints.json",
+                json={"datapoint": {"value": b64}},
+                headers=headers,
+                timeout=REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 201:
+                return True
+            if resp.status_code != 404:
+                return False
+        return False
 
     def brew(self, dsn: str, recipe_ecam: bytes) -> bool:
         """Send a brew command."""
@@ -393,8 +406,12 @@ class DeLonghiApi:
         return result
 
     def get_counters(self, dsn: str) -> dict[str, Any]:
+        """Get counters (fetches properties)."""
+        return self.parse_counters(self.get_properties(dsn))
+
+    def parse_counters(self, props: dict[str, Any]) -> dict[str, Any]:
         """Get beverage counters, maintenance stats, and JSON sub-counters."""
-        props = self.get_properties(dsn)
+        
         counters: dict[str, Any] = {}
 
         # Simple integer counters
@@ -779,8 +796,11 @@ class DeLonghiApi:
         return body + cls._crc16(body)
 
     def get_profiles(self, dsn: str) -> dict[str, Any]:
-        """Get user profiles (names, icons, active profile)."""
-        props = self.get_properties(dsn)
+        """Get profiles (fetches properties)."""  # noqa: D401
+        return self.parse_profiles(self.get_properties(dsn))
+
+    def parse_profiles(self, props: dict[str, Any]) -> dict[str, Any]:
+        """Parse user profiles from pre-fetched properties."""
         profiles: dict[int, dict[str, Any]] = {}
         active = 1
 
@@ -844,8 +864,11 @@ class DeLonghiApi:
         return {"active": active, "profiles": profiles}
 
     def get_bean_systems(self, dsn: str) -> list[dict[str, Any]]:
-        """Get bean system names (Bean Adapt profiles)."""
-        props = self.get_properties(dsn)
+        """Get beans (fetches properties)."""  # noqa: D401
+        return self.parse_bean_systems(self.get_properties(dsn))
+
+    def parse_bean_systems(self, props: dict[str, Any]) -> list[dict[str, Any]]:
+        """Parse bean systems from pre-fetched properties."""
         beans: list[dict[str, Any]] = []
 
         for i in range(7):
@@ -871,8 +894,11 @@ class DeLonghiApi:
         return beans
 
     def get_available_beverages(self, dsn: str) -> list[str]:
-        """Get list of available beverage keys from device properties."""
-        props = self.get_properties(dsn)
+        """Get beverages (fetches properties)."""  # noqa: D401
+        return self.parse_available_beverages(self.get_properties(dsn))
+
+    def parse_available_beverages(self, props: dict[str, Any]) -> list[str]:
+        """Parse available beverages from pre-fetched properties."""
         beverages: set[str] = set()
         for name in props:
             # Match d1XX_rec_2_BEVERAGE pattern (profile 2 = user defaults)

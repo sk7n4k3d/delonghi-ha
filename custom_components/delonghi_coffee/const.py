@@ -58,7 +58,7 @@ APP_SIGNATURE: Final = bytes([0x20, 0x40, 0x35, 0xEF])
 SCAN_INTERVAL_SECONDS: Final = 60
 
 # Full refresh interval — counters, profiles, beans (heavy, includes ping)
-FULL_REFRESH_INTERVAL: Final = 300  # 5 minutes
+FULL_REFRESH_INTERVAL: Final = 600  # 10 minutes
 
 # HTTP timeouts (connect, read) in seconds
 REQUEST_TIMEOUT: Final = (5, 15)
