@@ -338,6 +338,11 @@
       "brew_h_cb_capp_mug": {
         "name": "Cold Brew Cappuccino Mug"
       }
+    },
+    "switch": {
+      "power": {
+        "name": "Питание"
+      }
     }
   }
 }

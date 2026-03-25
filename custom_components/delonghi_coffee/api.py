@@ -505,11 +505,38 @@ class DeLonghiApi:
         except (DeLonghiApiError, DeLonghiAuthError):
             return  # Can't check, proceed anyway
 
+        # Check machine state
+        machine_state = status.get("machine_state", "Unknown")
+        if machine_state == "Off":
+            raise DeLonghiApiError(
+                f"Cannot brew {beverage_key}: machine is off. Power on first."
+            )
+        if machine_state == "Brewing":
+            raise DeLonghiApiError(
+                f"Cannot brew {beverage_key}: machine is already brewing."
+            )
+        if machine_state in ("Descaling", "Rinsing", "Going to sleep", "Turning On", "Heating"):
+            raise DeLonghiApiError(
+                f"Cannot brew {beverage_key}: machine is busy ({machine_state})."
+            )
+
         # Check blocking alarms
         alarms = status.get("alarms", [])
         alarm_names = [a["name"] for a in alarms]
 
-        blocking = {"Water Tank Empty", "Grounds Container Full", "Coffee Beans Empty"}
+        blocking = {
+            "Water Tank Empty",
+            "Grounds Container Full",
+            "Coffee Beans Empty",
+            "Coffee Beans Empty 2",
+            "Drip Tray Missing",
+            "Tank In Position",
+            "Hydraulic Problem",
+            "Heater Probe Failure",
+            "Infuser Motor Failure",
+            "Steamer Probe Failure",
+            "Bean Hopper Absent",
+        }
         active_blocking = [a for a in alarm_names if a in blocking]
         if active_blocking:
             raise DeLonghiApiError(
@@ -517,25 +544,20 @@ class DeLonghiApi:
             )
 
         # Check accessory requirement
-        # Recipe param ACCESSORIO(28) tells which accessory is needed
-        # 0=none, 1=hot water spout, 2=Latte Crema Hot, 6=Latte Crema Cool
         required_acc = self._get_recipe_accessory(recipe)
         if required_acc and required_acc > 1:
-            # Machine needs milk module — check monitor
             try:
                 monitor_prop = self.get_property(dsn, "d302_monitor_machine")
                 monitor_val = monitor_prop.get("value")
                 if monitor_val:
                     raw = base64.b64decode(monitor_val)
                     current_acc = raw[4] if len(raw) > 4 else 0
-                    # Accessory 0 = nothing attached
                     if current_acc == 0:
                         raise DeLonghiApiError(
-                            f"Cannot brew {beverage_key}: milk module not attached "
-                            f"(required accessory={required_acc}, current=None)"
+                            f"Cannot brew {beverage_key}: milk module not attached."
                         )
             except (KeyError, ValueError):
-                pass  # Can't check, proceed
+                pass
 
     @staticmethod
     def _get_recipe_accessory(recipe: bytes) -> int | None:
