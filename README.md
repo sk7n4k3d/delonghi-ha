@@ -379,6 +379,7 @@ automation:
 - Built on the [Ayla Networks](https://www.aylanetworks.com/) IoT platform API
 - [ayla-iot-unofficial](https://github.com/rewardone/ayla-iot-unofficial) Python library for reference
 - [AylaLocalAPI](https://github.com/jakecrowley/AylaLocalAPI) for LAN protocol reference
+- [PyDeLonghiAPI](https://github.com/FrozenGalaxy/PyDeLonghiAPI) by FrozenGalaxy — ECAM model matching table reference
 
 ## License
 
