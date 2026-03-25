@@ -68,6 +68,11 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             self._attr_device_info["sw_version"] = sw_version
 
     @property
+    def assumed_state(self) -> bool:
+        """Return True if state is assumed (no monitor available)."""
+        return self.coordinator.data.get("machine_state", "Unknown") == "Unknown"
+
+    @property
     def is_on(self) -> bool:
         """Return True if machine is on.
 
@@ -76,9 +81,10 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
         if state != "Unknown":
-            # Monitor data available — use it
-            return state not in ("Off", "Going to sleep")
-        # No monitor — use locally tracked state
+            result = state not in ("Off", "Going to sleep")
+            _LOGGER.debug("Switch is_on: state=%s → %s", state, result)
+            return result
+        _LOGGER.debug("Switch is_on: no monitor, assumed=%s", self._assumed_on)
         return self._assumed_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
