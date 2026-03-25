@@ -43,6 +43,9 @@ def _retry(func):  # noqa: ANN001, ANN202
             except DeLonghiAuthError:
                 raise
             except (requests.RequestException, DeLonghiApiError) as err:
+                # Don't retry 404s — property doesn't exist, retrying won't help
+                if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 404:
+                    raise
                 last_err = err
                 if attempt < RETRY_COUNT:
                     _LOGGER.debug(
