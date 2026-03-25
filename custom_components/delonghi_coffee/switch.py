@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
@@ -54,6 +55,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         self._api = api
         self._dsn = dsn
         self._assumed_on = True  # Assume on at startup (safe default)
+        self._command_sent_at: float = 0  # Timestamp of last power command
+        self._last_monitor_value: str | None = None  # Track stale monitor data
         self._attr_unique_id = f"{dsn}_power"
         self._attr_has_entity_name = True
         self._attr_translation_key = "power"
@@ -73,19 +76,49 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         return self.coordinator.data.get("machine_state", "Unknown") == "Unknown"
 
     @property
+    def _monitor_is_stale(self) -> bool:
+        """Check if monitor data is stale (never changes between polls).
+
+        Some models (PrimaDonna Soul) have a d302_monitor property that
+        returns cached cloud data which doesn't update when the machine
+        is off. We detect this by checking if a power command was sent
+        recently — if so, trust assumed state over stale monitor.
+        """
+        # After a power command, trust assumed state for 180s (3 poll cycles)
+        if self._command_sent_at and (time.time() - self._command_sent_at) < 180:
+            return True
+        return False
+
+    @property
     def is_on(self) -> bool:
         """Return True if machine is on.
 
-        Uses monitor state if available, falls back to local tracking
-        for models without monitor properties (PrimaDonna Soul).
+        Uses monitor state if available and fresh, falls back to local
+        tracking for models without monitor or with stale data.
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
-        if state != "Unknown":
-            result = state not in ("Off", "Going to sleep")
-            _LOGGER.debug("Switch is_on: state=%s → %s", state, result)
-            return result
-        _LOGGER.debug("Switch is_on: no monitor, assumed=%s", self._assumed_on)
-        return self._assumed_on
+
+        # No monitor data at all → use assumed state
+        if state == "Unknown":
+            _LOGGER.debug("Switch is_on: no monitor, assumed=%s", self._assumed_on)
+            return self._assumed_on
+
+        # Monitor exists but we just sent a power command → trust assumed state
+        # (cloud monitor returns stale "Ready" even after power off on some models)
+        if self._monitor_is_stale:
+            _LOGGER.debug(
+                "Switch is_on: monitor=%s but command sent %.0fs ago, assumed=%s",
+                state,
+                time.time() - self._command_sent_at,
+                self._assumed_on,
+            )
+            return self._assumed_on
+
+        # Monitor data is fresh → trust it and sync assumed state
+        result = state not in ("Off", "Going to sleep")
+        self._assumed_on = result
+        _LOGGER.debug("Switch is_on: monitor=%s → %s", state, result)
+        return result
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Power on the machine."""
@@ -97,8 +130,10 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             if not success:
                 raise HomeAssistantError("Failed to power on")
             self._assumed_on = True
+            self._command_sent_at = time.time()
         except DeLonghiApiError as err:
             raise HomeAssistantError(f"Failed to power on: {err}") from err
+        self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -111,6 +146,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             if not success:
                 raise HomeAssistantError("Failed to power off")
             self._assumed_on = False
+            self._command_sent_at = time.time()
         except DeLonghiApiError as err:
             raise HomeAssistantError(f"Failed to power off: {err}") from err
+        self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
