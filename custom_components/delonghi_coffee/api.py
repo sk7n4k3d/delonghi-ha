@@ -487,6 +487,9 @@ class DeLonghiApi:
             _LOGGER.error("Recipe %s too short: %d bytes", beverage_key, len(recipe_data))
             return False
 
+        # Pre-brew checks: alarms and accessory
+        self._pre_brew_check(dsn, recipe_data, beverage_key)
+
         is_iced = beverage_key.startswith(("i_", "mi_", "over_ice"))
         is_cold_brew = "_cb_" in beverage_key
         brew_cmd = self._recipe_to_brew_command(
@@ -494,6 +497,63 @@ class DeLonghiApi:
         )
         _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
+
+    def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str) -> None:
+        """Check machine state before brewing. Raises DeLonghiApiError on problems."""
+        try:
+            status = self.get_status(dsn)
+        except (DeLonghiApiError, DeLonghiAuthError):
+            return  # Can't check, proceed anyway
+
+        # Check blocking alarms
+        alarms = status.get("alarms", [])
+        alarm_names = [a["name"] for a in alarms]
+
+        blocking = {"Water Tank Empty", "Grounds Container Full", "Coffee Beans Empty"}
+        active_blocking = [a for a in alarm_names if a in blocking]
+        if active_blocking:
+            raise DeLonghiApiError(
+                f"Cannot brew {beverage_key}: {', '.join(active_blocking)}"
+            )
+
+        # Check accessory requirement
+        # Recipe param ACCESSORIO(28) tells which accessory is needed
+        # 0=none, 1=hot water spout, 2=Latte Crema Hot, 6=Latte Crema Cool
+        required_acc = self._get_recipe_accessory(recipe)
+        if required_acc and required_acc > 1:
+            # Machine needs milk module — check monitor
+            try:
+                monitor_prop = self.get_property(dsn, "d302_monitor_machine")
+                monitor_val = monitor_prop.get("value")
+                if monitor_val:
+                    raw = base64.b64decode(monitor_val)
+                    current_acc = raw[4] if len(raw) > 4 else 0
+                    # Accessory 0 = nothing attached
+                    if current_acc == 0:
+                        raise DeLonghiApiError(
+                            f"Cannot brew {beverage_key}: milk module not attached "
+                            f"(required accessory={required_acc}, current=None)"
+                        )
+            except (KeyError, ValueError):
+                pass  # Can't check, proceed
+
+    @staticmethod
+    def _get_recipe_accessory(recipe: bytes) -> int | None:
+        """Extract ACCESSORIO(28) param from recipe if present."""
+        raw = recipe[6:-2]
+        big = {1, 9, 15}
+        i = 0
+        while i < len(raw):
+            pid = raw[i]
+            if pid == 28 and i + 1 < len(raw):  # ACCESSORIO
+                return raw[i + 1]
+            if pid in big and i + 2 < len(raw):
+                i += 3
+            elif i + 1 < len(raw):
+                i += 2
+            else:
+                break
+        return None
 
     @staticmethod
     def _crc16(data: bytes) -> bytes:
