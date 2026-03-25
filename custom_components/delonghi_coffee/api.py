@@ -13,7 +13,6 @@ import requests
 
 from .const import (
     APP_SIGNATURE,
-    CAPTURED_BREWS,
     GIGYA_API_KEY,
     GIGYA_URL,
     REGIONS,
