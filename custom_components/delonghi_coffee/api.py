@@ -252,24 +252,37 @@ class DeLonghiApi:
         resp.raise_for_status()
         return resp.json().get("property", {})
 
-    def _build_packet(self, ecam_bytes: bytes) -> str:
-        """Build WiFi packet: ECAM + timestamp + app signature -> Base64."""
+    def _build_packet(self, ecam_bytes: bytes, include_app_id: bool = True) -> str:
+        """Build WiFi packet -> Base64.
+
+        Newer models (Eletta Explore): ECAM + timestamp + app_id
+        Older models (PrimaDonna Soul): ECAM + timestamp only
+        """
         ts = struct.pack(">I", int(time.time()))
-        full = ecam_bytes + ts + APP_SIGNATURE
+        if include_app_id:
+            full = ecam_bytes + ts + APP_SIGNATURE
+        else:
+            full = ecam_bytes + ts
         return base64.b64encode(full).decode()
 
     @_retry
     def send_command(self, dsn: str, ecam_bytes: bytes) -> bool:
         """Send an ECAM command to the machine.
 
-        Tries 'app_data_request' first (newer WiFi models like Eletta Explore),
-        falls back to 'data_request' (older WiFi models like PrimaDonna Soul).
+        Newer models (Eletta Explore): app_data_request, packet with app_id
+        Older models (PrimaDonna Soul): data_request, packet without app_id
         """
-        b64 = self._build_packet(ecam_bytes)
         headers = self._headers()
 
-        # Try newer property first
-        for prop_name in ("app_data_request", "data_request"):
+        # Try newer format first (app_data_request + app_id in packet)
+        # Then legacy (data_request + no app_id)
+        attempts = [
+            ("app_data_request", True),   # newer: with app_id
+            ("data_request", False),      # legacy: without app_id
+        ]
+
+        for prop_name, include_app_id in attempts:
+            b64 = self._build_packet(ecam_bytes, include_app_id=include_app_id)
             resp = self._session.post(
                 f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/{prop_name}/datapoints.json",
                 json={"datapoint": {"value": b64}},
@@ -282,9 +295,8 @@ class DeLonghiApi:
             if resp.status_code != 404:
                 _LOGGER.error("Command failed on %s: %s %s", prop_name, resp.status_code, resp.text)
                 return False
-            # 404 = property doesn't exist, try next
 
-        _LOGGER.error("Command failed: no valid request property found (tried app_data_request and data_request)")
+        _LOGGER.error("Command failed: no valid request property found")
         return False
 
     @_retry
