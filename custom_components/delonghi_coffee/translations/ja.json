@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "アクティブプロファイル"
+      },
+      "bean_system": {
+        "name": "豆システム"
       }
     },
     "binary_sensor": {

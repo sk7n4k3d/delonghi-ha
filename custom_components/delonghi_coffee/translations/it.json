@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Profilo attivo"
+      },
+      "bean_system": {
+        "name": "Sistema chicchi"
       }
     },
     "binary_sensor": {

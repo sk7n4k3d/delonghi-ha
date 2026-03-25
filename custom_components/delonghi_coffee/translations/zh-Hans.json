@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "当前用户"
+      },
+      "bean_system": {
+        "name": "咖啡豆系统"
       }
     },
     "binary_sensor": {

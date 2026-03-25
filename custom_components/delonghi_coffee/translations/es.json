@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Perfil activo"
+      },
+      "bean_system": {
+        "name": "Sistema de granos"
       }
     },
     "binary_sensor": {

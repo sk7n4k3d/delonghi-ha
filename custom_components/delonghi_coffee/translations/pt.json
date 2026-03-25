@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Perfil ativo"
+      },
+      "bean_system": {
+        "name": "Sistema de grãos"
       }
     },
     "binary_sensor": {

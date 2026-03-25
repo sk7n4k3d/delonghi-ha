@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Aktywny profil"
+      },
+      "bean_system": {
+        "name": "System ziaren"
       }
     },
     "binary_sensor": {

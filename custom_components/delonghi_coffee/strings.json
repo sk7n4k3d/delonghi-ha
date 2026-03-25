@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Active Profile"
+      },
+      "bean_system": {
+        "name": "Bean System"
       }
     },
     "binary_sensor": {

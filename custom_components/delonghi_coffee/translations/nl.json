@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Actief profiel"
+      },
+      "bean_system": {
+        "name": "Bonensysteem"
       }
     },
     "binary_sensor": {

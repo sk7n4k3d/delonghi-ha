@@ -84,6 +84,9 @@ async def async_setup_entry(
     # Profile sensor
     entities.append(DeLonghiProfileSensor(coordinator, dsn, model, device_name, sw_version))
 
+    # Bean system sensor
+    entities.append(DeLonghiBeanSensor(coordinator, dsn, model, device_name, sw_version))
+
     # Counter sensors
     for key, meta in COUNTER_SENSORS.items():
         entities.append(DeLonghiCounterSensor(coordinator, dsn, model, device_name, sw_version, key, meta))
@@ -196,4 +199,41 @@ class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
             attrs[f"profile_{pid}_name"] = pdata.get("name", "")
             attrs[f"profile_{pid}_color"] = pdata.get("color", "")
             attrs[f"profile_{pid}_figure"] = pdata.get("figure", "")
+        return attrs
+
+
+class DeLonghiBeanSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
+    """Bean Adapt system sensor."""
+
+    def __init__(
+        self,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_bean_system"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "bean_system"
+        self._attr_icon = "mdi:seed"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def native_value(self) -> int:
+        """Return number of bean profiles configured."""
+        beans = self.coordinator.data.get("beans", [])
+        return len(beans)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return all bean profiles as attributes."""
+        beans = self.coordinator.data.get("beans", [])
+        attrs: dict[str, Any] = {}
+        for bean in beans:
+            bid = bean["id"]
+            attrs[f"bean_{bid}_name"] = bean.get("name", "")
+            attrs[f"bean_{bid}_english"] = bean.get("english_name", "")
         return attrs

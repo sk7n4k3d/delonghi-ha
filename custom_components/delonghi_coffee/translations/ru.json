@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Активный профиль"
+      },
+      "bean_system": {
+        "name": "Система зёрен"
       }
     },
     "binary_sensor": {

@@ -811,6 +811,33 @@ class DeLonghiApi:
 
         return {"active": active, "profiles": profiles}
 
+    def get_bean_systems(self, dsn: str) -> list[dict[str, Any]]:
+        """Get bean system names (Bean Adapt profiles)."""
+        props = self.get_properties(dsn)
+        beans: list[dict[str, Any]] = []
+
+        for i in range(7):
+            prop_name = f"d{250 + i}_beansystem_{i}"
+            if prop_name in props:
+                val = props[prop_name].get("value")
+                if val:
+                    try:
+                        raw = base64.b64decode(val)
+                        data = raw[5:-2]
+                        text = data.decode("utf-16-be", errors="replace")
+                        parts = [p for p in text.split("\x00") if p.strip()]
+                        local_name = parts[0] if parts else f"Bean {i}"
+                        english_name = parts[1] if len(parts) > 1 else local_name
+                        beans.append({
+                            "id": i,
+                            "name": local_name,
+                            "english_name": english_name,
+                        })
+                    except (ValueError, UnicodeDecodeError):
+                        beans.append({"id": i, "name": f"Bean {i}", "english_name": f"Bean {i}"})
+
+        return beans
+
     def get_available_beverages(self, dsn: str) -> list[str]:
         """Get list of available beverage keys from device properties."""
         props = self.get_properties(dsn)

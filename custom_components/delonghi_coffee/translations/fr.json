@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Profil actif"
+      },
+      "bean_system": {
+        "name": "Système de grains"
       }
     },
     "binary_sensor": {

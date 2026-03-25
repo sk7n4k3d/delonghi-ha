@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "활성 프로필"
+      },
+      "bean_system": {
+        "name": "원두 시스템"
       }
     },
     "binary_sensor": {

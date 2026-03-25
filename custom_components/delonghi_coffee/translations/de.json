@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Aktives Profil"
+      },
+      "bean_system": {
+        "name": "Bohnensystem"
       }
     },
     "binary_sensor": {

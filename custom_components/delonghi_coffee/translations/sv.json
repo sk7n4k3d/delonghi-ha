@@ -123,6 +123,9 @@
       },
       "active_profile": {
         "name": "Aktiv profil"
+      },
+      "bean_system": {
+        "name": "Bönsystem"
       }
     },
     "binary_sensor": {
