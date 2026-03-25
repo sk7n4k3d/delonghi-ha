@@ -637,9 +637,13 @@ class DeLonghiApi:
                 if monitor_val:
                     raw = base64.b64decode(monitor_val)
                     current_acc = raw[4] if len(raw) > 4 else 0
-                    if current_acc == 0:
+                    # Milk drinks need acc >= 2 (Latte Crema Hot/Cool)
+                    # acc 0 = nothing, 1 = hot water spout
+                    if current_acc < 2:
+                        acc_names = {0: "nothing", 1: "hot water spout"}
                         raise DeLonghiApiError(
-                            f"Cannot brew {beverage_key}: milk module not attached."
+                            f"Cannot brew {beverage_key}: milk module required "
+                            f"(current: {acc_names.get(current_acc, current_acc)})"
                         )
             except (KeyError, ValueError):
                 pass
