@@ -53,6 +53,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         super().__init__(coordinator)
         self._api = api
         self._dsn = dsn
+        self._assumed_on = True  # Assume on at startup (safe default)
         self._attr_unique_id = f"{dsn}_power"
         self._attr_has_entity_name = True
         self._attr_translation_key = "power"
@@ -68,9 +69,17 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return True if machine is on (not in standby/off)."""
-        state = self.coordinator.data.get("machine_state", "Off")
-        return state not in ("Off", "Going to sleep", "Unknown")
+        """Return True if machine is on.
+
+        Uses monitor state if available, falls back to local tracking
+        for models without monitor properties (PrimaDonna Soul).
+        """
+        state = self.coordinator.data.get("machine_state", "Unknown")
+        if state != "Unknown":
+            # Monitor data available — use it
+            return state not in ("Off", "Going to sleep")
+        # No monitor — use locally tracked state
+        return self._assumed_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Power on the machine."""
@@ -81,6 +90,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             )
             if not success:
                 raise HomeAssistantError("Failed to power on")
+            self._assumed_on = True
         except DeLonghiApiError as err:
             raise HomeAssistantError(f"Failed to power on: {err}") from err
         await self.coordinator.async_request_refresh()
@@ -94,6 +104,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             )
             if not success:
                 raise HomeAssistantError("Failed to power off")
+            self._assumed_on = False
         except DeLonghiApiError as err:
             raise HomeAssistantError(f"Failed to power off: {err}") from err
         await self.coordinator.async_request_refresh()
