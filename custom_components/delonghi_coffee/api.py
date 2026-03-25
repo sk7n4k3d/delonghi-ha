@@ -12,8 +12,6 @@ from typing import Any
 import requests
 
 from .const import (
-    AYLA_APP_ID,
-    AYLA_APP_SECRET,
     APP_SIGNATURE,
     CAPTURED_BREWS,
     GIGYA_API_KEY,
@@ -75,8 +73,10 @@ class DeLonghiApi:
         # Gigya always uses EU1 (confirmed from app manifest)
         self._gigya_url: str = GIGYA_URL
 
-        # Region-specific Ayla endpoints
+        # Region-specific Ayla endpoints AND credentials
         region_cfg = REGIONS.get(region, REGIONS["EU"])
+        self._ayla_app_id: str = region_cfg["ayla_app_id"]
+        self._ayla_app_secret: str = region_cfg["ayla_app_secret"]
         self._ayla_user: str = region_cfg["ayla_user"]
         self._ayla_ads: str = region_cfg["ayla_ads"]
 
@@ -148,8 +148,8 @@ class DeLonghiApi:
             ayla_resp = self._session.post(
                 f"{self._ayla_user}/api/v1/token_sign_in",
                 data={
-                    "app_id": AYLA_APP_ID,
-                    "app_secret": AYLA_APP_SECRET,
+                    "app_id": self._ayla_app_id,
+                    "app_secret": self._ayla_app_secret,
                     "token": jwt_token,
                 },
                 timeout=REQUEST_TIMEOUT,

@@ -26,19 +26,26 @@ CONF_REGION: Final = "region"
 # Only Ayla endpoints change per region
 GIGYA_URL: Final = "https://accounts.eu1.gigya.com"
 
+# Each region has different Ayla credentials AND endpoints
 REGIONS: Final[dict[str, dict[str, str]]] = {
     "EU": {
         "name": "Europe",
+        "ayla_app_id": "DLonghiCoffeeIdKit-sQ-id",
+        "ayla_app_secret": "DLonghiCoffeeIdKit-HT6b0VNd4y6CSha9ivM5k8navLw",
         "ayla_user": "https://user-field-eu.aylanetworks.com",
         "ayla_ads": "https://ads-eu.aylanetworks.com",
     },
     "US": {
         "name": "United States",
+        "ayla_app_id": "DeLonghiCoffeeIdKit-yA-id",
+        "ayla_app_secret": "DeLonghiCoffeeIdKit-2oUcfCkA0pUIACH8jSCwWsf1RcU",
         "ayla_user": "https://user-field.aylanetworks.com",
         "ayla_ads": "https://ads-field.aylanetworks.com",
     },
     "CN": {
         "name": "China",
+        "ayla_app_id": "DeLonghiCoffeeIdKit-yA-id",
+        "ayla_app_secret": "DeLonghiCoffeeIdKit-2oUcfCkA0pUIACH8jSCwWsf1RcU",
         "ayla_user": "https://user-field.ayla.com.cn",
         "ayla_ads": "https://ads-field.ayla.com.cn",
     },
