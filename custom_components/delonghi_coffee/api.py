@@ -909,13 +909,15 @@ class DeLonghiApi:
         for name in props:
             if "_rec_2_" in name:
                 bev = name.split("_rec_2_", 1)[-1]
-                beverages.add(bev)
+                if bev and not bev.isdigit():
+                    beverages.add(bev)
 
         if not beverages:
             for name in props:
                 if "_rec_1_" in name:
                     bev = name.split("_rec_1_", 1)[-1]
-                    beverages.add(bev)
+                    if bev and not bev.isdigit():
+                        beverages.add(bev)
 
         if not beverages:
             for name in props:
@@ -925,6 +927,8 @@ class DeLonghiApi:
                     rest = parts[1]
                     idx = rest.find("_")
                     if idx > 0:
-                        beverages.add(rest[idx + 1:])
+                        bev = rest[idx + 1:]
+                        if bev and not bev.isdigit():
+                            beverages.add(bev)
 
         return sorted(beverages)

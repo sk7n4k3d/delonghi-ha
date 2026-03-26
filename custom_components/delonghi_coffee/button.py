@@ -94,7 +94,12 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         self._beverage_key = beverage_key
         self._attr_unique_id = f"{dsn}_brew_{beverage_key}"
         self._attr_has_entity_name = True
-        self._attr_translation_key = f"brew_{beverage_key}"
+        # Use translation_key only for beverages with known translations,
+        # otherwise fall back to a readable name
+        if beverage_key in BEVERAGES:
+            self._attr_translation_key = f"brew_{beverage_key}"
+        else:
+            self._attr_name = f"Brew {meta['name']}"
         self._attr_icon = meta["icon"]
         self._attr_device_info: dict[str, Any] = {
             "identifiers": {(DOMAIN, dsn)},

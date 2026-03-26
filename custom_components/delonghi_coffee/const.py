@@ -69,6 +69,7 @@ RETRY_DELAY: Final = 2  # seconds
 
 # Beverage profiles — mapped from captured data
 BEVERAGES: Final[dict[str, dict[str, str]]] = {
+    # Standard
     "espresso": {"name": "Espresso", "icon": "mdi:coffee"},
     "regular": {"name": "Coffee", "icon": "mdi:coffee"},
     "long_coffee": {"name": "Long Coffee", "icon": "mdi:coffee-outline"},
@@ -88,6 +89,41 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "coffee_pot": {"name": "Coffee Pot", "icon": "mdi:coffee-maker"},
     "cortado": {"name": "Cortado", "icon": "mdi:coffee"},
     "brew_over_ice": {"name": "Brew Over Ice", "icon": "mdi:snowflake"},
+    # Iced
+    "over_ice_espr": {"name": "Iced Espresso", "icon": "mdi:snowflake"},
+    "i_americano": {"name": "Iced Americano", "icon": "mdi:snowflake"},
+    "i_cappuccino": {"name": "Iced Cappuccino", "icon": "mdi:snowflake"},
+    "i_latte_macch": {"name": "Iced Latte Macchiato", "icon": "mdi:snowflake"},
+    "i_capp_mix": {"name": "Iced Cappuccino Mix", "icon": "mdi:snowflake"},
+    "i_flatwhite": {"name": "Iced Flat White", "icon": "mdi:snowflake"},
+    "i_coldmilk": {"name": "Iced Cold Milk", "icon": "mdi:snowflake"},
+    "i_caffelatte": {"name": "Iced Caffe Latte", "icon": "mdi:snowflake"},
+    # My (personalized)
+    "m_americano": {"name": "My Americano", "icon": "mdi:coffee-outline"},
+    "m_cappuccino": {"name": "My Cappuccino", "icon": "mdi:coffee-maker-outline"},
+    "m_latte_macch": {"name": "My Latte Macchiato", "icon": "mdi:glass-mug-variant"},
+    "m_caffelatte": {"name": "My Caffe Latte", "icon": "mdi:glass-mug-variant"},
+    "m_capp_mix": {"name": "My Cappuccino Mix", "icon": "mdi:coffee-maker-outline"},
+    "m_flat_white": {"name": "My Flat White", "icon": "mdi:coffee"},
+    "m_hot_milk": {"name": "My Hot Milk", "icon": "mdi:cup"},
+    # My Iced
+    "mi_over_ice": {"name": "My Iced", "icon": "mdi:snowflake"},
+    "mi_americano": {"name": "My Iced Americano", "icon": "mdi:snowflake"},
+    "mi_capp": {"name": "My Iced Cappuccino", "icon": "mdi:snowflake"},
+    "mi_latte_macch": {"name": "My Iced Latte Macchiato", "icon": "mdi:snowflake"},
+    "mi_cafflatt": {"name": "My Iced Caffe Latte", "icon": "mdi:snowflake"},
+    "mi_capp_mix": {"name": "My Iced Cappuccino Mix", "icon": "mdi:snowflake"},
+    "mi_flat_white": {"name": "My Iced Flat White", "icon": "mdi:snowflake"},
+    "mi_cold_milk": {"name": "My Iced Cold Milk", "icon": "mdi:snowflake"},
+    # Cold Brew
+    "a_cb_coffee": {"name": "Cold Brew Coffee", "icon": "mdi:snowflake"},
+    "b_cb_coffee_ess": {"name": "Cold Brew Espresso", "icon": "mdi:snowflake"},
+    "c_cb_coffee_pot": {"name": "Cold Brew Pot", "icon": "mdi:snowflake"},
+    "d_cb_latte": {"name": "Cold Brew Latte", "icon": "mdi:snowflake"},
+    "e_cb_cappuccino": {"name": "Cold Brew Cappuccino", "icon": "mdi:snowflake"},
+    "f_cb_mug": {"name": "Cold Brew Mug", "icon": "mdi:snowflake"},
+    "g_cb_latte_mug": {"name": "Cold Brew Latte Mug", "icon": "mdi:snowflake"},
+    "h_cb_capp_mug": {"name": "Cold Brew Cappuccino Mug", "icon": "mdi:snowflake"},
 }
 
 # Captured MITM brew commands — verified working, byte-for-byte exact
