@@ -424,8 +424,14 @@ class DeLonghiApi:
         counters: dict[str, Any] = {}
 
         # Simple integer counters
+        # Some properties differ between models:
+        #   Eletta Explore: d701_tot_bev_b (total beverages)
+        #   PrimaDonna Soul: d700_tot_bev_b (black), d701_tot_bev_bw (black+white), d703_tot_bev_w (water)
         counter_map: dict[str, str] = {
+            "d700_tot_bev_b": "total_black_beverages",
             "d701_tot_bev_b": "total_beverages",
+            "d701_tot_bev_bw": "total_beverages",
+            "d703_tot_bev_w": "total_water_beverages",
             "d704_tot_bev_espressi": "total_espressos",
             "d705_tot_id1_espr": "espresso",
             "d706_tot_id2_coffee": "coffee",
@@ -451,6 +457,9 @@ class DeLonghiApi:
             "d513_percentage_usage_fltr": "filter_percentage",
             "d554_cnt_filter_tot": "filter_replacements",
             "d555_water_filter_qty": "water_through_filter_ml",
+            "d550_water_calc_qty": "water_since_descale_ml",
+            "d557_milk_cln_cnt": "milk_clean_count",
+            "d558_bev_cnt_desc_on": "beverages_since_descale",
         }
         for prop_name, friendly in counter_map.items():
             if prop_name in props:

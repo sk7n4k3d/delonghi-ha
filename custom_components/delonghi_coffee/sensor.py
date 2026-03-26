@@ -46,6 +46,12 @@ COUNTER_SENSORS: dict[str, dict[str, str]] = {
     "filter_percentage": {"name": "Water Filter Usage", "icon": "mdi:filter", "unit": "%"},
     "filter_replacements": {"name": "Filter Replacements", "icon": "mdi:filter-check", "unit": "times"},
     "water_through_filter_ml": {"name": "Water Through Filter", "icon": "mdi:filter", "unit": "mL"},
+    # PrimaDonna Soul specific
+    "total_black_beverages": {"name": "Total Black Beverages", "icon": "mdi:coffee", "unit": "cups"},
+    "total_water_beverages": {"name": "Total Water Beverages", "icon": "mdi:water", "unit": "cups"},
+    "water_since_descale_ml": {"name": "Water Since Descale", "icon": "mdi:water-alert", "unit": "mL"},
+    "milk_clean_count": {"name": "Milk Cleans", "icon": "mdi:spray-bottle", "unit": "times"},
+    "beverages_since_descale": {"name": "Beverages Since Descale", "icon": "mdi:counter", "unit": "cups"},
     # Custom / other
     "usage_tot_custom_b_bw": {"name": "Custom Beverages", "icon": "mdi:coffee-to-go", "unit": "cups"},
     "other_tot_bev_other": {"name": "Other Beverages", "icon": "mdi:cup", "unit": "cups"},
