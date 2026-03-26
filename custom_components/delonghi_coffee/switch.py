@@ -71,12 +71,20 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             self._attr_device_info["sw_version"] = sw_version
 
     @property
+    def _no_cloud_status(self) -> bool:
+        """Return True if model has no cloud status (app_device_status 404)."""
+        return self.coordinator.data.get("status", "UNKNOWN") == "UNKNOWN"
+
+    @property
     def assumed_state(self) -> bool:
         """Return True if state is assumed (no monitor available or stale)."""
         state = self.coordinator.data.get("machine_state", "Unknown")
         if state == "Unknown":
             return True
-        # If we detected persistent staleness, we're in assumed mode
+        # Models without cloud status have permanently stale monitors
+        if self._no_cloud_status:
+            return True
+        # If we detected persistent staleness after a command
         if self._monitor_stale_count >= 2 and self._last_commanded_on is not None:
             return True
         return False
@@ -85,20 +93,24 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
     def is_on(self) -> bool:
         """Return True if machine is on.
 
-        Uses monitor state if available and responsive, falls back to local
-        tracking for models with permanently stale cloud monitor data.
-
-        Staleness detection: after a power command, if the monitor keeps
-        returning the same value (contradicting what we commanded), we
-        count consecutive stale polls. After 2+ stale polls, we trust
-        the assumed state indefinitely until the monitor actually changes.
+        Models without app_device_status (404) have permanently stale
+        monitors — always use assumed state for those. For other models,
+        trust the monitor unless we detect staleness after a command.
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
-        cloud_status = self.coordinator.data.get("status", "UNKNOWN")
 
         # No monitor data at all → use assumed state
         if state == "Unknown":
             _LOGGER.debug("Switch is_on: no monitor, assumed=%s", self._assumed_on)
+            return self._assumed_on
+
+        # Models without cloud status → monitor is permanently stale
+        if self._no_cloud_status:
+            _LOGGER.debug(
+                "Switch is_on: no cloud status, monitor=%s ignored, assumed=%s",
+                state,
+                self._assumed_on,
+            )
             return self._assumed_on
 
         # Detect stale monitor: after a power command, check if monitor
@@ -107,7 +119,6 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             monitor_says_on = state not in ("Off", "Going to sleep")
 
             if monitor_says_on != self._last_commanded_on:
-                # Monitor contradicts our command and hasn't changed
                 if state == self._last_monitor_state:
                     self._monitor_stale_count += 1
                     _LOGGER.debug(
@@ -117,25 +128,21 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
                         self._monitor_stale_count,
                     )
                 else:
-                    # Monitor changed to something else but still contradicts
                     self._monitor_stale_count = 1
             else:
-                # Monitor agrees with our command → it's responsive
                 self._monitor_stale_count = 0
                 self._last_commanded_on = None
                 _LOGGER.debug("Switch: monitor confirmed %s state", state)
 
         self._last_monitor_state = state
 
-        # If monitor is persistently stale (2+ polls unchanged after command),
-        # trust assumed state instead
+        # If monitor is persistently stale after command, trust assumed state
         if self._monitor_stale_count >= 2 and self._last_commanded_on is not None:
             _LOGGER.debug(
-                "Switch is_on: monitor stale ('%s' x%d), using assumed=%s (cloud=%s)",
+                "Switch is_on: monitor stale ('%s' x%d), using assumed=%s",
                 state,
                 self._monitor_stale_count,
                 self._assumed_on,
-                cloud_status,
             )
             return self._assumed_on
 
