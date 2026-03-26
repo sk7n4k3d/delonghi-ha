@@ -254,6 +254,83 @@ class DeLonghiApi:
         resp.raise_for_status()
         return resp.json().get("property", {})
 
+    def get_lan_config(self, dsn: str) -> dict[str, Any]:
+        """Get LAN connection config (lan_key, lan_enabled, IP).
+
+        Returns dict with:
+          - lan_enabled: bool
+          - lanip_key: str (AES key for local LAN crypto)
+          - lanip_key_id: int
+          - lan_ip: str (machine's local IP)
+          - status: str (Online/Offline)
+        """
+        result: dict[str, Any] = {
+            "lan_enabled": False,
+            "lanip_key": None,
+            "lanip_key_id": None,
+            "lan_ip": None,
+            "status": None,
+        }
+
+        # Get device info for lan_enabled and IP
+        try:
+            resp = self._session.get(
+                f"{self._ayla_ads}/apiv1/dsns/{dsn}.json",
+                headers=self._headers(),
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            device = resp.json().get("device", {})
+            result["lan_enabled"] = bool(device.get("lan_enabled", False))
+            result["lan_ip"] = device.get("lan_ip")
+            result["status"] = device.get("connection_status")
+            _LOGGER.debug(
+                "LAN config for %s: enabled=%s, ip=%s, status=%s",
+                dsn, result["lan_enabled"], result["lan_ip"], result["status"],
+            )
+        except (requests.RequestException, DeLonghiApiError) as err:
+            _LOGGER.debug("Failed to get device info for %s: %s", dsn, err)
+
+        # Get LAN key from connection_config endpoint
+        if result["lan_enabled"]:
+            try:
+                resp = self._session.get(
+                    f"{self._ayla_ads}/apiv1/devices/{dsn}/lan.json",
+                    headers=self._headers(),
+                    timeout=REQUEST_TIMEOUT,
+                )
+                resp.raise_for_status()
+                lanip = resp.json().get("lanip", {})
+                result["lanip_key"] = lanip.get("lanip_key")
+                result["lanip_key_id"] = lanip.get("lanip_key_id")
+                _LOGGER.debug(
+                    "LAN key for %s: key_id=%s, key=%s",
+                    dsn,
+                    result["lanip_key_id"],
+                    "***" if result["lanip_key"] else "None",
+                )
+            except (requests.RequestException, DeLonghiApiError) as err:
+                _LOGGER.debug("Failed to get LAN key for %s: %s", dsn, err)
+                # Try alternative endpoint
+                try:
+                    resp = self._session.get(
+                        f"{self._ayla_ads}/apiv1/devices/{dsn}/connection_config.json",
+                        headers=self._headers(),
+                        timeout=REQUEST_TIMEOUT,
+                    )
+                    resp.raise_for_status()
+                    cfg = resp.json()
+                    result["lanip_key"] = cfg.get("local_key")
+                    result["lanip_key_id"] = cfg.get("local_key_id")
+                    _LOGGER.debug(
+                        "LAN key (alt) for %s: key_id=%s",
+                        dsn, result["lanip_key_id"],
+                    )
+                except (requests.RequestException, DeLonghiApiError) as err2:
+                    _LOGGER.debug("Failed alt LAN key for %s: %s", dsn, err2)
+
+        return result
+
     def _build_packet(self, ecam_bytes: bytes, include_app_id: bool = True) -> str:
         """Build WiFi packet -> Base64.
 

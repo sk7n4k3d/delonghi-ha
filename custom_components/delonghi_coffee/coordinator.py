@@ -40,6 +40,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cached_counters: dict[str, Any] = {}
         self._cached_profiles: dict[str, Any] = {}
         self._cached_beans: list[dict[str, Any]] = []
+        self._lan_config: dict[str, Any] | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -75,6 +76,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._cached_profiles = self.api.parse_profiles(all_props)
                 self._cached_beans = self.api.parse_bean_systems(all_props)
 
+                # Fetch LAN config once (first full refresh only)
+                if self._lan_config is None:
+                    self._lan_config = await self.hass.async_add_executor_job(
+                        self.api.get_lan_config, self.dsn
+                    )
+
                 self._last_full_refresh = now
 
             return {
@@ -87,6 +94,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "active_profile": self._cached_profiles.get("active", 1),
                 "profiles": self._cached_profiles.get("profiles", {}),
                 "beans": self._cached_beans,
+                "lan_config": self._lan_config or {},
             }
         except DeLonghiAuthError as err:
             raise UpdateFailed(f"Authentication error: {err}") from err

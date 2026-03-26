@@ -128,12 +128,17 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
         alarms: list[dict[str, Any]] = self.coordinator.data.get("alarms", [])
-        return {
+        lan: dict[str, Any] = self.coordinator.data.get("lan_config", {})
+        attrs: dict[str, Any] = {
             "cloud_status": self.coordinator.data.get("status", "UNKNOWN"),
             "profile": self.coordinator.data.get("profile", 0),
             "active_alarms": [a["name"] for a in alarms],
             "alarm_count": len(alarms),
         }
+        if lan:
+            attrs["lan_enabled"] = lan.get("lan_enabled", False)
+            attrs["lan_ip"] = lan.get("lan_ip")
+        return attrs
 
 
 class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
