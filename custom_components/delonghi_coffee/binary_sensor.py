@@ -58,6 +58,7 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
     ) -> None:
         super().__init__(coordinator)
         self._alarm_bit = alarm_bit
+        self._inverted = meta.get("inverted", False)
         self._attr_unique_id = f"{dsn}_alarm_{alarm_bit}"
         self._attr_has_entity_name = True
         self._attr_translation_key = f"alarm_{alarm_bit}"
@@ -73,6 +74,12 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
 
     @property
     def is_on(self) -> bool:
-        """Return True if alarm is active."""
+        """Return True if alarm is active.
+
+        Some bits are inverted — they indicate a positive state (e.g. tank
+        in position, grid present). For those, the alarm is active when
+        the bit is NOT set (meaning the thing is missing).
+        """
         alarms: list[dict[str, Any]] = self.coordinator.data.get("alarms", [])
-        return any(a["bit"] == self._alarm_bit for a in alarms)
+        bit_set = any(a["bit"] == self._alarm_bit for a in alarms)
+        return not bit_set if self._inverted else bit_set

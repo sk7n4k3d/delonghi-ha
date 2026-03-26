@@ -1,6 +1,6 @@
 """Constants for De'Longhi Coffee integration."""
 
-from typing import Final
+from typing import Any, Final
 
 DOMAIN: Final = "delonghi_coffee"
 
@@ -145,7 +145,7 @@ POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")
 POWER_OFF_CMD: Final = bytes.fromhex("0d07840f01010041")
 
 # Monitor V2 alarm bit definitions (32-bit word from bytes[7], [8], [12], [13])
-ALARMS: Final[dict[int, dict[str, str]]] = {
+ALARMS: Final[dict[int, dict[str, Any]]] = {
     0: {"name": "Water Tank Empty", "icon": "mdi:water-off"},
     1: {"name": "Grounds Container Full", "icon": "mdi:delete-alert"},
     2: {"name": "Descale Needed", "icon": "mdi:water-alert"},
@@ -159,12 +159,12 @@ ALARMS: Final[dict[int, dict[str, str]]] = {
     10: {"name": "Steamer Probe Failure", "icon": "mdi:thermometer-alert"},
     11: {"name": "Drip Tray Missing", "icon": "mdi:tray-alert"},
     12: {"name": "Hydraulic Problem", "icon": "mdi:pipe-leak"},
-    13: {"name": "Tank In Position", "icon": "mdi:check-circle"},
+    13: {"name": "Water Tank Missing", "icon": "mdi:water-off", "inverted": True},
     14: {"name": "Clean Milk Knob", "icon": "mdi:broom"},
     15: {"name": "Coffee Beans Empty 2", "icon": "mdi:seed-off"},
     16: {"name": "Cleaning Needed", "icon": "mdi:spray-bottle"},
     17: {"name": "Bean Hopper Absent", "icon": "mdi:tray-remove"},
-    18: {"name": "Grid Present", "icon": "mdi:grid"},
+    18: {"name": "Grid Missing", "icon": "mdi:grid", "inverted": True},
 }
 
 # Machine state values (from MonitorDataV2.f() -> byte[9])
