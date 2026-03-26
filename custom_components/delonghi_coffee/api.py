@@ -413,7 +413,14 @@ class DeLonghiApi:
 
     def parse_counters(self, props: dict[str, Any]) -> dict[str, Any]:
         """Get beverage counters, maintenance stats, and JSON sub-counters."""
-        
+
+        # Dump raw counter properties for debugging model differences
+        for name in sorted(props):
+            if name.startswith(("d70", "d71", "d72", "d73", "d74", "d55", "d51", "d58")):
+                val = props[name].get("value")
+                if val is not None:
+                    _LOGGER.debug("Counter property %s = %s", name, str(val)[:200])
+
         counters: dict[str, Any] = {}
 
         # Simple integer counters
