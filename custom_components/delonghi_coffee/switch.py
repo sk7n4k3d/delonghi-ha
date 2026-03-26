@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
@@ -55,8 +54,9 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         self._api = api
         self._dsn = dsn
         self._assumed_on = True  # Assume on at startup (safe default)
-        self._command_sent_at: float = 0  # Timestamp of last power command
-        self._last_monitor_value: str | None = None  # Track stale monitor data
+        self._last_commanded_on: bool | None = None  # What we last commanded
+        self._monitor_stale_count: int = 0  # How many polls returned same value after command
+        self._last_monitor_state: str | None = None  # Previous poll's monitor value
         self._attr_unique_id = f"{dsn}_power"
         self._attr_has_entity_name = True
         self._attr_translation_key = "power"
@@ -72,20 +72,12 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
 
     @property
     def assumed_state(self) -> bool:
-        """Return True if state is assumed (no monitor available)."""
-        return self.coordinator.data.get("machine_state", "Unknown") == "Unknown"
-
-    @property
-    def _monitor_is_stale(self) -> bool:
-        """Check if monitor data is stale (never changes between polls).
-
-        Some models (PrimaDonna Soul) have a d302_monitor property that
-        returns cached cloud data which doesn't update when the machine
-        is off. We detect this by checking if a power command was sent
-        recently — if so, trust assumed state over stale monitor.
-        """
-        # After a power command, trust assumed state for 180s (3 poll cycles)
-        if self._command_sent_at and (time.time() - self._command_sent_at) < 180:
+        """Return True if state is assumed (no monitor available or stale)."""
+        state = self.coordinator.data.get("machine_state", "Unknown")
+        if state == "Unknown":
+            return True
+        # If we detected persistent staleness, we're in assumed mode
+        if self._monitor_stale_count >= 2 and self._last_commanded_on is not None:
             return True
         return False
 
@@ -93,28 +85,61 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
     def is_on(self) -> bool:
         """Return True if machine is on.
 
-        Uses monitor state if available and fresh, falls back to local
-        tracking for models without monitor or with stale data.
+        Uses monitor state if available and responsive, falls back to local
+        tracking for models with permanently stale cloud monitor data.
+
+        Staleness detection: after a power command, if the monitor keeps
+        returning the same value (contradicting what we commanded), we
+        count consecutive stale polls. After 2+ stale polls, we trust
+        the assumed state indefinitely until the monitor actually changes.
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
+        cloud_status = self.coordinator.data.get("status", "UNKNOWN")
 
         # No monitor data at all → use assumed state
         if state == "Unknown":
             _LOGGER.debug("Switch is_on: no monitor, assumed=%s", self._assumed_on)
             return self._assumed_on
 
-        # Monitor exists but we just sent a power command → trust assumed state
-        # (cloud monitor returns stale "Ready" even after power off on some models)
-        if self._monitor_is_stale:
+        # Detect stale monitor: after a power command, check if monitor
+        # reflects the change or stays frozen
+        if self._last_commanded_on is not None:
+            monitor_says_on = state not in ("Off", "Going to sleep")
+
+            if monitor_says_on != self._last_commanded_on:
+                # Monitor contradicts our command and hasn't changed
+                if state == self._last_monitor_state:
+                    self._monitor_stale_count += 1
+                    _LOGGER.debug(
+                        "Switch: monitor stuck on '%s' after %s command (%d polls)",
+                        state,
+                        "ON" if self._last_commanded_on else "OFF",
+                        self._monitor_stale_count,
+                    )
+                else:
+                    # Monitor changed to something else but still contradicts
+                    self._monitor_stale_count = 1
+            else:
+                # Monitor agrees with our command → it's responsive
+                self._monitor_stale_count = 0
+                self._last_commanded_on = None
+                _LOGGER.debug("Switch: monitor confirmed %s state", state)
+
+        self._last_monitor_state = state
+
+        # If monitor is persistently stale (2+ polls unchanged after command),
+        # trust assumed state instead
+        if self._monitor_stale_count >= 2 and self._last_commanded_on is not None:
             _LOGGER.debug(
-                "Switch is_on: monitor=%s but command sent %.0fs ago, assumed=%s",
+                "Switch is_on: monitor stale ('%s' x%d), using assumed=%s (cloud=%s)",
                 state,
-                time.time() - self._command_sent_at,
+                self._monitor_stale_count,
                 self._assumed_on,
+                cloud_status,
             )
             return self._assumed_on
 
-        # Monitor data is fresh → trust it and sync assumed state
+        # Monitor is responsive → trust it
         result = state not in ("Off", "Going to sleep")
         self._assumed_on = result
         _LOGGER.debug("Switch is_on: monitor=%s → %s", state, result)
@@ -130,7 +155,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             if not success:
                 raise HomeAssistantError("Failed to power on")
             self._assumed_on = True
-            self._command_sent_at = time.time()
+            self._last_commanded_on = True
+            self._monitor_stale_count = 0
         except DeLonghiApiError as err:
             raise HomeAssistantError(f"Failed to power on: {err}") from err
         self.async_write_ha_state()
@@ -146,7 +172,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             if not success:
                 raise HomeAssistantError("Failed to power off")
             self._assumed_on = False
-            self._command_sent_at = time.time()
+            self._last_commanded_on = False
+            self._monitor_stale_count = 0
         except DeLonghiApiError as err:
             raise HomeAssistantError(f"Failed to power off: {err}") from err
         self.async_write_ha_state()
