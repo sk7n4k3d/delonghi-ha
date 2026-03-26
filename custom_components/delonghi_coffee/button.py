@@ -37,18 +37,41 @@ async def async_setup_entry(
             api.get_available_beverages, dsn
         )
 
-    entities: list[ButtonEntity] = []
+    known_keys: set[str] = set()
 
-    for bev_key in coordinator.beverages:
-        meta = BEVERAGES.get(bev_key, {
-            "name": bev_key.replace("_", " ").title(),
-            "icon": "mdi:coffee",
-        })
-        entities.append(
-            DeLonghiBrewButton(api, coordinator, dsn, model, device_name, sw_version, bev_key, meta)
-        )
+    def _add_buttons(beverage_keys: list[str]) -> None:
+        """Create button entities for newly discovered beverages."""
+        new_entities: list[ButtonEntity] = []
+        for bev_key in beverage_keys:
+            if bev_key in known_keys:
+                continue
+            known_keys.add(bev_key)
+            meta = BEVERAGES.get(bev_key, {
+                "name": bev_key.replace("_", " ").title(),
+                "icon": "mdi:coffee",
+            })
+            new_entities.append(
+                DeLonghiBrewButton(
+                    api, coordinator, dsn, model, device_name, sw_version, bev_key, meta
+                )
+            )
+        if new_entities:
+            _LOGGER.info("Adding %d brew buttons", len(new_entities))
+            async_add_entities(new_entities)
 
-    async_add_entities(entities)
+    # Add buttons for currently known beverages
+    _add_buttons(coordinator.beverages)
+
+    # If no beverages found yet, listen for coordinator updates
+    # and add buttons when they're discovered on the next full refresh
+    if not coordinator.beverages:
+        _LOGGER.warning("No beverages discovered yet — will retry on next refresh")
+
+        def _on_update() -> None:
+            if coordinator.beverages:
+                _add_buttons(coordinator.beverages)
+
+        coordinator.async_add_listener(_on_update)
 
 
 class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):

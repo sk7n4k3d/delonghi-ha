@@ -900,11 +900,31 @@ class DeLonghiApi:
         return self.parse_available_beverages(self.get_properties(dsn))
 
     def parse_available_beverages(self, props: dict[str, Any]) -> list[str]:
-        """Parse available beverages from pre-fetched properties."""
+        """Parse available beverages from pre-fetched properties.
+
+        Tries profile 2 first (user defaults), falls back to profile 1,
+        then any _rec_N_ pattern. Some models only have profile 1.
+        """
         beverages: set[str] = set()
         for name in props:
-            # Match d1XX_rec_2_BEVERAGE pattern (profile 2 = user defaults)
             if "_rec_2_" in name:
                 bev = name.split("_rec_2_", 1)[-1]
                 beverages.add(bev)
+
+        if not beverages:
+            for name in props:
+                if "_rec_1_" in name:
+                    bev = name.split("_rec_1_", 1)[-1]
+                    beverages.add(bev)
+
+        if not beverages:
+            for name in props:
+                # Generic fallback: match any d{NNN}_rec_{N}_{beverage} pattern
+                parts = name.split("_rec_", 1)
+                if len(parts) == 2 and parts[0].startswith("d"):
+                    rest = parts[1]
+                    idx = rest.find("_")
+                    if idx > 0:
+                        beverages.add(rest[idx + 1:])
+
         return sorted(beverages)
