@@ -1,9 +1,5 @@
 # De'Longhi Coffee for Home Assistant
 
-> **AI Disclosure:** This integration was developed with the assistance of Claude (Anthropic). The protocol reverse engineering, code architecture, and implementation were produced in collaboration with AI. All code has been reviewed, tested on real hardware, and audited for security.
->
-> **This repository is actively monitored by [Claude Code](https://claude.ai/claude-code).** Issues are triaged, code fixes are pushed, and responses are posted automatically. Bug reports are typically addressed within minutes. If you open an issue, expect a fast and detailed response — powered by AI, validated on real hardware.
-
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/v/release/sk7n4k3d/delonghi-ha)](https://github.com/sk7n4k3d/delonghi-ha/releases)
 
@@ -33,6 +29,20 @@ Any De'Longhi WiFi-connected coffee machine that works with the **De'Longhi Coff
 - Rivelia (EXAM440.xx)
 - Perfetto (ECAM550.xx)
 - Other Ayla Networks-connected models
+
+## Comparison with Other Integrations
+
+| | **delonghi-ha** (this) | **[cremalink-ha](https://github.com/miditkl/cremalink-ha)** | **[ha-delonghi-coffee](https://github.com/ArbuzovAA/ha-delonghi-coffee)** |
+|---|---|---|---|
+| **Connection** | WiFi / Ayla Cloud API | WiFi / Local LAN | Bluetooth Low Energy |
+| **Protocol** | Cloud (Gigya + Ayla REST) | LAN (AES-256-CBC direct) | BLE GATT |
+| **Latency** | ~2-5s (cloud round-trip) | ~instant (local network) | ~instant (BLE range) |
+| **Rate limiting** | Possible (Ayla per-IP limits) | None (local) | None (local) |
+| **WiFi models** | All Coffee Link WiFi models | PrimaDonna Soul confirmed | Not supported |
+| **BLE-only models** | Not supported | Not supported | Supported |
+| **Sensors** | 30+ counters, 19 alarms, maintenance | Status, basic counters | Basic status |
+| **Brew commands** | 50+ beverages, recipe conversion | Yes | Limited |
+| **Multi-region** | EU, US, CN | EU | N/A |
 
 ## Installation
 
