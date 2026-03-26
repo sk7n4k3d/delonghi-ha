@@ -53,7 +53,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         super().__init__(coordinator)
         self._api = api
         self._dsn = dsn
-        self._assumed_on = True  # Assume on at startup (safe default)
+        self._assumed_on = False  # Assume off at startup (safe default)
         self._last_commanded_on: bool | None = None  # What we last commanded
         self._monitor_stale_count: int = 0  # How many polls returned same value after command
         self._last_monitor_state: str | None = None  # Previous poll's monitor value
@@ -71,20 +71,11 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             self._attr_device_info["sw_version"] = sw_version
 
     @property
-    def _no_cloud_status(self) -> bool:
-        """Return True if model has no cloud status (app_device_status 404)."""
-        return self.coordinator.data.get("status", "UNKNOWN") == "UNKNOWN"
-
-    @property
     def assumed_state(self) -> bool:
         """Return True if state is assumed (no monitor available or stale)."""
         state = self.coordinator.data.get("machine_state", "Unknown")
         if state == "Unknown":
             return True
-        # Models without cloud status have permanently stale monitors
-        if self._no_cloud_status:
-            return True
-        # If we detected persistent staleness after a command
         if self._monitor_stale_count >= 2 and self._last_commanded_on is not None:
             return True
         return False
@@ -93,24 +84,15 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
     def is_on(self) -> bool:
         """Return True if machine is on.
 
-        Models without app_device_status (404) have permanently stale
-        monitors — always use assumed state for those. For other models,
-        trust the monitor unless we detect staleness after a command.
+        Trust the monitor when available — it works when the machine is ON.
+        After a power command, detect staleness if the monitor contradicts
+        the command for 2+ consecutive polls.
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
 
         # No monitor data at all → use assumed state
         if state == "Unknown":
             _LOGGER.debug("Switch is_on: no monitor, assumed=%s", self._assumed_on)
-            return self._assumed_on
-
-        # Models without cloud status → monitor is permanently stale
-        if self._no_cloud_status:
-            _LOGGER.debug(
-                "Switch is_on: no cloud status, monitor=%s ignored, assumed=%s",
-                state,
-                self._assumed_on,
-            )
             return self._assumed_on
 
         # Detect stale monitor: after a power command, check if monitor
