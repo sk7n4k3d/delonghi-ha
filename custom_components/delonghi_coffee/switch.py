@@ -118,8 +118,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
 
         self._last_monitor_state = state
 
-        # If monitor is persistently stale after command, trust assumed state
-        if self._monitor_stale_count >= 2 and self._last_commanded_on is not None:
+        # If monitor contradicts our command (stale count >= 1), trust assumed state
+        if self._monitor_stale_count >= 1 and self._last_commanded_on is not None:
             _LOGGER.debug(
                 "Switch is_on: monitor stale ('%s' x%d), using assumed=%s",
                 state,
@@ -128,9 +128,11 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             )
             return self._assumed_on
 
-        # Monitor is responsive → trust it
+        # Monitor is responsive → trust it (but don't overwrite assumed_on
+        # if we have a pending command — the monitor hasn't caught up yet)
         result = state not in ("Off", "Going to sleep")
-        self._assumed_on = result
+        if self._last_commanded_on is None:
+            self._assumed_on = result
         _LOGGER.debug("Switch is_on: monitor=%s → %s", state, result)
         return result
 
