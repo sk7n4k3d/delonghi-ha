@@ -1046,6 +1046,11 @@ class DeLonghiApi:
         Tries profile 2 first (user defaults), falls back to profile 1,
         then any _rec_N_ pattern. Some models only have profile 1.
         """
+        # Log all recipe/custom properties for debugging
+        rec_props = [n for n in props if "_rec_" in n or "custom" in n.lower()]
+        if rec_props:
+            _LOGGER.debug("Recipe properties found: %s", ", ".join(sorted(rec_props)[:30]))
+
         beverages: set[str] = set()
         for name in props:
             if "_rec_2_" in name:
