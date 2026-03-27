@@ -42,6 +42,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cached_beans: list[dict[str, Any]] = []
         self._lan_config: dict[str, Any] | None = None
         self.selected_profile: int = 2  # Default to profile 2 (user defaults)
+        self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
 
@@ -75,6 +76,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 if not self.beverages:
                     self.beverages = self.api.parse_available_beverages(all_props)
+                    self.custom_recipe_names = self.api.get_custom_recipe_names()
 
                 self._cached_profiles = self.api.parse_profiles(all_props)
                 self._cached_beans = self.api.parse_bean_systems(all_props)

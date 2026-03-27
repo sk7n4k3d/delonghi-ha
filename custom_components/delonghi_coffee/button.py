@@ -46,10 +46,15 @@ async def async_setup_entry(
             if bev_key in known_keys:
                 continue
             known_keys.add(bev_key)
-            meta = BEVERAGES.get(bev_key, {
-                "name": bev_key.replace("_", " ").title(),
-                "icon": "mdi:coffee",
-            })
+            # Check for custom recipe name first
+            custom_name = coordinator.custom_recipe_names.get(bev_key)
+            if custom_name:
+                meta = {"name": custom_name, "icon": "mdi:coffee-to-go"}
+            else:
+                meta = BEVERAGES.get(bev_key, {
+                    "name": bev_key.replace("_", " ").title(),
+                    "icon": "mdi:coffee",
+                })
             new_entities.append(
                 DeLonghiBrewButton(
                     api, coordinator, dsn, model, device_name, sw_version, bev_key, meta

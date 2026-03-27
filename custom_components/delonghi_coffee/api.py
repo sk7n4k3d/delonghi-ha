@@ -1051,16 +1051,15 @@ class DeLonghiApi:
         if rec_props:
             _LOGGER.debug("Recipe properties (%d): %s", len(rec_props), ", ".join(rec_props))
 
-        # Decode custom recipe names (d053_custom_name_13, d054_custom_name_46)
-        for cprop in ("d053_custom_name_13", "d054_custom_name_46"):
+        # Parse custom recipe names (d053_custom_name_13, d054_custom_name_46)
+        custom_names: dict[int, str] = {}
+        for cprop, start_idx in (("d053_custom_name_13", 1), ("d054_custom_name_46", 4)):
             if cprop in props:
                 val = props[cprop].get("value")
                 if val:
                     try:
                         raw = base64.b64decode(val)
                         data = raw[6:-2] if len(raw) > 8 else raw
-                        _LOGGER.debug("Custom names %s raw: %s", cprop, raw.hex())
-                        # Same format as profiles: 22-byte stride (20 name + 2 meta)
                         for i in range(3):
                             offset = i * 22
                             if offset + 20 <= len(data):
@@ -1068,9 +1067,21 @@ class DeLonghiApi:
                                     "utf-16-be", errors="replace"
                                 ).replace("\x00", "")
                                 if name:
-                                    _LOGGER.debug("Custom recipe %d: '%s'", i + (1 if "13" in cprop else 4), name)
+                                    slot = start_idx + i
+                                    custom_names[slot] = name
+                                    _LOGGER.debug("Custom recipe %d: '%s'", slot, name)
                     except (ValueError, UnicodeDecodeError):
                         pass
+
+        # Add custom recipes (d240-d245) that have data
+        for slot in range(1, 7):
+            prop_name = f"d{239 + slot}_rec_custom_{slot}"
+            if prop_name in props:
+                val = props[prop_name].get("value")
+                if val and isinstance(val, str) and not val.startswith("{"):
+                    bev_key = f"custom_{slot}"
+                    beverages.add(bev_key)
+                    _LOGGER.debug("Custom beverage discovered: %s", bev_key)
 
         beverages: set[str] = set()
         for name in props:
@@ -1098,4 +1109,14 @@ class DeLonghiApi:
                         if bev and not bev.isdigit():
                             beverages.add(bev)
 
+        # Store custom names for button labels
+        self._custom_recipe_names = custom_names
+
         return sorted(beverages)
+
+    def get_custom_recipe_names(self) -> dict[str, str]:
+        """Return custom recipe names keyed by beverage key."""
+        return {
+            f"custom_{slot}": name
+            for slot, name in getattr(self, "_custom_recipe_names", {}).items()
+        }
