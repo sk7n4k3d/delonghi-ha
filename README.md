@@ -1,7 +1,13 @@
 # De'Longhi Coffee for Home Assistant
 
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/v/release/sk7n4k3d/delonghi-ha)](https://github.com/sk7n4k3d/delonghi-ha/releases)
+<p align="center">
+  <img src="custom_components/delonghi_coffee/brand/logo.png" alt="De'Longhi Coffee" width="400">
+</p>
+
+<p align="center">
+  <a href="https://github.com/hacs/integration"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS"></a>
+  <a href="https://github.com/sk7n4k3d/delonghi-ha/releases"><img src="https://img.shields.io/github/v/release/sk7n4k3d/delonghi-ha" alt="GitHub Release"></a>
+</p>
 
 Home Assistant custom integration for De'Longhi connected coffee machines (Eletta Explore, Dinamica Plus, Rivelia, etc.) via the De'Longhi Coffee Link cloud API.
 
