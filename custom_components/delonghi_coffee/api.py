@@ -480,6 +480,11 @@ class DeLonghiApi:
         active_alarms: list[dict[str, Any]] = []
         for bit, meta in ALARMS.items():
             if alarm_word & (1 << bit):
+                # Bit 0 (Water Tank Empty) is unreliable on some models:
+                # the cloud caches it as set even when machine is Ready.
+                # A Ready machine cannot have an empty tank.
+                if bit == 0 and state_val == 7:  # 7 = Ready
+                    continue
                 active_alarms.append({"bit": bit, **meta})
 
         if active_alarms:
