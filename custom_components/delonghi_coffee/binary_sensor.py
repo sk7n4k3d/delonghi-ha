@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ALARMS, DOMAIN
 from .coordinator import DeLonghiCoordinator
+from .sensor import _device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,14 +64,7 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
         self._attr_has_entity_name = True
         self._attr_translation_key = f"alarm_{alarm_bit}"
         self._attr_icon = meta["icon"]
-        self._attr_device_info: dict[str, Any] = {
-            "identifiers": {(DOMAIN, dsn)},
-            "name": device_name,
-            "manufacturer": "De'Longhi",
-            "model": model,
-        }
-        if sw_version:
-            self._attr_device_info["sw_version"] = sw_version
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
     @property
     def is_on(self) -> bool:

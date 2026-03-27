@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "Bean System"
+      },
+      "total_black_beverages": {
+        "name": "Total Black Beverages"
+      },
+      "total_water_beverages": {
+        "name": "Total Water Beverages"
+      },
+      "water_since_descale_ml": {
+        "name": "Water Since Descale"
+      },
+      "milk_clean_count": {
+        "name": "Milk Cleans"
+      },
+      "beverages_since_descale": {
+        "name": "Beverages Since Descale"
+      },
+      "computed_total": {
+        "name": "Total All Beverages"
       }
     },
     "binary_sensor": {

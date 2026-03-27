@@ -143,10 +143,12 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
         return attrs
 
 
+    # Percentage sensors that go down (not monotonically increasing)
+_MEASUREMENT_SENSORS = {"grounds_percentage", "descale_progress", "filter_percentage"}
+
+
 class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
     """Beverage counter sensor."""
-
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def __init__(
         self,
@@ -167,6 +169,11 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         self._attr_icon = meta["icon"]
         self._attr_native_unit_of_measurement = meta["unit"]
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+        # Percentage sensors go up and down — use MEASUREMENT, not TOTAL_INCREASING
+        if counter_key in _MEASUREMENT_SENSORS:
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+        else:
+            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def native_value(self) -> int | None:

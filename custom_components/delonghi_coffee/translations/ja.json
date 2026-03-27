@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "豆システム"
+      },
+      "total_black_beverages": {
+        "name": "ブラック飲料合計"
+      },
+      "total_water_beverages": {
+        "name": "お湯飲料合計"
+      },
+      "water_since_descale_ml": {
+        "name": "除石灰からの水量"
+      },
+      "milk_clean_count": {
+        "name": "ミルク洗浄回数"
+      },
+      "beverages_since_descale": {
+        "name": "除石灰からの飲料数"
+      },
+      "computed_total": {
+        "name": "全飲料合計"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "電源"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "プロフィール"
       }
     }
   }

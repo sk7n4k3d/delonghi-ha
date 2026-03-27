@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "Sistema chicchi"
+      },
+      "total_black_beverages": {
+        "name": "Totale bevande nere"
+      },
+      "total_water_beverages": {
+        "name": "Totale bevande acqua"
+      },
+      "water_since_descale_ml": {
+        "name": "Acqua dalla decalcificazione"
+      },
+      "milk_clean_count": {
+        "name": "Pulizie latte"
+      },
+      "beverages_since_descale": {
+        "name": "Bevande dalla decalcificazione"
+      },
+      "computed_total": {
+        "name": "Totale di tutte le bevande"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "Accensione"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "Profilo"
       }
     }
   }

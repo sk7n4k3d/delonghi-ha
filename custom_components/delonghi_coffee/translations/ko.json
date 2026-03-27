@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "원두 시스템"
+      },
+      "total_black_beverages": {
+        "name": "블랙 음료 합계"
+      },
+      "total_water_beverages": {
+        "name": "물 음료 합계"
+      },
+      "water_since_descale_ml": {
+        "name": "석회 제거 후 물"
+      },
+      "milk_clean_count": {
+        "name": "우유 세척 횟수"
+      },
+      "beverages_since_descale": {
+        "name": "석회 제거 후 음료"
+      },
+      "computed_total": {
+        "name": "전체 음료 합계"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "전원"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "프로필"
       }
     }
   }

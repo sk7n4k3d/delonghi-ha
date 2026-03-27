@@ -15,10 +15,6 @@ DOMAIN: Final = "delonghi_coffee"
 # Gigya (De'Longhi identity provider)
 GIGYA_API_KEY: Final = "4_DRIMLu7jk9bkKwpRRoQOuw"
 
-# Ayla Networks (IoT cloud platform)
-AYLA_APP_ID: Final = "DLonghiCoffeeIdKit-sQ-id"
-AYLA_APP_SECRET: Final = "DLonghiCoffeeIdKit-HT6b0VNd4y6CSha9ivM5k8navLw"
-
 # Region configurations
 CONF_REGION: Final = "region"
 
@@ -126,17 +122,6 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "h_cb_capp_mug": {"name": "Cold Brew Cappuccino Mug", "icon": "mdi:snowflake"},
 }
 
-# Captured MITM brew commands — verified working, byte-for-byte exact
-CAPTURED_BREWS: Final[dict[str, bytes]] = {
-    "espresso": bytes.fromhex("0d1383f0010308000100281b01020527010651d7"),
-    "hot_water": bytes.fromhex("0d1183f010031c010f00961b012701061189"),
-    "tea": bytes.fromhex("0d1383f016031c010f00961b010d01270106b65b"),
-    "i_americano": bytes.fromhex("0d1083f032031b0102011f00270106ade8"),
-}
-
-# Legacy alias
-CAPTURED_BREW_ESPRESSO: Final = CAPTURED_BREWS["espresso"]
-
 # Power on / wake up command (Request ID 132, contents 0x02 0x01)
 POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")
 
@@ -195,4 +180,6 @@ MACHINE_STATES: Final[dict[int, str]] = {
     5: "Descaling",
     6: "Heating",
     7: "Ready",
+    8: "Rinsing",
+    9: "Going to sleep",
 }

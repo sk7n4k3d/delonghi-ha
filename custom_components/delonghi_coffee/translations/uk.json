@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "Система зерен"
+      },
+      "total_black_beverages": {
+        "name": "Усього чорних напоїв"
+      },
+      "total_water_beverages": {
+        "name": "Усього водних напоїв"
+      },
+      "water_since_descale_ml": {
+        "name": "Води з декальцинації"
+      },
+      "milk_clean_count": {
+        "name": "Очищень молока"
+      },
+      "beverages_since_descale": {
+        "name": "Напоїв з декальцинації"
+      },
+      "computed_total": {
+        "name": "Усього всіх напоїв"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "Живлення"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "Профіль"
       }
     }
   }

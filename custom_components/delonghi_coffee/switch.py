@@ -12,9 +12,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import DeLonghiApi, DeLonghiApiError
+from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import DOMAIN, POWER_OFF_CMD, POWER_ON_CMD
 from .coordinator import DeLonghiCoordinator
+from .sensor import _device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,14 +62,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         self._attr_has_entity_name = True
         self._attr_translation_key = "power"
         self._attr_icon = "mdi:coffee-maker"
-        self._attr_device_info: dict[str, Any] = {
-            "identifiers": {(DOMAIN, dsn)},
-            "name": device_name,
-            "manufacturer": "De'Longhi",
-            "model": model,
-        }
-        if sw_version:
-            self._attr_device_info["sw_version"] = sw_version
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
     @property
     def assumed_state(self) -> bool:
@@ -148,7 +142,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             self._assumed_on = True
             self._last_commanded_on = True
             self._monitor_stale_count = 0
-        except DeLonghiApiError as err:
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to power on: {err}") from err
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
@@ -165,7 +159,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             self._assumed_on = False
             self._last_commanded_on = False
             self._monitor_stale_count = 0
-        except DeLonghiApiError as err:
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to power off: {err}") from err
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()

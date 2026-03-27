@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "Bønnesystem"
+      },
+      "total_black_beverages": {
+        "name": "Svarte drikker totalt"
+      },
+      "total_water_beverages": {
+        "name": "Vanndrikker totalt"
+      },
+      "water_since_descale_ml": {
+        "name": "Vann siden avkalking"
+      },
+      "milk_clean_count": {
+        "name": "Melkerengjøringer"
+      },
+      "beverages_since_descale": {
+        "name": "Drikker siden avkalking"
+      },
+      "computed_total": {
+        "name": "Alle drikker totalt"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "Strøm"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "Profil"
       }
     }
   }

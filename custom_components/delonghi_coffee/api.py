@@ -24,6 +24,21 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _decode_utf16(data: bytes) -> str:
+    """Decode UTF-16 text, auto-detecting endianness from null byte positions.
+
+    De'Longhi stores names in UTF-16 but the endianness varies between
+    properties (profile names vs custom recipe names). This detects
+    whether null bytes sit at even positions (BE) or odd positions (LE).
+    """
+    if len(data) < 2:
+        return ""
+    nulls_even = sum(1 for i in range(0, min(len(data), 20), 2) if data[i] == 0)
+    nulls_odd = sum(1 for i in range(1, min(len(data), 20), 2) if data[i] == 0)
+    encoding = "utf-16-be" if nulls_even >= nulls_odd else "utf-16-le"
+    return data.decode(encoding, errors="replace").replace("\x00", "").strip()
+
+
 class DeLonghiAuthError(Exception):
     """Authentication error."""
 
@@ -130,21 +145,29 @@ class DeLonghiApi:
                 _LOGGER.error("No id_token in Gigya response for %s", self._email)
                 raise DeLonghiAuthError("No id_token in Gigya response")
 
-            # Step 2: Get long-lived JWT
-            jwt_resp = self._session.post(
-                f"{self._gigya_url}/accounts.getJWT",
-                data={
-                    "oauth_token": gigya_data["sessionInfo"]["sessionToken"],
-                    "secret": gigya_data["sessionInfo"]["sessionSecret"],
-                    "apiKey": GIGYA_API_KEY,
-                    "fields": "data.favoriteStoreId",
-                    "expiration": "7776000",
-                    "httpStatusCodes": "true",
-                },
-                timeout=REQUEST_TIMEOUT,
-            )
-            jwt_data = jwt_resp.json()
-            jwt_token: str = jwt_data.get("id_token", id_token)
+            # Step 2: Get long-lived JWT (requires sessionInfo)
+            session_info = gigya_data.get("sessionInfo", {})
+            session_token = session_info.get("sessionToken")
+            session_secret = session_info.get("sessionSecret")
+
+            jwt_token: str = id_token  # default to id_token from step 1
+            if session_token and session_secret:
+                jwt_resp = self._session.post(
+                    f"{self._gigya_url}/accounts.getJWT",
+                    data={
+                        "oauth_token": session_token,
+                        "secret": session_secret,
+                        "apiKey": GIGYA_API_KEY,
+                        "fields": "data.favoriteStoreId",
+                        "expiration": "7776000",
+                        "httpStatusCodes": "true",
+                    },
+                    timeout=REQUEST_TIMEOUT,
+                )
+                jwt_data = jwt_resp.json()
+                jwt_token = jwt_data.get("id_token", id_token)
+            else:
+                _LOGGER.debug("No sessionInfo, using id_token directly")
 
             # Step 3: Ayla token_sign_in
             ayla_resp = self._session.post(
@@ -654,7 +677,10 @@ class DeLonghiApi:
 
         if not recipe_prop:
             for name, prop in props.items():
-                if f"_rec_{beverage_key}" in name and prop.get("value"):
+                # Match _rec_N_KEY or _rec_KEY_ exactly (not substring)
+                if (f"_rec_{beverage_key}_" in name or name.endswith(f"_rec_{beverage_key}") or
+                        f"_rec_1_{beverage_key}" in name or f"_rec_3_{beverage_key}" in name or
+                        f"_rec_4_{beverage_key}" in name) and prop.get("value"):
                     val = prop["value"]
                     if isinstance(val, str) and not val.startswith("{"):
                         recipe_prop = prop
@@ -802,7 +828,8 @@ class DeLonghiApi:
             "Coffee Beans Empty",
             "Coffee Beans Empty 2",
             "Drip Tray Missing",
-            "Tank In Position",
+            "Water Tank Missing",
+            "Grid Missing",
             "Hydraulic Problem",
             "Heater Probe Failure",
             "Infuser Motor Failure",
@@ -823,7 +850,7 @@ class DeLonghiApi:
                 monitor_val = monitor_prop.get("value")
                 if monitor_val:
                     raw = base64.b64decode(monitor_val)
-                    current_acc = raw[4] if len(raw) > 4 else 0
+                    current_acc = raw[5] if len(raw) > 5 else 0
                     # Milk drinks need acc >= 2 (Latte Crema Hot/Cool)
                     # acc 0 = nothing, 1 = hot water spout
                     if current_acc < 2:
@@ -960,9 +987,7 @@ class DeLonghiApi:
                     for i in range(3):
                         offset = i * stride
                         if offset + 20 <= len(data):
-                            name = data[offset:offset + 20].decode(
-                                "utf-16-be", errors="replace"
-                            ).replace("\x00", "")
+                            name = _decode_utf16(data[offset:offset + 20])
                             icon = data[offset + 20] if offset + 20 < len(data) else 0
                             profiles[i + 1] = {
                                 "name": name,
@@ -981,9 +1006,7 @@ class DeLonghiApi:
                     raw = base64.b64decode(val)
                     data = raw[6:-2]
                     if len(data) >= 20:
-                        name = data[:20].decode(
-                            "utf-16-be", errors="replace"
-                        ).replace("\x00", "")
+                        name = _decode_utf16(data[:20])
                         icon = data[20] if len(data) > 20 else 0
                         profiles[4] = {
                             "name": name,
@@ -1022,7 +1045,7 @@ class DeLonghiApi:
                     try:
                         raw = base64.b64decode(val)
                         data = raw[5:-2]
-                        text = data.decode("utf-16-be", errors="replace")
+                        text = _decode_utf16(data)
                         parts = [p for p in text.split("\x00") if p.strip()]
                         local_name = parts[0] if parts else f"Bean {i}"
                         english_name = parts[1] if len(parts) > 1 else local_name
@@ -1063,9 +1086,7 @@ class DeLonghiApi:
                         for i in range(3):
                             offset = i * 22
                             if offset + 20 <= len(data):
-                                name = data[offset:offset + 20].decode(
-                                    "utf-16-be", errors="replace"
-                                ).replace("\x00", "")
+                                name = _decode_utf16(data[offset:offset + 20])
                                 if name:
                                     slot = start_idx + i
                                     custom_names[slot] = name

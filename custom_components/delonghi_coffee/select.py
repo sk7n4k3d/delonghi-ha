@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import DeLonghiCoordinator
+from .sensor import _device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,14 +51,7 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
         self._attr_has_entity_name = True
         self._attr_translation_key = "profile_select"
         self._attr_icon = "mdi:account-circle"
-        self._attr_device_info: dict[str, Any] = {
-            "identifiers": {(DOMAIN, dsn)},
-            "name": device_name,
-            "manufacturer": "De'Longhi",
-            "model": model,
-        }
-        if sw_version:
-            self._attr_device_info["sw_version"] = sw_version
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
     @property
     def options(self) -> list[str]:
@@ -94,3 +88,5 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
                 _LOGGER.info("Profile switched to %d", i)
                 self.async_write_ha_state()
                 return
+
+        _LOGGER.warning("Profile selection failed: '%s' not found in profiles", option)

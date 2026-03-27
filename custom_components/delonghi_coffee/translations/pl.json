@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "System ziaren"
+      },
+      "total_black_beverages": {
+        "name": "Łącznie czarnych napojów"
+      },
+      "total_water_beverages": {
+        "name": "Łącznie napojów wodnych"
+      },
+      "water_since_descale_ml": {
+        "name": "Woda od odkamieniania"
+      },
+      "milk_clean_count": {
+        "name": "Czyszczenia mleka"
+      },
+      "beverages_since_descale": {
+        "name": "Napoje od odkamieniania"
+      },
+      "computed_total": {
+        "name": "Łącznie wszystkich napojów"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "Zasilanie"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "Profil"
       }
     }
   }

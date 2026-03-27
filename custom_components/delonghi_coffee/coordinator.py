@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import timedelta
+from time import monotonic
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -45,13 +46,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
-        self._monitor_last_changed: float = time.time()
+        self._monitor_last_changed: float = monotonic()
         self._monitor_stale_timeout: int = 1800  # 30 minutes
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
         try:
-            now = time.time()
+            now = monotonic()
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 
             # Always get status (lightweight — 1-2 API calls)
@@ -98,7 +99,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._monitor_stale_count += 1
             else:
                 self._monitor_stale_count = 0
-                self._monitor_last_changed = now
+                self._monitor_last_changed = monotonic()
             self._last_monitor_raw = monitor_raw
 
             # Detect prolonged staleness — machine probably off

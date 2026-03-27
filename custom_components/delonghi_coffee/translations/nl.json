@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "Bonensysteem"
+      },
+      "total_black_beverages": {
+        "name": "Totaal zwarte dranken"
+      },
+      "total_water_beverages": {
+        "name": "Totaal waterdranken"
+      },
+      "water_since_descale_ml": {
+        "name": "Water sinds ontkalking"
+      },
+      "milk_clean_count": {
+        "name": "Melkreinigingen"
+      },
+      "beverages_since_descale": {
+        "name": "Dranken sinds ontkalking"
+      },
+      "computed_total": {
+        "name": "Totaal alle dranken"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "Aan/Uit"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "Profiel"
       }
     }
   }

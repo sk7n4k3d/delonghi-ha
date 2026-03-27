@@ -12,9 +12,10 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import DeLonghiApi, DeLonghiApiError
+from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import BEVERAGES, DOMAIN
 from .coordinator import DeLonghiCoordinator
+from .sensor import _device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,21 +100,14 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         self._beverage_key = beverage_key
         self._attr_unique_id = f"{dsn}_brew_{beverage_key}"
         self._attr_has_entity_name = True
-        # Use translation_key only for beverages with known translations,
-        # otherwise fall back to a readable name
+        # Use translation_key for beverages with known translations,
+        # otherwise use the name directly (custom recipes, unknown beverages)
         if beverage_key in BEVERAGES:
             self._attr_translation_key = f"brew_{beverage_key}"
         else:
-            self._attr_name = f"Brew {meta['name']}"
+            self._attr_name = meta["name"]
         self._attr_icon = meta["icon"]
-        self._attr_device_info: dict[str, Any] = {
-            "identifiers": {(DOMAIN, dsn)},
-            "name": device_name,
-            "manufacturer": "De'Longhi",
-            "model": model,
-        }
-        if sw_version:
-            self._attr_device_info["sw_version"] = sw_version
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
     async def async_press(self) -> None:
         """Brew the beverage using the selected profile's recipe."""
@@ -127,7 +121,7 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
                 raise HomeAssistantError(
                     f"Failed to brew {self._beverage_key}: command was not accepted"
                 )
-        except DeLonghiApiError as err:
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(
                 f"Failed to brew {self._beverage_key}: {err}"
             ) from err

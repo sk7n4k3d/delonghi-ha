@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "咖啡豆系统"
+      },
+      "total_black_beverages": {
+        "name": "黑咖啡总计"
+      },
+      "total_water_beverages": {
+        "name": "水饮品总计"
+      },
+      "water_since_descale_ml": {
+        "name": "除垢后用水量"
+      },
+      "milk_clean_count": {
+        "name": "奶路清洁次数"
+      },
+      "beverages_since_descale": {
+        "name": "除垢后饮品数"
+      },
+      "computed_total": {
+        "name": "所有饮品总计"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "电源"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "配置文件"
       }
     }
   }

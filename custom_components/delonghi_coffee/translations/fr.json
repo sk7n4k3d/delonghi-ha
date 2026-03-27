@@ -126,6 +126,24 @@
       },
       "bean_system": {
         "name": "Système de grains"
+      },
+      "total_black_beverages": {
+        "name": "Total boissons noires"
+      },
+      "total_water_beverages": {
+        "name": "Total boissons eau"
+      },
+      "water_since_descale_ml": {
+        "name": "Eau depuis détartrage"
+      },
+      "milk_clean_count": {
+        "name": "Nettoyages lait"
+      },
+      "beverages_since_descale": {
+        "name": "Boissons depuis détartrage"
+      },
+      "computed_total": {
+        "name": "Total toutes boissons"
       }
     },
     "binary_sensor": {
@@ -348,6 +366,11 @@
     "switch": {
       "power": {
         "name": "Alimentation"
+      }
+    },
+    "select": {
+      "profile_select": {
+        "name": "Profil"
       }
     }
   }
