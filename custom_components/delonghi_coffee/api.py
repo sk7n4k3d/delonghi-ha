@@ -1047,9 +1047,30 @@ class DeLonghiApi:
         then any _rec_N_ pattern. Some models only have profile 1.
         """
         # Log all recipe/custom properties for debugging
-        rec_props = [n for n in props if "_rec_" in n or "custom" in n.lower()]
+        rec_props = sorted(n for n in props if "_rec_" in n or "custom" in n.lower())
         if rec_props:
-            _LOGGER.debug("Recipe properties found: %s", ", ".join(sorted(rec_props)[:30]))
+            _LOGGER.debug("Recipe properties (%d): %s", len(rec_props), ", ".join(rec_props))
+
+        # Decode custom recipe names (d053_custom_name_13, d054_custom_name_46)
+        for cprop in ("d053_custom_name_13", "d054_custom_name_46"):
+            if cprop in props:
+                val = props[cprop].get("value")
+                if val:
+                    try:
+                        raw = base64.b64decode(val)
+                        data = raw[6:-2] if len(raw) > 8 else raw
+                        _LOGGER.debug("Custom names %s raw: %s", cprop, raw.hex())
+                        # Same format as profiles: 22-byte stride (20 name + 2 meta)
+                        for i in range(3):
+                            offset = i * 22
+                            if offset + 20 <= len(data):
+                                name = data[offset:offset + 20].decode(
+                                    "utf-16-be", errors="replace"
+                                ).replace("\x00", "")
+                                if name:
+                                    _LOGGER.debug("Custom recipe %d: '%s'", i + (1 if "13" in cprop else 4), name)
+                    except (ValueError, UnicodeDecodeError):
+                        pass
 
         beverages: set[str] = set()
         for name in props:
