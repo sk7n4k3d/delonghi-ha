@@ -68,6 +68,8 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
     def current_option(self) -> str | None:
         """Return the currently selected profile."""
         active = self.coordinator.selected_profile
+        if active is None:
+            return None
         profiles = self.coordinator.data.get("profiles", {})
         return profiles.get(active, {}).get("name", f"Profile {active}")
 

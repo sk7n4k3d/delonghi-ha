@@ -111,7 +111,7 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
 
     async def async_press(self) -> None:
         """Brew the beverage using the selected profile's recipe."""
-        profile = self.coordinator.selected_profile
+        profile = self.coordinator.selected_profile or 1
         _LOGGER.info("Brewing %s on %s (profile %d)", self._beverage_key, self._dsn, profile)
         try:
             success = await self.hass.async_add_executor_job(

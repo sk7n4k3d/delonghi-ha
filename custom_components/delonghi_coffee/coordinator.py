@@ -42,7 +42,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cached_profiles: dict[str, Any] = {}
         self._cached_beans: list[dict[str, Any]] = []
         self._lan_config: dict[str, Any] | None = None
-        self.selected_profile: int = 2  # Default to profile 2 (user defaults)
+        self.selected_profile: int | None = None  # Set from machine on first refresh
+        self.seen_alarm_bits: set[int] = set()  # Track which inverted bits the machine supports
         self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
@@ -82,6 +83,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.custom_recipe_names = self.api.get_custom_recipe_names()
 
                 self._cached_profiles = self.api.parse_profiles(all_props)
+                # Initialize selected_profile from machine on first refresh
+                if self.selected_profile is None:
+                    self.selected_profile = self._cached_profiles.get("active", 1)
                 self._cached_beans = self.api.parse_bean_systems(all_props)
 
                 # Fetch LAN config once (first full refresh only)
@@ -110,6 +114,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # - stale (3+ identical polls), OR
             # - no cloud status (model has no app_device_status — monitor always cached)
             alarms = status.get("alarms", [])
+            alarm_word = status.get("alarm_word")
             cloud_status = status.get("status", "UNKNOWN")
             monitor_stale = self._monitor_stale_count >= 3
             no_cloud = cloud_status == "UNKNOWN"
@@ -119,6 +124,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     len(alarms), monitor_stale, no_cloud,
                 )
                 alarms = []
+                alarm_word = None
 
             # Override machine state to Off if monitor hasn't changed in 30+ min
             machine_state = status.get("machine_state", "Unknown")
@@ -133,6 +139,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": machine_state,
                 "alarms": alarms,
+                "alarm_word": alarm_word,
                 "monitor_stale": monitor_stale,
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,

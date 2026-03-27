@@ -514,6 +514,7 @@ class DeLonghiApi:
             )
 
         result["alarms"] = active_alarms
+        result["alarm_word"] = alarm_word
         return result
 
     def get_counters(self, dsn: str) -> dict[str, Any]:
