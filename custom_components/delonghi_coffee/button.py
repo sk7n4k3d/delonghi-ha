@@ -121,7 +121,9 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
                 raise HomeAssistantError(
                     f"Failed to brew {self._beverage_key}: command was not accepted"
                 )
-        except (DeLonghiApiError, DeLonghiAuthError) as err:
+        except HomeAssistantError:
+            raise
+        except Exception as err:
             raise HomeAssistantError(
                 f"Failed to brew {self._beverage_key}: {err}"
             ) from err
