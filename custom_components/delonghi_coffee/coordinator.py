@@ -105,11 +105,18 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             stale_duration = now - self._monitor_last_changed
             monitor_timed_out = stale_duration > self._monitor_stale_timeout
 
-            # Suppress alarms when monitor is stale (3+ identical polls)
+            # Suppress alarms when monitor is unreliable:
+            # - stale (3+ identical polls), OR
+            # - no cloud status (model has no app_device_status — monitor always cached)
             alarms = status.get("alarms", [])
+            cloud_status = status.get("status", "UNKNOWN")
             monitor_stale = self._monitor_stale_count >= 3
-            if monitor_stale and alarms:
-                _LOGGER.debug("Suppressing %d alarms from stale monitor", len(alarms))
+            no_cloud = cloud_status == "UNKNOWN"
+            if (monitor_stale or no_cloud) and alarms:
+                _LOGGER.debug(
+                    "Suppressing %d alarms (stale=%s, no_cloud=%s)",
+                    len(alarms), monitor_stale, no_cloud,
+                )
                 alarms = []
 
             # Override machine state to Off if monitor hasn't changed in 30+ min
