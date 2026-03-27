@@ -111,11 +111,12 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
             self._attr_device_info["sw_version"] = sw_version
 
     async def async_press(self) -> None:
-        """Brew the beverage."""
-        _LOGGER.info("Brewing %s on %s", self._beverage_key, self._dsn)
+        """Brew the beverage using the selected profile's recipe."""
+        profile = self.coordinator.selected_profile
+        _LOGGER.info("Brewing %s on %s (profile %d)", self._beverage_key, self._dsn, profile)
         try:
             success = await self.hass.async_add_executor_job(
-                self._api.brew_beverage, self._dsn, self._beverage_key
+                self._api.brew_beverage, self._dsn, self._beverage_key, profile
             )
             if not success:
                 raise HomeAssistantError(

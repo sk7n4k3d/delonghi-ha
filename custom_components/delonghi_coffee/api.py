@@ -592,7 +592,7 @@ class DeLonghiApi:
 
         return counters
 
-    def brew_beverage(self, dsn: str, beverage_key: str) -> bool:
+    def brew_beverage(self, dsn: str, beverage_key: str, profile: int = 2) -> bool:
         """Brew a beverage by converting stored recipe to brew command.
 
         Universal conversion verified against 9 MITM captures:
@@ -600,12 +600,18 @@ class DeLonghiApi:
         - Iced drinks: exclude COFFEE/MILK/HOT_WATER quantities
         - Cold brew: exclude quantities, add ICED=3 + INTENSITY
         - Always append RINSE(39)=1 and profile_save byte
+
+        Args:
+            dsn: Device serial number.
+            beverage_key: Beverage identifier (e.g. "espresso").
+            profile: User profile number (1-4, default 2).
         """
         props = self.get_properties(dsn)
 
+        # Try the selected profile first, then fall back to any profile
         recipe_prop: dict[str, Any] | None = None
         for name, prop in props.items():
-            if f"_rec_2_{beverage_key}" in name and prop.get("value"):
+            if f"_rec_{profile}_{beverage_key}" in name and prop.get("value"):
                 recipe_prop = prop
                 break
 
@@ -637,7 +643,7 @@ class DeLonghiApi:
         is_iced = beverage_key.startswith(("i_", "mi_", "over_ice"))
         is_cold_brew = "_cb_" in beverage_key
         brew_cmd = self._recipe_to_brew_command(
-            recipe_data, is_iced=is_iced, is_cold_brew=is_cold_brew
+            recipe_data, is_iced=is_iced, is_cold_brew=is_cold_brew, profile=profile
         )
         _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
@@ -834,6 +840,7 @@ class DeLonghiApi:
         is_iced: bool = False,
         is_cold_brew: bool = False,
         intensity: int = 1,
+        profile: int = 2,
     ) -> bytes:
         """Convert stored recipe (0xD0/0xA6) to brew command (0x0D/0x83).
 
@@ -848,7 +855,7 @@ class DeLonghiApi:
         - For iced: append ICED(31)=0
         - For cold_brew: append ICED(31)=3 + INTENSITY(38)=value
         - Always append RINSE(39)=1
-        - End with profile_save = (1 << 2) | 2 = 6
+        - End with profile_save = (1 << 2) | profile
         """
         if recipe[0] == 0x0D:
             return recipe
@@ -886,7 +893,7 @@ class DeLonghiApi:
         body = (
             bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
             + bytes(brew_params)
-            + bytes([6])  # profile_save = (1<<2)|2
+            + bytes([(1 << 2) | profile])  # profile_save
         )
         return body + cls._crc16(body)
 

@@ -349,6 +349,11 @@
       "power": {
         "name": "Power"
       }
+    },
+    "select": {
+      "profile_select": {
+        "name": "Profile"
+      }
     }
   }
 }

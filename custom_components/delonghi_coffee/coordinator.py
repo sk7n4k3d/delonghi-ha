@@ -41,6 +41,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cached_profiles: dict[str, Any] = {}
         self._cached_beans: list[dict[str, Any]] = []
         self._lan_config: dict[str, Any] | None = None
+        self.selected_profile: int = 2  # Default to profile 2 (user defaults)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
