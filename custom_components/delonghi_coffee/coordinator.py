@@ -142,7 +142,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "machine_state": machine_state,
                 "alarms": alarms,
                 "alarm_word": alarm_word,
-                "monitor_stale": monitor_stale,
+                "monitor_stale": monitor_timed_out,
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,
                 "beverages": self.beverages,
