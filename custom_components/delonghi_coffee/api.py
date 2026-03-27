@@ -955,8 +955,10 @@ class DeLonghiApi:
                     _LOGGER.debug("Profile raw d051: %s (%d bytes)", raw.hex(), len(raw))
                     data = raw[6:-2]
                     _LOGGER.debug("Profile data (after header): %s (%d bytes)", data.hex(), len(data))
+                    # Each profile: 20 bytes name (UTF-16-BE) + 2 bytes metadata
+                    stride = 22
                     for i in range(3):
-                        offset = i * 21
+                        offset = i * stride
                         if offset + 20 <= len(data):
                             name = data[offset:offset + 20].decode(
                                 "utf-16-be", errors="replace"
