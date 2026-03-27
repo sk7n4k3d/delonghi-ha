@@ -169,12 +169,13 @@ class DeLonghiApi:
             else:
                 _LOGGER.debug("No sessionInfo, using id_token directly")
 
-            # Step 3: Ayla token_sign_in
+            # Step 3: Ayla token_sign_in (must be JSON + provider to get push-capable token)
             ayla_resp = self._session.post(
                 f"{self._ayla_user}/api/v1/token_sign_in",
-                data={
+                json={
                     "app_id": self._ayla_app_id,
                     "app_secret": self._ayla_app_secret,
+                    "provider": "gigya_eu1_field",
                     "token": jwt_token,
                 },
                 timeout=REQUEST_TIMEOUT,
@@ -705,6 +706,12 @@ class DeLonghiApi:
         # Pre-brew checks: alarms and accessory
         self._pre_brew_check(dsn, recipe_data, beverage_key)
 
+        # Ping machine to ensure push channel is active (app does this before every brew)
+        try:
+            self.ping_connected(dsn)
+        except (DeLonghiApiError, DeLonghiAuthError):
+            _LOGGER.debug("Pre-brew ping failed, sending command anyway")
+
         is_iced = beverage_key.startswith(("i_", "mi_", "over_ice"))
         is_cold_brew = "_cb_" in beverage_key
         brew_cmd = self._recipe_to_brew_command(
@@ -794,6 +801,12 @@ class DeLonghiApi:
         # Pre-brew check (build a fake recipe for accessory check)
         fake_recipe = bytes([0xD0, 0, 0xA6, 0xF0, 1, bev_id, 28, acc, 0, 0])
         self._pre_brew_check(dsn, fake_recipe, beverage)
+
+        # Ping machine to ensure push channel is active
+        try:
+            self.ping_connected(dsn)
+        except (DeLonghiApiError, DeLonghiAuthError):
+            _LOGGER.debug("Pre-brew ping failed, sending command anyway")
 
         _LOGGER.info("Brewing custom %s: %s", beverage, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
@@ -921,7 +934,7 @@ class DeLonghiApi:
         - For iced: append ICED(31)=0
         - For cold_brew: append ICED(31)=3 + INTENSITY(38)=value
         - Always append RINSE(39)=1
-        - End with profile_save = (1 << 2) | profile
+        - End with profile_save = (profile << 2) | 2
         """
         if recipe[0] == 0x0D:
             return recipe
@@ -929,7 +942,7 @@ class DeLonghiApi:
         bev_id = recipe[5]
         raw = recipe[6:-2]
 
-        exclude: set[int] = {25}  # VISIBLE always excluded
+        exclude: set[int] = {25, 27}  # VISIBLE + IDX_LEN always excluded
         if is_iced or is_cold_brew:
             exclude.update({1, 9, 15})  # Exclude quantities
 
@@ -948,6 +961,8 @@ class DeLonghiApi:
             else:
                 break
 
+        brew_params += bytearray([27, 1])  # IDX_LEN=1 (always, matches app behavior)
+
         if is_iced:
             brew_params += bytearray([31, 0])
         elif is_cold_brew:
@@ -959,7 +974,7 @@ class DeLonghiApi:
         body = (
             bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
             + bytes(brew_params)
-            + bytes([(1 << 2) | profile])  # profile_save
+            + bytes([(profile << 2) | 2])  # profile_save: profile in upper bits, action=2 (brew+save)
         )
         return body + cls._crc16(body)
 
