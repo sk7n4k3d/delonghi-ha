@@ -462,6 +462,7 @@ class DeLonghiApi:
         if len(raw) < 14:
             return result
 
+        _LOGGER.debug("Monitor raw: %s", raw.hex())
         result["profile"] = raw[4]
 
         # Machine state
@@ -480,6 +481,13 @@ class DeLonghiApi:
         for bit, meta in ALARMS.items():
             if alarm_word & (1 << bit):
                 active_alarms.append({"bit": bit, **meta})
+
+        if active_alarms:
+            _LOGGER.debug(
+                "Monitor alarms: word=0x%08X, active=[%s]",
+                alarm_word,
+                ", ".join(f"bit{a['bit']}:{a['name']}" for a in active_alarms),
+            )
 
         result["alarms"] = active_alarms
         return result
