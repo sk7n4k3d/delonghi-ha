@@ -61,11 +61,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.api.get_status, self.dsn
             )
 
-            # Initialize selected_profile from monitor (actual active profile)
-            if self.selected_profile is None:
-                monitor_profile = status.get("profile", 0)
-                if monitor_profile > 0:
-                    self.selected_profile = monitor_profile
+            # Sync selected_profile from monitor (actual active profile)
+            monitor_profile = status.get("profile", 0)
+            if monitor_profile > 0:
+                self.selected_profile = monitor_profile
 
             # Full refresh: ping + ONE properties fetch for everything
             if need_full:

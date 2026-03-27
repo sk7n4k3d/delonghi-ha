@@ -209,7 +209,10 @@ class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
     @property
     def native_value(self) -> str:
         """Return active profile name."""
-        active = self.coordinator.data.get("active_profile", 1)
+        # Use monitor profile (updated every 60s), fall back to cloud property (10min)
+        active = self.coordinator.data.get("profile", 0)
+        if active == 0:
+            active = self.coordinator.data.get("active_profile", 1)
         profiles = self.coordinator.data.get("profiles", {})
         profile = profiles.get(active, {})
         return profile.get("name", f"Profile {active}")
