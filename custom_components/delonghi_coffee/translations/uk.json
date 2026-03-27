@@ -339,28 +339,28 @@
         "name": "Моє Холодне молоко"
       },
       "brew_a_cb_coffee": {
-        "name": "Cold Brew Coffee"
+        "name": "Колд Брю Кава"
       },
       "brew_b_cb_coffee_ess": {
-        "name": "Cold Brew Espresso"
+        "name": "Колд Брю Еспресо"
       },
       "brew_c_cb_coffee_pot": {
-        "name": "Cold Brew Pot"
+        "name": "Колд Брю Кавник"
       },
       "brew_d_cb_latte": {
-        "name": "Cold Brew Latte"
+        "name": "Колд Брю Лате"
       },
       "brew_e_cb_cappuccino": {
-        "name": "Cold Brew Cappuccino"
+        "name": "Колд Брю Капучіно"
       },
       "brew_f_cb_mug": {
-        "name": "Cold Brew Mug"
+        "name": "Колд Брю Кухоль"
       },
       "brew_g_cb_latte_mug": {
-        "name": "Cold Brew Latte Mug"
+        "name": "Колд Брю Лате Кухоль"
       },
       "brew_h_cb_capp_mug": {
-        "name": "Cold Brew Cappuccino Mug"
+        "name": "Колд Брю Капучіно Кухоль"
       }
     },
     "switch": {

@@ -339,28 +339,28 @@
         "name": "我的冰牛奶"
       },
       "brew_a_cb_coffee": {
-        "name": "Cold Brew Coffee"
+        "name": "冷萃咖啡"
       },
       "brew_b_cb_coffee_ess": {
-        "name": "Cold Brew Espresso"
+        "name": "冷萃浓缩咖啡"
       },
       "brew_c_cb_coffee_pot": {
-        "name": "Cold Brew Pot"
+        "name": "冷萃咖啡壶"
       },
       "brew_d_cb_latte": {
-        "name": "Cold Brew Latte"
+        "name": "冷萃拿铁"
       },
       "brew_e_cb_cappuccino": {
-        "name": "Cold Brew Cappuccino"
+        "name": "冷萃卡布奇诺"
       },
       "brew_f_cb_mug": {
-        "name": "Cold Brew Mug"
+        "name": "冷萃大杯"
       },
       "brew_g_cb_latte_mug": {
-        "name": "Cold Brew Latte Mug"
+        "name": "冷萃拿铁大杯"
       },
       "brew_h_cb_capp_mug": {
-        "name": "Cold Brew Cappuccino Mug"
+        "name": "冷萃卡布奇诺大杯"
       }
     },
     "switch": {

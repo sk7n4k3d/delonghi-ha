@@ -354,13 +354,13 @@
         "name": "Cold Brew Cappuccino"
       },
       "brew_f_cb_mug": {
-        "name": "Cold Brew Mug"
+        "name": "Cold Brew Grande Tasse"
       },
       "brew_g_cb_latte_mug": {
-        "name": "Cold Brew Latte Mug"
+        "name": "Cold Brew Latte Grande Tasse"
       },
       "brew_h_cb_capp_mug": {
-        "name": "Cold Brew Cappuccino Mug"
+        "name": "Cold Brew Cappuccino Grande Tasse"
       }
     },
     "switch": {

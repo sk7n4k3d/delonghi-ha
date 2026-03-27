@@ -339,13 +339,13 @@
         "name": "Il mio Latte freddo"
       },
       "brew_a_cb_coffee": {
-        "name": "Cold Brew Coffee"
+        "name": "Cold Brew Caffe"
       },
       "brew_b_cb_coffee_ess": {
         "name": "Cold Brew Espresso"
       },
       "brew_c_cb_coffee_pot": {
-        "name": "Cold Brew Pot"
+        "name": "Cold Brew Caffettiera"
       },
       "brew_d_cb_latte": {
         "name": "Cold Brew Latte"
@@ -354,13 +354,13 @@
         "name": "Cold Brew Cappuccino"
       },
       "brew_f_cb_mug": {
-        "name": "Cold Brew Mug"
+        "name": "Cold Brew Tazza Grande"
       },
       "brew_g_cb_latte_mug": {
-        "name": "Cold Brew Latte Mug"
+        "name": "Cold Brew Latte Tazza Grande"
       },
       "brew_h_cb_capp_mug": {
-        "name": "Cold Brew Cappuccino Mug"
+        "name": "Cold Brew Cappuccino Tazza Grande"
       }
     },
     "switch": {

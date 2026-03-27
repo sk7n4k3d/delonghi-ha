@@ -339,28 +339,28 @@
         "name": "나의 아이스 우유"
       },
       "brew_a_cb_coffee": {
-        "name": "Cold Brew Coffee"
+        "name": "콜드브루 커피"
       },
       "brew_b_cb_coffee_ess": {
-        "name": "Cold Brew Espresso"
+        "name": "콜드브루 에스프레소"
       },
       "brew_c_cb_coffee_pot": {
-        "name": "Cold Brew Pot"
+        "name": "콜드브루 포트"
       },
       "brew_d_cb_latte": {
-        "name": "Cold Brew Latte"
+        "name": "콜드브루 라테"
       },
       "brew_e_cb_cappuccino": {
-        "name": "Cold Brew Cappuccino"
+        "name": "콜드브루 카푸치노"
       },
       "brew_f_cb_mug": {
-        "name": "Cold Brew Mug"
+        "name": "콜드브루 머그"
       },
       "brew_g_cb_latte_mug": {
-        "name": "Cold Brew Latte Mug"
+        "name": "콜드브루 라테 머그"
       },
       "brew_h_cb_capp_mug": {
-        "name": "Cold Brew Cappuccino Mug"
+        "name": "콜드브루 카푸치노 머그"
       }
     },
     "switch": {

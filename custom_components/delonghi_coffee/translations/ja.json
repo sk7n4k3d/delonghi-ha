@@ -339,28 +339,28 @@
         "name": "マイ アイスミルク"
       },
       "brew_a_cb_coffee": {
-        "name": "Cold Brew Coffee"
+        "name": "コールドブリュー コーヒー"
       },
       "brew_b_cb_coffee_ess": {
-        "name": "Cold Brew Espresso"
+        "name": "コールドブリュー エスプレッソ"
       },
       "brew_c_cb_coffee_pot": {
-        "name": "Cold Brew Pot"
+        "name": "コールドブリュー ポット"
       },
       "brew_d_cb_latte": {
-        "name": "Cold Brew Latte"
+        "name": "コールドブリュー ラテ"
       },
       "brew_e_cb_cappuccino": {
-        "name": "Cold Brew Cappuccino"
+        "name": "コールドブリュー カプチーノ"
       },
       "brew_f_cb_mug": {
-        "name": "Cold Brew Mug"
+        "name": "コールドブリュー マグ"
       },
       "brew_g_cb_latte_mug": {
-        "name": "Cold Brew Latte Mug"
+        "name": "コールドブリュー ラテ マグ"
       },
       "brew_h_cb_capp_mug": {
-        "name": "Cold Brew Cappuccino Mug"
+        "name": "コールドブリュー カプチーノ マグ"
       }
     },
     "switch": {
