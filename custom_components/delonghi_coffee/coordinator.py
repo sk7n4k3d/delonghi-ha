@@ -48,7 +48,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
         self._monitor_last_changed: float = monotonic()
-        self._monitor_stale_timeout: int = 1800  # 30 minutes
+        self._monitor_stale_timeout: int = 2700  # 45 minutes (machine auto-sleep is 30min)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
