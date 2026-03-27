@@ -77,3 +77,11 @@ brew_custom:
           min: 0
           max: 2
           step: 1
+    profile:
+      name: Profile
+      description: "User profile (1-4). Defaults to currently selected profile."
+      selector:
+        number:
+          min: 1
+          max: 4
+          step: 1

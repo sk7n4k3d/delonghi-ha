@@ -94,12 +94,8 @@ async def async_setup_entry(
     # Bean system sensor
     entities.append(DeLonghiBeanSensor(coordinator, dsn, model, device_name, sw_version))
 
-    # Counter sensors — only create if data exists (not all machines report all counters)
-    counters = coordinator.data.get("counters", {}) if coordinator.data else {}
+    # Counter sensors — always create all; unsupported ones show as "unavailable"
     for key, meta in COUNTER_SENSORS.items():
-        if counters and key not in counters:
-            _LOGGER.debug("Skipping sensor %s — not reported by this machine", key)
-            continue
         entities.append(DeLonghiCounterSensor(coordinator, dsn, model, device_name, sw_version, key, meta))
 
     async_add_entities(entities)

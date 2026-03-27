@@ -95,12 +95,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         taste = call.data.get("taste", 3)
         milk_froth = call.data.get("milk_froth", 2)
         temperature = call.data.get("temperature", 1)
+        profile = call.data.get("profile", coordinator.selected_profile or 1)
 
         try:
             await hass.async_add_executor_job(
                 api.brew_custom, dsn, beverage,
                 coffee_qty, milk_qty, water_qty,
-                taste, milk_froth, temperature,
+                taste, milk_froth, temperature, profile,
             )
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err

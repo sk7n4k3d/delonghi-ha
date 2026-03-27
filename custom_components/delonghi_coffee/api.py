@@ -745,6 +745,7 @@ class DeLonghiApi:
         taste: int = 3,
         milk_froth: int = 2,
         temperature: int = 1,
+        profile: int = 1,
     ) -> bool:
         """Brew a custom beverage with specific parameters."""
         bev_id = self._BEVERAGE_IDS.get(beverage)
@@ -789,12 +790,11 @@ class DeLonghiApi:
         # RINSE
         brew_params += bytearray([39, 1])
 
-        # profile_save = (1 << 2) | 2 = 6
         total = 6 + len(brew_params) + 1 + 2
         body = (
             bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
             + bytes(brew_params)
-            + bytes([6])
+            + bytes([(profile << 2) | 2])
         )
         brew_cmd = body + self._crc16(body)
 
@@ -974,7 +974,7 @@ class DeLonghiApi:
         body = (
             bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
             + bytes(brew_params)
-            + bytes([6])  # profile_save: always 6 (matches app MITM captures + brew_custom)
+            + bytes([(profile << 2) | 2])
         )
         return body + cls._crc16(body)
 
