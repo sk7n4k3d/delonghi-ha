@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Total Water Beverages"
       },
-      "water_since_descale_ml": {
-        "name": "Water Since Descale"
-      },
       "milk_clean_count": {
         "name": "Milk Cleans"
       },

@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Vanddrikke i alt"
       },
-      "water_since_descale_ml": {
-        "name": "Vand siden afkalkning"
-      },
       "milk_clean_count": {
         "name": "Mælkerensninger"
       },

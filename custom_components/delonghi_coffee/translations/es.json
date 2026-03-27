@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Total bebidas de agua"
       },
-      "water_since_descale_ml": {
-        "name": "Agua desde descalcificación"
-      },
       "milk_clean_count": {
         "name": "Limpiezas de leche"
       },

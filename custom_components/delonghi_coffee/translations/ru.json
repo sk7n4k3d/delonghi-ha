@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Всего водных напитков"
       },
-      "water_since_descale_ml": {
-        "name": "Воды с декальцинации"
-      },
       "milk_clean_count": {
         "name": "Очисток молока"
       },

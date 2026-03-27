@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Totaal waterdranken"
       },
-      "water_since_descale_ml": {
-        "name": "Water sinds ontkalking"
-      },
       "milk_clean_count": {
         "name": "Melkreinigingen"
       },

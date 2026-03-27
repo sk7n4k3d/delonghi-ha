@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "水饮品总计"
       },
-      "water_since_descale_ml": {
-        "name": "除垢后用水量"
-      },
       "milk_clean_count": {
         "name": "奶路清洁次数"
       },

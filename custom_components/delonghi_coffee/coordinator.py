@@ -61,6 +61,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.api.get_status, self.dsn
             )
 
+            # Initialize selected_profile from monitor (actual active profile)
+            if self.selected_profile is None:
+                monitor_profile = status.get("profile", 0)
+                if monitor_profile > 0:
+                    self.selected_profile = monitor_profile
+
             # Full refresh: ping + ONE properties fetch for everything
             if need_full:
                 _LOGGER.debug("Full refresh (single properties fetch)")
@@ -83,9 +89,6 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.custom_recipe_names = self.api.get_custom_recipe_names()
 
                 self._cached_profiles = self.api.parse_profiles(all_props)
-                # Initialize selected_profile from machine on first refresh
-                if self.selected_profile is None:
-                    self.selected_profile = self._cached_profiles.get("active", 1)
                 self._cached_beans = self.api.parse_bean_systems(all_props)
 
                 # Fetch LAN config once (first full refresh only)

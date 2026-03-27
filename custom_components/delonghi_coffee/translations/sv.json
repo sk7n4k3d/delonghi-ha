@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Vattendrycker totalt"
       },
-      "water_since_descale_ml": {
-        "name": "Vatten sedan avkalkning"
-      },
       "milk_clean_count": {
         "name": "Mjölkrengöringar"
       },

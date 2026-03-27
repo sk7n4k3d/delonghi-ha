@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Total boissons eau"
       },
-      "water_since_descale_ml": {
-        "name": "Eau depuis détartrage"
-      },
       "milk_clean_count": {
         "name": "Nettoyages lait"
       },

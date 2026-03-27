@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "お湯飲料合計"
       },
-      "water_since_descale_ml": {
-        "name": "除石灰からの水量"
-      },
       "milk_clean_count": {
         "name": "ミルク洗浄回数"
       },

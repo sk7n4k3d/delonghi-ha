@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "물 음료 합계"
       },
-      "water_since_descale_ml": {
-        "name": "석회 제거 후 물"
-      },
       "milk_clean_count": {
         "name": "우유 세척 횟수"
       },

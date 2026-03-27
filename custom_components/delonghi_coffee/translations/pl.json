@@ -133,9 +133,6 @@
       "total_water_beverages": {
         "name": "Łącznie napojów wodnych"
       },
-      "water_since_descale_ml": {
-        "name": "Woda od odkamieniania"
-      },
       "milk_clean_count": {
         "name": "Czyszczenia mleka"
       },

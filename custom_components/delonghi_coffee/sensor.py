@@ -42,14 +42,13 @@ COUNTER_SENSORS: dict[str, dict[str, str]] = {
     "grounds_percentage": {"name": "Grounds Container", "icon": "mdi:delete-variant", "unit": "%"},
     "descale_count": {"name": "Descales Done", "icon": "mdi:water-check", "unit": "times"},
     "descale_progress": {"name": "Descale Progress", "icon": "mdi:water-alert", "unit": "%"},
-    "total_water_ml": {"name": "Total Water Used", "icon": "mdi:water", "unit": "mL"},
+    "total_water_ml": {"name": "Total Water Used", "icon": "mdi:water", "unit": "L", "scale": 0.001},
     "filter_percentage": {"name": "Water Filter Usage", "icon": "mdi:filter", "unit": "%"},
     "filter_replacements": {"name": "Filter Replacements", "icon": "mdi:filter-check", "unit": "times"},
-    "water_through_filter_ml": {"name": "Water Through Filter", "icon": "mdi:filter", "unit": "mL"},
+    "water_through_filter_ml": {"name": "Water Through Filter", "icon": "mdi:water", "unit": "L", "scale": 0.001},
     # PrimaDonna Soul specific
     "total_black_beverages": {"name": "Total Black Beverages", "icon": "mdi:coffee", "unit": "cups"},
     "total_water_beverages": {"name": "Total Water Beverages", "icon": "mdi:water", "unit": "cups"},
-    "water_since_descale_ml": {"name": "Water Since Descale", "icon": "mdi:water-alert", "unit": "mL"},
     "milk_clean_count": {"name": "Milk Cleans", "icon": "mdi:spray-bottle", "unit": "times"},
     "beverages_since_descale": {"name": "Beverages Since Descale", "icon": "mdi:counter", "unit": "cups"},
     # Computed
@@ -167,12 +166,15 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         super().__init__(coordinator)
         self._dsn = dsn
         self._counter_key = counter_key
+        self._scale: float | None = meta.get("scale")
         self._attr_unique_id = f"{dsn}_{counter_key}"
         self._attr_has_entity_name = True
         self._attr_translation_key = counter_key
         self._attr_icon = meta["icon"]
         self._attr_native_unit_of_measurement = meta["unit"]
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+        if self._scale:
+            self._attr_suggested_display_precision = 1
         # Percentage sensors go up and down — use MEASUREMENT, not TOTAL_INCREASING
         if counter_key in _MEASUREMENT_SENSORS:
             self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -180,10 +182,13 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
-    def native_value(self) -> int | None:
+    def native_value(self) -> float | int | None:
         """Return current counter value."""
         counters: dict[str, Any] = self.coordinator.data.get("counters", {})
-        return counters.get(self._counter_key)
+        val = counters.get(self._counter_key)
+        if val is not None and self._scale:
+            return round(val * self._scale, 1)
+        return val
 
 
 class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
