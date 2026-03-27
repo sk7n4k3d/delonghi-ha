@@ -974,7 +974,7 @@ class DeLonghiApi:
         body = (
             bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
             + bytes(brew_params)
-            + bytes([(profile << 2) | 2])  # profile_save: profile in upper bits, action=2 (brew+save)
+            + bytes([6])  # profile_save: always 6 (matches app MITM captures + brew_custom)
         )
         return body + cls._crc16(body)
 
