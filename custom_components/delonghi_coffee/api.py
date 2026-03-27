@@ -1073,6 +1073,8 @@ class DeLonghiApi:
                     except (ValueError, UnicodeDecodeError):
                         pass
 
+        beverages: set[str] = set()
+
         # Add custom recipes (d240-d245) that have data
         for slot in range(1, 7):
             prop_name = f"d{239 + slot}_rec_custom_{slot}"
@@ -1082,8 +1084,6 @@ class DeLonghiApi:
                     bev_key = f"custom_{slot}"
                     beverages.add(bev_key)
                     _LOGGER.debug("Custom beverage discovered: %s", bev_key)
-
-        beverages: set[str] = set()
         for name in props:
             if "_rec_2_" in name:
                 bev = name.split("_rec_2_", 1)[-1]
