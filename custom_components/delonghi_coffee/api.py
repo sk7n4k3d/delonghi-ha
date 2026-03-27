@@ -952,7 +952,9 @@ class DeLonghiApi:
             if val:
                 try:
                     raw = base64.b64decode(val)
+                    _LOGGER.debug("Profile raw d051: %s (%d bytes)", raw.hex(), len(raw))
                     data = raw[6:-2]
+                    _LOGGER.debug("Profile data (after header): %s (%d bytes)", data.hex(), len(data))
                     for i in range(3):
                         offset = i * 21
                         if offset + 20 <= len(data):
