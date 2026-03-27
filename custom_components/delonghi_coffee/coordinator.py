@@ -45,6 +45,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
+        self._monitor_last_changed: float = time.time()
+        self._monitor_stale_timeout: int = 1800  # 30 minutes
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -96,7 +98,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._monitor_stale_count += 1
             else:
                 self._monitor_stale_count = 0
+                self._monitor_last_changed = now
             self._last_monitor_raw = monitor_raw
+
+            # Detect prolonged staleness — machine probably off
+            stale_duration = now - self._monitor_last_changed
+            monitor_timed_out = stale_duration > self._monitor_stale_timeout
 
             # Suppress alarms when monitor is stale (3+ identical polls)
             alarms = status.get("alarms", [])
@@ -105,9 +112,18 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Suppressing %d alarms from stale monitor", len(alarms))
                 alarms = []
 
+            # Override machine state to Off if monitor hasn't changed in 30+ min
+            machine_state = status.get("machine_state", "Unknown")
+            if monitor_timed_out and machine_state not in ("Unknown", "Off"):
+                _LOGGER.debug(
+                    "Monitor unchanged for %.0f min, assuming machine is Off",
+                    stale_duration / 60,
+                )
+                machine_state = "Off"
+
             return {
                 "status": status.get("status", "UNKNOWN"),
-                "machine_state": status.get("machine_state", "Unknown"),
+                "machine_state": machine_state,
                 "alarms": alarms,
                 "monitor_stale": monitor_stale,
                 "profile": status.get("profile", 0),
