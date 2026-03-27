@@ -52,6 +52,8 @@ COUNTER_SENSORS: dict[str, dict[str, str]] = {
     "water_since_descale_ml": {"name": "Water Since Descale", "icon": "mdi:water-alert", "unit": "mL"},
     "milk_clean_count": {"name": "Milk Cleans", "icon": "mdi:spray-bottle", "unit": "times"},
     "beverages_since_descale": {"name": "Beverages Since Descale", "icon": "mdi:counter", "unit": "cups"},
+    # Computed
+    "computed_total": {"name": "Total All Beverages", "icon": "mdi:coffee", "unit": "cups"},
     # Custom / other
     "usage_tot_custom_b_bw": {"name": "Custom Beverages", "icon": "mdi:coffee-to-go", "unit": "cups"},
     "other_tot_bev_other": {"name": "Other Beverages", "icon": "mdi:cup", "unit": "cups"},

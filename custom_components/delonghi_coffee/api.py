@@ -432,6 +432,7 @@ class DeLonghiApi:
             monitor_val = monitor.get("value")
             if monitor_val:
                 raw = base64.b64decode(monitor_val)
+                result["monitor_raw"] = raw.hex()
                 result.update(self._parse_monitor_v2(raw))
         except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
             _LOGGER.debug("Monitor parse error: %s", err)
@@ -480,11 +481,6 @@ class DeLonghiApi:
         active_alarms: list[dict[str, Any]] = []
         for bit, meta in ALARMS.items():
             if alarm_word & (1 << bit):
-                # Bit 0 (Water Tank Empty) is unreliable on some models:
-                # the cloud caches it as set even when machine is Ready.
-                # A Ready machine cannot have an empty tank.
-                if bit == 0 and state_val == 7:  # 7 = Ready
-                    continue
                 active_alarms.append({"bit": bit, **meta})
 
         if active_alarms:
@@ -602,6 +598,34 @@ class DeLonghiApi:
                     counters["descale_status"] = descale_status
                 except (json.JSONDecodeError, ValueError, TypeError):
                     pass
+
+        # Computed total — sum all beverage categories
+        # d700 (black) + d701 (black+white) + d702 (other) + d703 (water)
+        total_parts = ["total_black_beverages", "total_beverages", "total_water_beverages"]
+        computed_total = 0
+        has_parts = False
+        for key in total_parts:
+            val = counters.get(key)
+            if isinstance(val, int):
+                computed_total += val
+                has_parts = True
+        other = counters.get("other_tot_bev_other") or counters.get("other_other")
+        if isinstance(other, int):
+            computed_total += other
+            has_parts = True
+        # d702 as direct integer (not JSON sub-key)
+        if "d702_tot_bev_other" in props:
+            raw_val = props["d702_tot_bev_other"].get("value")
+            if raw_val is not None:
+                try:
+                    other_direct = int(raw_val)
+                    if not isinstance(other, int):
+                        computed_total += other_direct
+                        has_parts = True
+                except (ValueError, TypeError):
+                    pass
+        if has_parts:
+            counters["computed_total"] = computed_total
 
         return counters
 

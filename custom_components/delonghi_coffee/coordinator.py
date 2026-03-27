@@ -42,6 +42,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cached_beans: list[dict[str, Any]] = []
         self._lan_config: dict[str, Any] | None = None
         self.selected_profile: int = 2  # Default to profile 2 (user defaults)
+        self._last_monitor_raw: str | None = None
+        self._monitor_stale_count: int = 0
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -85,10 +87,27 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 self._last_full_refresh = now
 
+            # Track monitor staleness — if raw data never changes,
+            # alarms from this data are unreliable
+            monitor_raw = status.get("monitor_raw")
+            if monitor_raw and monitor_raw == self._last_monitor_raw:
+                self._monitor_stale_count += 1
+            else:
+                self._monitor_stale_count = 0
+            self._last_monitor_raw = monitor_raw
+
+            # Suppress alarms when monitor is stale (3+ identical polls)
+            alarms = status.get("alarms", [])
+            monitor_stale = self._monitor_stale_count >= 3
+            if monitor_stale and alarms:
+                _LOGGER.debug("Suppressing %d alarms from stale monitor", len(alarms))
+                alarms = []
+
             return {
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": status.get("machine_state", "Unknown"),
-                "alarms": status.get("alarms", []),
+                "alarms": alarms,
+                "monitor_stale": monitor_stale,
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,
                 "beverages": self.beverages,
