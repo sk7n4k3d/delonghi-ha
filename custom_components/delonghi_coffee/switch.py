@@ -128,9 +128,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         """Power on the machine."""
         _LOGGER.info("Powering on %s", self._dsn)
         try:
-            success = await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
-            if not success:
-                raise HomeAssistantError("Failed to power on")
+            await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
             self._assumed_on = True
             self._last_commanded_on = True
             self._monitor_stale_count = 0
@@ -143,9 +141,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         """Power off the machine (standby)."""
         _LOGGER.info("Powering off %s", self._dsn)
         try:
-            success = await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
-            if not success:
-                raise HomeAssistantError("Failed to power off")
+            await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
             self._assumed_on = False
             self._last_commanded_on = False
             self._monitor_stale_count = 0

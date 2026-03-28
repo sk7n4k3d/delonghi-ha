@@ -68,7 +68,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Full refresh (single properties fetch)")
 
                 # Ping to force ALL properties to update (not just monitor)
-                await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
+                try:
+                    await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
+                except (DeLonghiApiError, DeLonghiAuthError):
+                    _LOGGER.debug("Ping failed during refresh, continuing with cached data")
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
                 all_props: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_properties, self.dsn)

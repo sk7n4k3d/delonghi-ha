@@ -101,6 +101,9 @@ class DeLonghiApi:
         self._ayla_user: str = region_cfg["ayla_user"]
         self._ayla_ads: str = region_cfg["ayla_ads"]
 
+        # Cache which command property works for this model (auto-detected on first success)
+        self._cmd_property: str | None = None
+
     @property
     def device_name(self) -> str | None:
         """Return device product name from last get_devices call."""
@@ -113,6 +116,7 @@ class DeLonghiApi:
 
     def authenticate(self) -> bool:
         """Full auth flow: Gigya login -> JWT -> Ayla token_sign_in."""
+        _LOGGER.debug("Authenticating %s (Ayla ADS: %s)", self._email, self._ayla_ads)
         try:
             # Step 1: Gigya login
             gigya_resp = self._session.post(
@@ -265,7 +269,15 @@ class DeLonghiApi:
             timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
-        return {p["property"]["name"]: p["property"] for p in resp.json()}
+        result = {p["property"]["name"]: p["property"] for p in resp.json()}
+        _LOGGER.debug(
+            "get_properties(%s, names=%s): %d properties returned (%s)",
+            dsn,
+            names,
+            len(result),
+            ", ".join(sorted(result.keys())[:20]) + ("..." if len(result) > 20 else ""),
+        )
+        return result
 
     @_retry
     def get_property(self, dsn: str, name: str) -> dict[str, Any]:
@@ -357,6 +369,13 @@ class DeLonghiApi:
                 except (requests.RequestException, DeLonghiApiError) as err2:
                     _LOGGER.debug("Failed alt LAN key for %s: %s", dsn, err2)
 
+        _LOGGER.info(
+            "LAN config result: enabled=%s, ip=%s, key=%s, status=%s",
+            result["lan_enabled"],
+            result["lan_ip"],
+            "present" if result["lanip_key"] else "MISSING",
+            result["status"],
+        )
         return result
 
     def _build_packet(self, ecam_bytes: bytes, include_app_id: bool = True) -> str:
@@ -378,17 +397,29 @@ class DeLonghiApi:
 
         Newer models (Eletta Explore): app_data_request, packet with app_id
         Older models (PrimaDonna Soul): data_request, packet without app_id
+
+        Auto-detects and caches the working property on first success.
+        Raises DeLonghiApiError on failure so @_retry can actually retry.
         """
         headers = self._headers()
 
-        # Try newer format first (app_data_request + app_id in packet)
-        # Then legacy (data_request + no app_id)
         attempts = [
             ("app_data_request", True),  # newer: with app_id
             ("data_request", False),  # legacy: without app_id
         ]
 
+        # Skip to known working property if already detected
+        if self._cmd_property:
+            attempts = sorted(attempts, key=lambda a: a[0] != self._cmd_property)
+
         for prop_name, include_app_id in attempts:
+            _LOGGER.debug(
+                "send_command: trying %s (app_id=%s, cached=%s) cmd=%s",
+                prop_name,
+                include_app_id,
+                self._cmd_property,
+                ecam_bytes.hex(),
+            )
             b64 = self._build_packet(ecam_bytes, include_app_id=include_app_id)
             resp = self._session.post(
                 f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/{prop_name}/datapoints.json",
@@ -397,29 +428,39 @@ class DeLonghiApi:
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code == 201:
+                if not self._cmd_property:
+                    self._cmd_property = prop_name
+                    _LOGGER.info("Detected command property: %s", prop_name)
                 _LOGGER.info("Command sent via %s: %s", prop_name, ecam_bytes.hex())
                 return True
-            if resp.status_code != 404:
-                _LOGGER.error("Command failed on %s: %s %s", prop_name, resp.status_code, resp.text)
-                return False
+            if resp.status_code == 404:
+                _LOGGER.debug("send_command: %s returned 404, trying next", prop_name)
+                continue
+            # Non-404 error → retryable failure
+            _LOGGER.error("send_command: %s returned HTTP %d: %s", prop_name, resp.status_code, resp.text[:200])
+            raise DeLonghiApiError(f"Command rejected by {prop_name}: HTTP {resp.status_code}")
 
-        _LOGGER.error("Command failed: no valid request property found")
-        return False
+        raise DeLonghiApiError("No valid command property found (both endpoints returned 404)")
 
     @_retry
     def ping_connected(self, dsn: str) -> bool:
         """Send app_device_connected ping to force machine to push data updates.
 
         Tries with app_id (newer models) then without (legacy models).
+        Raises DeLonghiApiError on failure so @_retry can retry.
         """
         ts = struct.pack(">I", int(time.time()))
         headers = self._headers()
 
         # Try with app signature first (newer), then without (legacy)
-        for b64 in (
-            base64.b64encode(ts + APP_SIGNATURE).decode(),
-            base64.b64encode(ts).decode(),
+        formats = ["with_app_id", "without_app_id"]
+        for i, b64 in enumerate(
+            (
+                base64.b64encode(ts + APP_SIGNATURE).decode(),
+                base64.b64encode(ts).decode(),
+            )
         ):
+            _LOGGER.debug("ping_connected: trying %s format", formats[i])
             resp = self._session.post(
                 f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/app_device_connected/datapoints.json",
                 json={"datapoint": {"value": b64}},
@@ -427,10 +468,13 @@ class DeLonghiApi:
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code == 201:
+                _LOGGER.debug("ping_connected: success (%s)", formats[i])
                 return True
-            if resp.status_code != 404:
-                return False
-        return False
+            if resp.status_code == 404:
+                _LOGGER.debug("ping_connected: %s returned 404, trying next", formats[i])
+                continue
+            raise DeLonghiApiError(f"Ping failed: HTTP {resp.status_code}")
+        raise DeLonghiApiError("Ping failed: app_device_connected not found")
 
     # Pre-built monitor command: 0x84 with params 0F 03 02 + CRC
     _MONITOR_CMD = bytes.fromhex("0d07840f03025640")
@@ -456,12 +500,27 @@ class DeLonghiApi:
             props = self.get_properties(dsn, names=["app_device_status", "d302_monitor_machine", "d302_monitor"])
             result["status"] = props.get("app_device_status", {}).get("value", "UNKNOWN")
 
+            has_d302 = "d302_monitor_machine" in props
+            has_d302_legacy = "d302_monitor" in props
             monitor = props.get("d302_monitor_machine", props.get("d302_monitor", {}))
             monitor_val = monitor.get("value")
+            _LOGGER.debug(
+                "get_status: cloud=%s, d302_monitor_machine=%s, d302_monitor=%s, monitor_val=%s",
+                result["status"],
+                has_d302,
+                has_d302_legacy,
+                "present" if monitor_val else "absent",
+            )
             if monitor_val:
                 raw = base64.b64decode(monitor_val)
                 result["monitor_raw"] = raw.hex()
                 result.update(self._parse_monitor_v2(raw))
+                _LOGGER.debug(
+                    "get_status: machine_state=%s, alarms=%s, profile=%d",
+                    result.get("machine_state", "?"),
+                    [a["name"] for a in result.get("alarms", [])],
+                    result.get("profile", 0),
+                )
         except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
             _LOGGER.debug("Status/monitor fetch error: %s", err)
 
@@ -666,16 +725,29 @@ class DeLonghiApi:
             beverage_key: Beverage identifier (e.g. "espresso").
             profile: User profile number (1-4, default 2).
         """
+        _LOGGER.debug("brew_beverage: fetching all properties for %s", dsn)
         props = self.get_properties(dsn)
+
+        # Log all recipe properties for diagnostic
+        rec_props = [n for n in props if "_rec_" in n]
+        _LOGGER.debug(
+            "brew_beverage: %d total properties, %d recipe props: %s",
+            len(props),
+            len(rec_props),
+            rec_props[:15],
+        )
 
         # Try the selected profile first, then fall back to any profile
         recipe_prop: dict[str, Any] | None = None
+        target = f"_rec_{profile}_{beverage_key}"
         for name, prop in props.items():
-            if f"_rec_{profile}_{beverage_key}" in name and prop.get("value"):
+            if target in name and prop.get("value"):
+                _LOGGER.debug("brew_beverage: exact match on profile %d: %s", profile, name)
                 recipe_prop = prop
                 break
 
         if not recipe_prop:
+            _LOGGER.debug("brew_beverage: no exact match for '%s', trying fallback", target)
             for name, prop in props.items():
                 # Match _rec_N_KEY or _rec_KEY_ exactly (not substring)
                 if (
@@ -687,22 +759,33 @@ class DeLonghiApi:
                 ) and prop.get("value"):
                     val = prop["value"]
                     if isinstance(val, str) and not val.startswith("{"):
+                        _LOGGER.debug("brew_beverage: fallback match: %s", name)
                         recipe_prop = prop
                         break
 
         if not recipe_prop:
-            _LOGGER.error("Recipe not found for %s", beverage_key)
-            return False
+            _LOGGER.error(
+                "brew_beverage: recipe NOT FOUND for '%s' (profile %d). Available recipe props: %s",
+                beverage_key,
+                profile,
+                rec_props,
+            )
+            raise DeLonghiApiError(f"Recipe not found for {beverage_key} (tried profile {profile} + fallback)")
 
         try:
             recipe_data = base64.b64decode(recipe_prop["value"])
         except (ValueError, base64.binascii.Error) as err:
-            _LOGGER.error("Cannot decode recipe for %s: %s", beverage_key, err)
-            return False
+            raise DeLonghiApiError(f"Cannot decode recipe for {beverage_key}: {err}") from err
+
+        _LOGGER.debug(
+            "brew_beverage: recipe for %s = %d bytes: %s",
+            beverage_key,
+            len(recipe_data),
+            recipe_data.hex(),
+        )
 
         if len(recipe_data) < 8:
-            _LOGGER.error("Recipe %s too short: %d bytes", beverage_key, len(recipe_data))
-            return False
+            raise DeLonghiApiError(f"Recipe {beverage_key} too short: {len(recipe_data)} bytes")
 
         # Pre-brew checks: alarms and accessory
         self._pre_brew_check(dsn, recipe_data, beverage_key)
@@ -711,14 +794,21 @@ class DeLonghiApi:
         try:
             self.ping_connected(dsn)
         except (DeLonghiApiError, DeLonghiAuthError):
-            _LOGGER.debug("Pre-brew ping failed, sending command anyway")
+            _LOGGER.debug("brew_beverage: pre-brew ping failed, sending command anyway")
 
         is_iced = beverage_key.startswith(("i_", "mi_", "over_ice"))
         is_cold_brew = "_cb_" in beverage_key
         brew_cmd = self._recipe_to_brew_command(
             recipe_data, is_iced=is_iced, is_cold_brew=is_cold_brew, profile=profile
         )
-        _LOGGER.info("Brewing %s: %s", beverage_key, brew_cmd.hex())
+        _LOGGER.info(
+            "Brewing %s (profile=%d, iced=%s, cold=%s): %s",
+            beverage_key,
+            profile,
+            is_iced,
+            is_cold_brew,
+            brew_cmd.hex(),
+        )
         return self.send_command(dsn, brew_cmd)
 
     # Beverage name → ID mapping for custom brew
@@ -845,10 +935,12 @@ class DeLonghiApi:
 
     def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str) -> None:
         """Check machine state before brewing. Raises DeLonghiApiError on problems."""
+        _LOGGER.debug("_pre_brew_check: checking machine state for %s", beverage_key)
         try:
             status = self.get_status(dsn)
-        except (DeLonghiApiError, DeLonghiAuthError):
-            return  # Can't check, proceed anyway
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            _LOGGER.debug("_pre_brew_check: status fetch failed (%s), skipping checks", err)
+            return
 
         # Check machine state
         machine_state = status.get("machine_state", "Unknown")
@@ -900,6 +992,13 @@ class DeLonghiApi:
                         )
             except (KeyError, ValueError):
                 pass
+
+        _LOGGER.debug(
+            "_pre_brew_check: OK — state=%s, alarms=%s, accessory_required=%s",
+            machine_state,
+            alarm_names or "none",
+            required_acc,
+        )
 
     @staticmethod
     def _get_recipe_accessory(recipe: bytes) -> int | None:

@@ -119,14 +119,8 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         profile = self.coordinator.selected_profile or 1
         _LOGGER.info("Brewing %s on %s (profile %d)", self._beverage_key, self._dsn, profile)
         try:
-            success = await self.hass.async_add_executor_job(
-                self._api.brew_beverage, self._dsn, self._beverage_key, profile
-            )
-            if not success:
-                raise HomeAssistantError(f"Failed to brew {self._beverage_key}: command was not accepted")
-        except HomeAssistantError:
-            raise
-        except Exception as err:
+            await self.hass.async_add_executor_job(self._api.brew_beverage, self._dsn, self._beverage_key, profile)
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to brew {self._beverage_key}: {err}") from err
 
 
