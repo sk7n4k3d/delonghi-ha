@@ -1,0 +1,37 @@
+name: Validate
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  json:
+    name: JSON / YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate JSON translations
+        run: python -c "
+          import json, glob, sys;
+          ok = True;
+          [
+            (print(f'OK  {f}') if True else None)
+            if json.load(open(f))
+            else None
+            for f in sorted(glob.glob('custom_components/*/translations/*.json'))
+          ]
+          " 2>&1 || { echo "::error::Invalid JSON found"; exit 1; }
+      - name: Validate services.yaml
+        run: |
+          pip install pyyaml -q
+          python -c "
+          import yaml, sys
+          with open('custom_components/delonghi_coffee/services.yaml') as f:
+              data = yaml.safe_load(f)
+          print(f'Services: {list(data.keys())}')
+          "
