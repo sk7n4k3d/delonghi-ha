@@ -72,9 +72,7 @@ def _device_info(dsn: str, model: str, device_name: str, sw_version: str | None)
     return info
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up sensor entities."""
     data: dict[str, Any] = hass.data[DOMAIN][entry.entry_id]
     coordinator: DeLonghiCoordinator = data["coordinator"]
@@ -141,8 +139,9 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
             attrs["lan_ip"] = lan.get("lan_ip")
         return attrs
 
-
     # Percentage sensors that go down (not monotonically increasing)
+
+
 _MEASUREMENT_SENSORS = {"grounds_percentage", "descale_progress", "filter_percentage"}
 
 

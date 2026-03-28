@@ -18,9 +18,7 @@ from .sensor import _device_info
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up select entities."""
     data: dict[str, Any] = hass.data[DOMAIN][entry.entry_id]
     coordinator: DeLonghiCoordinator = data["coordinator"]
@@ -29,9 +27,7 @@ async def async_setup_entry(
     device_name: str = data["device_name"]
     sw_version: str | None = data.get("sw_version")
 
-    async_add_entities([
-        DeLonghiProfileSelect(coordinator, dsn, model, device_name, sw_version)
-    ])
+    async_add_entities([DeLonghiProfileSelect(coordinator, dsn, model, device_name, sw_version)])
 
 
 class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity):
@@ -59,10 +55,7 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
         profiles = self.coordinator.data.get("profiles", {})
         if not profiles:
             return ["Profile 1", "Profile 2", "Profile 3", "Profile 4"]
-        return [
-            profiles.get(i, {}).get("name", f"Profile {i}")
-            for i in sorted(profiles.keys())
-        ]
+        return [profiles.get(i, {}).get("name", f"Profile {i}") for i in sorted(profiles.keys())]
 
     @property
     def current_option(self) -> str | None:

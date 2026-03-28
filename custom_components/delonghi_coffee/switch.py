@@ -20,9 +20,7 @@ from .sensor import _device_info
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up switch entity."""
     data: dict[str, Any] = hass.data[DOMAIN][entry.entry_id]
     api: DeLonghiApi = data["api"]
@@ -32,9 +30,7 @@ async def async_setup_entry(
     device_name: str = data["device_name"]
     sw_version: str | None = data.get("sw_version")
 
-    async_add_entities([
-        DeLonghiPowerSwitch(api, coordinator, dsn, model, device_name, sw_version)
-    ])
+    async_add_entities([DeLonghiPowerSwitch(api, coordinator, dsn, model, device_name, sw_version)])
 
 
 class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
@@ -132,9 +128,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         """Power on the machine."""
         _LOGGER.info("Powering on %s", self._dsn)
         try:
-            success = await self.hass.async_add_executor_job(
-                self._api.send_command, self._dsn, POWER_ON_CMD
-            )
+            success = await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
             if not success:
                 raise HomeAssistantError("Failed to power on")
             self._assumed_on = True
@@ -149,9 +143,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         """Power off the machine (standby)."""
         _LOGGER.info("Powering off %s", self._dsn)
         try:
-            success = await self.hass.async_add_executor_job(
-                self._api.send_command, self._dsn, POWER_OFF_CMD
-            )
+            success = await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
             if not success:
                 raise HomeAssistantError("Failed to power off")
             self._assumed_on = False

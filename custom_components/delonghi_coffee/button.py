@@ -20,9 +20,7 @@ from .sensor import _device_info
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up button entities."""
     data: dict[str, Any] = hass.data[DOMAIN][entry.entry_id]
     api: DeLonghiApi = data["api"]
@@ -34,9 +32,7 @@ async def async_setup_entry(
 
     # Get available beverages from device
     if not coordinator.beverages:
-        coordinator.beverages = await hass.async_add_executor_job(
-            api.get_available_beverages, dsn
-        )
+        coordinator.beverages = await hass.async_add_executor_job(api.get_available_beverages, dsn)
 
     known_keys: set[str] = set()
 
@@ -52,24 +48,27 @@ async def async_setup_entry(
             if custom_name:
                 meta = {"name": custom_name, "icon": "mdi:coffee-to-go"}
             else:
-                meta = BEVERAGES.get(bev_key, {
-                    "name": bev_key.replace("_", " ").title(),
-                    "icon": "mdi:coffee",
-                })
-            new_entities.append(
-                DeLonghiBrewButton(
-                    api, coordinator, dsn, model, device_name, sw_version, bev_key, meta
+                meta = BEVERAGES.get(
+                    bev_key,
+                    {
+                        "name": bev_key.replace("_", " ").title(),
+                        "icon": "mdi:coffee",
+                    },
                 )
+            new_entities.append(
+                DeLonghiBrewButton(api, coordinator, dsn, model, device_name, sw_version, bev_key, meta)
             )
         if new_entities:
             _LOGGER.info("Adding %d brew buttons", len(new_entities))
             async_add_entities(new_entities)
 
     # Add static control buttons
-    async_add_entities([
-        DeLonghiCancelButton(api, coordinator, dsn, model, device_name, sw_version),
-        DeLonghiSyncButton(api, coordinator, dsn, model, device_name, sw_version),
-    ])
+    async_add_entities(
+        [
+            DeLonghiCancelButton(api, coordinator, dsn, model, device_name, sw_version),
+            DeLonghiSyncButton(api, coordinator, dsn, model, device_name, sw_version),
+        ]
+    )
 
     # Add buttons for currently known beverages
     _add_buttons(coordinator.beverages)
@@ -124,15 +123,11 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
                 self._api.brew_beverage, self._dsn, self._beverage_key, profile
             )
             if not success:
-                raise HomeAssistantError(
-                    f"Failed to brew {self._beverage_key}: command was not accepted"
-                )
+                raise HomeAssistantError(f"Failed to brew {self._beverage_key}: command was not accepted")
         except HomeAssistantError:
             raise
         except Exception as err:
-            raise HomeAssistantError(
-                f"Failed to brew {self._beverage_key}: {err}"
-            ) from err
+            raise HomeAssistantError(f"Failed to brew {self._beverage_key}: {err}") from err
 
 
 class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
@@ -189,8 +184,6 @@ class DeLonghiSyncButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         """Force sync recipes for the selected profile."""
         profile = self.coordinator.selected_profile or 1
         try:
-            await self.hass.async_add_executor_job(
-                self._api.sync_recipes, self._dsn, profile
-            )
+            await self.hass.async_add_executor_job(self._api.sync_recipes, self._dsn, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to sync recipes: {err}") from err

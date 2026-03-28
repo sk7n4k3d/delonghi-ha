@@ -21,9 +21,7 @@ from .sensor import _device_info
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up binary sensor entities for alarms."""
     data: dict[str, Any] = hass.data[DOMAIN][entry.entry_id]
     coordinator: DeLonghiCoordinator = data["coordinator"]
@@ -35,9 +33,7 @@ async def async_setup_entry(
     entities: list[BinarySensorEntity] = []
 
     for bit, meta in ALARMS.items():
-        entities.append(
-            DeLonghiAlarmSensor(coordinator, dsn, model, device_name, sw_version, bit, meta)
-        )
+        entities.append(DeLonghiAlarmSensor(coordinator, dsn, model, device_name, sw_version, bit, meta))
 
     async_add_entities(entities)
 
@@ -95,4 +91,3 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
             else:
                 return False  # Never seen → assume unsupported, no problem
         return not bit_set
-

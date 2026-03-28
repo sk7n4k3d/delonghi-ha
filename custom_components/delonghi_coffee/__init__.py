@@ -98,9 +98,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         try:
             await hass.async_add_executor_job(
-                api.brew_custom, dsn, beverage,
-                coffee_qty, milk_qty, water_qty,
-                taste, milk_froth, temperature, profile,
+                api.brew_custom,
+                dsn,
+                beverage,
+                coffee_qty,
+                milk_qty,
+                water_qty,
+                taste,
+                milk_froth,
+                temperature,
+                profile,
             )
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
@@ -110,6 +117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_cancel_brew(call) -> None:  # noqa: ANN001
         """Handle the cancel_brew service call."""
         from homeassistant.exceptions import HomeAssistantError as HAError
+
         try:
             await hass.async_add_executor_job(api.cancel_brew, dsn)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
@@ -120,6 +128,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_sync_recipes(call) -> None:  # noqa: ANN001
         """Handle the sync_recipes service call."""
         from homeassistant.exceptions import HomeAssistantError as HAError
+
         profile = call.data.get("profile", coordinator.selected_profile or 1)
         try:
             await hass.async_add_executor_job(api.sync_recipes, dsn, profile)

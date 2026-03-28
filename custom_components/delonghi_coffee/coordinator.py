@@ -56,9 +56,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 
             # Read status (monitor property from cloud cache)
-            status: dict[str, Any] = await self.hass.async_add_executor_job(
-                self.api.get_status, self.dsn
-            )
+            status: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_status, self.dsn)
 
             # Sync selected_profile from monitor (actual active profile)
             monitor_profile = status.get("profile", 0)
@@ -70,14 +68,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Full refresh (single properties fetch)")
 
                 # Ping to force ALL properties to update (not just monitor)
-                await self.hass.async_add_executor_job(
-                    self.api.ping_connected, self.dsn
-                )
+                await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
-                all_props: dict[str, Any] = await self.hass.async_add_executor_job(
-                    self.api.get_properties, self.dsn
-                )
+                all_props: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_properties, self.dsn)
 
                 # Parse everything from the single fetch
                 self._cached_counters = self.api.parse_counters(all_props)
@@ -91,9 +85,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 # Fetch LAN config once (first full refresh only)
                 if self._lan_config is None:
-                    self._lan_config = await self.hass.async_add_executor_job(
-                        self.api.get_lan_config, self.dsn
-                    )
+                    self._lan_config = await self.hass.async_add_executor_job(self.api.get_lan_config, self.dsn)
 
                 self._last_full_refresh = now
 
@@ -122,7 +114,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if (monitor_timed_out or no_cloud) and alarms:
                 _LOGGER.debug(
                     "Suppressing %d alarms (timed_out=%s, no_cloud=%s)",
-                    len(alarms), monitor_timed_out, no_cloud,
+                    len(alarms),
+                    monitor_timed_out,
+                    no_cloud,
                 )
                 alarms = []
                 alarm_word = None

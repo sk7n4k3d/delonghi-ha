@@ -49,6 +49,7 @@ class DeLonghiApiError(Exception):
 
 def _retry(func):  # noqa: ANN001, ANN202
     """Simple retry decorator with backoff (3 attempts, 2s delay)."""
+
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         last_err: Exception | None = None
         for attempt in range(1, RETRY_COUNT + 1):
@@ -64,12 +65,15 @@ def _retry(func):  # noqa: ANN001, ANN202
                 if attempt < RETRY_COUNT:
                     _LOGGER.debug(
                         "Attempt %d/%d failed for %s: %s — retrying in %ds",
-                        attempt, RETRY_COUNT, func.__name__, err, RETRY_DELAY,
+                        attempt,
+                        RETRY_COUNT,
+                        func.__name__,
+                        err,
+                        RETRY_DELAY,
                     )
                     time.sleep(RETRY_DELAY)
-        raise DeLonghiApiError(
-            f"{func.__name__} failed after {RETRY_COUNT} attempts: {last_err}"
-        ) from last_err
+        raise DeLonghiApiError(f"{func.__name__} failed after {RETRY_COUNT} attempts: {last_err}") from last_err
+
     return wrapper
 
 
@@ -132,9 +136,7 @@ class DeLonghiApi:
                     self._email,
                     gigya_data.get("errorMessage", "Unknown error"),
                 )
-                raise DeLonghiAuthError(
-                    f"Gigya login failed: {gigya_data.get('errorMessage', 'Unknown')}"
-                )
+                raise DeLonghiAuthError(f"Gigya login failed: {gigya_data.get('errorMessage', 'Unknown')}")
 
             id_token: str | None = gigya_data.get("id_token")
             if not id_token:
@@ -182,12 +184,8 @@ class DeLonghiApi:
             )
 
             if ayla_resp.status_code != 200:
-                _LOGGER.error(
-                    "Ayla auth failed: %s %s", ayla_resp.status_code, ayla_resp.text
-                )
-                raise DeLonghiAuthError(
-                    f"Ayla auth failed: {ayla_resp.status_code} {ayla_resp.text}"
-                )
+                _LOGGER.error("Ayla auth failed: %s %s", ayla_resp.status_code, ayla_resp.text)
+                raise DeLonghiAuthError(f"Ayla auth failed: {ayla_resp.status_code} {ayla_resp.text}")
 
             ayla_data: dict[str, Any] = ayla_resp.json()
             self._ayla_token = ayla_data["access_token"]
@@ -312,7 +310,10 @@ class DeLonghiApi:
             result["status"] = device.get("connection_status")
             _LOGGER.debug(
                 "LAN config for %s: enabled=%s, ip=%s, status=%s",
-                dsn, result["lan_enabled"], result["lan_ip"], result["status"],
+                dsn,
+                result["lan_enabled"],
+                result["lan_ip"],
+                result["status"],
             )
         except (requests.RequestException, DeLonghiApiError) as err:
             _LOGGER.debug("Failed to get device info for %s: %s", dsn, err)
@@ -350,7 +351,8 @@ class DeLonghiApi:
                     result["lanip_key_id"] = cfg.get("local_key_id")
                     _LOGGER.debug(
                         "LAN key (alt) for %s: key_id=%s",
-                        dsn, result["lanip_key_id"],
+                        dsn,
+                        result["lanip_key_id"],
                     )
                 except (requests.RequestException, DeLonghiApiError) as err2:
                     _LOGGER.debug("Failed alt LAN key for %s: %s", dsn, err2)
@@ -382,8 +384,8 @@ class DeLonghiApi:
         # Try newer format first (app_data_request + app_id in packet)
         # Then legacy (data_request + no app_id)
         attempts = [
-            ("app_data_request", True),   # newer: with app_id
-            ("data_request", False),      # legacy: without app_id
+            ("app_data_request", True),  # newer: with app_id
+            ("data_request", False),  # legacy: without app_id
         ]
 
         for prop_name, include_app_id in attempts:
@@ -451,9 +453,7 @@ class DeLonghiApi:
         }
 
         try:
-            props = self.get_properties(
-                dsn, names=["app_device_status", "d302_monitor_machine", "d302_monitor"]
-            )
+            props = self.get_properties(dsn, names=["app_device_status", "d302_monitor_machine", "d302_monitor"])
             result["status"] = props.get("app_device_status", {}).get("value", "UNKNOWN")
 
             monitor = props.get("d302_monitor_machine", props.get("d302_monitor", {}))
@@ -499,12 +499,7 @@ class DeLonghiApi:
         result["machine_state"] = MACHINE_STATES.get(state_val, f"Unknown ({state_val})")
 
         # 32-bit alarm word from 4 bytes
-        alarm_word = (
-            (raw[7] & 0xFF)
-            | ((raw[8] & 0xFF) << 8)
-            | ((raw[12] & 0xFF) << 16)
-            | ((raw[13] & 0xFF) << 24)
-        )
+        alarm_word = (raw[7] & 0xFF) | ((raw[8] & 0xFF) << 8) | ((raw[12] & 0xFF) << 16) | ((raw[13] & 0xFF) << 24)
 
         active_alarms: list[dict[str, Any]] = []
         for bit, meta in ALARMS.items():
@@ -622,9 +617,7 @@ class DeLonghiApi:
                     threshold = int(svc.get("last_4_calc_threshold", 1))
                     descale_status = int(svc.get("descale_status", 0))
                     if threshold > 0:
-                        counters["descale_progress"] = min(
-                            round(calc_qty / threshold * 100), 100
-                        )
+                        counters["descale_progress"] = min(round(calc_qty / threshold * 100), 100)
                     counters["descale_status"] = descale_status
                 except (json.JSONDecodeError, ValueError, TypeError):
                     pass
@@ -685,9 +678,13 @@ class DeLonghiApi:
         if not recipe_prop:
             for name, prop in props.items():
                 # Match _rec_N_KEY or _rec_KEY_ exactly (not substring)
-                if (f"_rec_{beverage_key}_" in name or name.endswith(f"_rec_{beverage_key}") or
-                        f"_rec_1_{beverage_key}" in name or f"_rec_3_{beverage_key}" in name or
-                        f"_rec_4_{beverage_key}" in name) and prop.get("value"):
+                if (
+                    f"_rec_{beverage_key}_" in name
+                    or name.endswith(f"_rec_{beverage_key}")
+                    or f"_rec_1_{beverage_key}" in name
+                    or f"_rec_3_{beverage_key}" in name
+                    or f"_rec_4_{beverage_key}" in name
+                ) and prop.get("value"):
                     val = prop["value"]
                     if isinstance(val, str) and not val.startswith("{"):
                         recipe_prop = prop
@@ -726,16 +723,30 @@ class DeLonghiApi:
 
     # Beverage name → ID mapping for custom brew
     _BEVERAGE_IDS: dict[str, int] = {
-        "espresso": 1, "coffee": 2, "long_coffee": 3, "doppio": 5,
-        "americano": 6, "cappuccino": 7, "latte_macchiato": 8,
-        "caffe_latte": 9, "flat_white": 10, "espresso_macchiato": 11,
-        "hot_milk": 12, "hot_water": 16, "tea": 22, "cortado": 24,
+        "espresso": 1,
+        "coffee": 2,
+        "long_coffee": 3,
+        "doppio": 5,
+        "americano": 6,
+        "cappuccino": 7,
+        "latte_macchiato": 8,
+        "caffe_latte": 9,
+        "flat_white": 10,
+        "espresso_macchiato": 11,
+        "hot_milk": 12,
+        "hot_water": 16,
+        "tea": 22,
+        "cortado": 24,
     }
 
     # Accessory required per beverage type (2=Latte Crema Hot)
     _BEVERAGE_ACCESSORY: dict[str, int] = {
-        "cappuccino": 2, "latte_macchiato": 2, "caffe_latte": 2,
-        "flat_white": 2, "espresso_macchiato": 2, "hot_milk": 2,
+        "cappuccino": 2,
+        "latte_macchiato": 2,
+        "caffe_latte": 2,
+        "flat_white": 2,
+        "espresso_macchiato": 2,
+        "hot_milk": 2,
         "cortado": 2,
     }
 
@@ -795,11 +806,7 @@ class DeLonghiApi:
         brew_params += bytearray([39, 1])
 
         total = 6 + len(brew_params) + 1 + 2
-        body = (
-            bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
-            + bytes(brew_params)
-            + bytes([(profile << 2) | 2])
-        )
+        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03]) + bytes(brew_params) + bytes([(profile << 2) | 2])
         brew_cmd = body + self._crc16(body)
 
         # Pre-brew check (build a fake recipe for accessory check)
@@ -846,17 +853,11 @@ class DeLonghiApi:
         # Check machine state
         machine_state = status.get("machine_state", "Unknown")
         if machine_state == "Off":
-            raise DeLonghiApiError(
-                f"Cannot brew {beverage_key}: machine is off. Power on first."
-            )
+            raise DeLonghiApiError(f"Cannot brew {beverage_key}: machine is off. Power on first.")
         if machine_state == "Brewing":
-            raise DeLonghiApiError(
-                f"Cannot brew {beverage_key}: machine is already brewing."
-            )
+            raise DeLonghiApiError(f"Cannot brew {beverage_key}: machine is already brewing.")
         if machine_state in ("Descaling", "Rinsing", "Going to sleep", "Turning On", "Heating"):
-            raise DeLonghiApiError(
-                f"Cannot brew {beverage_key}: machine is busy ({machine_state})."
-            )
+            raise DeLonghiApiError(f"Cannot brew {beverage_key}: machine is busy ({machine_state}).")
 
         # Check blocking alarms
         alarms = status.get("alarms", [])
@@ -878,9 +879,7 @@ class DeLonghiApi:
         }
         active_blocking = [a for a in alarm_names if a in blocking]
         if active_blocking:
-            raise DeLonghiApiError(
-                f"Cannot brew {beverage_key}: {', '.join(active_blocking)}"
-            )
+            raise DeLonghiApiError(f"Cannot brew {beverage_key}: {', '.join(active_blocking)}")
 
         # Check accessory requirement
         required_acc = self._get_recipe_accessory(recipe)
@@ -977,11 +976,11 @@ class DeLonghiApi:
             pid = raw[i]
             if pid in cls._BIG_PARAMS and i + 2 < len(raw):
                 if pid not in exclude:
-                    brew_params += raw[i:i + 3]
+                    brew_params += raw[i : i + 3]
                 i += 3
             elif i + 1 < len(raw):
                 if pid not in exclude:
-                    brew_params += raw[i:i + 2]
+                    brew_params += raw[i : i + 2]
                 i += 2
             else:
                 break
@@ -996,11 +995,7 @@ class DeLonghiApi:
         brew_params += bytearray([39, 1])  # RINSE=1
 
         total = 6 + len(brew_params) + 1 + 2
-        body = (
-            bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03])
-            + bytes(brew_params)
-            + bytes([(profile << 2) | 2])
-        )
+        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03]) + bytes(brew_params) + bytes([(profile << 2) | 2])
         return body + cls._crc16(body)
 
     def get_profiles(self, dsn: str) -> dict[str, Any]:
@@ -1029,7 +1024,7 @@ class DeLonghiApi:
                     for i in range(3):
                         offset = i * stride
                         if offset + 20 <= len(data):
-                            name = _decode_utf16(data[offset:offset + 20])
+                            name = _decode_utf16(data[offset : offset + 20])
                             icon = data[offset + 20] if offset + 20 < len(data) else 0
                             profiles[i + 1] = {
                                 "name": name,
@@ -1091,11 +1086,13 @@ class DeLonghiApi:
                         parts = [p for p in text.split("\x00") if p.strip()]
                         local_name = parts[0] if parts else f"Bean {i}"
                         english_name = parts[1] if len(parts) > 1 else local_name
-                        beans.append({
-                            "id": i,
-                            "name": local_name,
-                            "english_name": english_name,
-                        })
+                        beans.append(
+                            {
+                                "id": i,
+                                "name": local_name,
+                                "english_name": english_name,
+                            }
+                        )
                     except (ValueError, UnicodeDecodeError):
                         beans.append({"id": i, "name": f"Bean {i}", "english_name": f"Bean {i}"})
 
@@ -1128,7 +1125,7 @@ class DeLonghiApi:
                         for i in range(3):
                             offset = i * 22
                             if offset + 20 <= len(data):
-                                name = _decode_utf16(data[offset:offset + 20])
+                                name = _decode_utf16(data[offset : offset + 20])
                                 if name:
                                     slot = start_idx + i
                                     custom_names[slot] = name
@@ -1168,7 +1165,7 @@ class DeLonghiApi:
                     rest = parts[1]
                     idx = rest.find("_")
                     if idx > 0:
-                        bev = rest[idx + 1:]
+                        bev = rest[idx + 1 :]
                         if bev and not bev.isdigit():
                             beverages.add(bev)
 
@@ -1179,7 +1176,4 @@ class DeLonghiApi:
 
     def get_custom_recipe_names(self) -> dict[str, str]:
         """Return custom recipe names keyed by beverage key."""
-        return {
-            f"custom_{slot}": name
-            for slot, name in getattr(self, "_custom_recipe_names", {}).items()
-        }
+        return {f"custom_{slot}": name for slot, name in getattr(self, "_custom_recipe_names", {}).items()}

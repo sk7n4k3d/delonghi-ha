@@ -8,9 +8,7 @@ class TestCommandLengthBytes:
 
     def _build_and_check(self, body: bytes) -> bytes:
         cmd = body + DeLonghiApi._crc16(body)
-        assert cmd[1] == len(cmd) - 1, (
-            f"Length byte 0x{cmd[1]:02X} != total({len(cmd)}) - 1 = 0x{len(cmd)-1:02X}"
-        )
+        assert cmd[1] == len(cmd) - 1, f"Length byte 0x{cmd[1]:02X} != total({len(cmd)}) - 1 = 0x{len(cmd) - 1:02X}"
         assert cmd[0] == 0x0D, "ECAM commands must start with 0x0D"
         return cmd
 
@@ -87,16 +85,14 @@ class TestRecipeToBrew:
             cmd = DeLonghiApi._recipe_to_brew_command(recipe, profile=profile)
             profile_save = cmd[-(2 + 1)]  # 1 byte before CRC
             expected = (profile << 2) | 2
-            assert profile_save == expected, (
-                f"Profile {profile}: got 0x{profile_save:02X}, expected 0x{expected:02X}"
-            )
+            assert profile_save == expected, f"Profile {profile}: got 0x{profile_save:02X}, expected 0x{expected:02X}"
 
     def test_iced_adds_iced_param(self):
         """Iced drinks must append ICED(31)=0."""
         recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
         cmd = DeLonghiApi._recipe_to_brew_command(recipe, is_iced=True, profile=1)
         # Find ICED(31) in params
-        params = cmd[6:-(1 + 2)]
+        params = cmd[6 : -(1 + 2)]
         found = False
         i = 0
         big = {1, 9, 15}
@@ -111,10 +107,8 @@ class TestRecipeToBrew:
     def test_cold_brew_adds_iced3_and_intensity(self):
         """Cold brew must append ICED(31)=3 + INTENSITY(38)."""
         recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
-        cmd = DeLonghiApi._recipe_to_brew_command(
-            recipe, is_cold_brew=True, intensity=2, profile=1
-        )
-        params = cmd[6:-(1 + 2)]
+        cmd = DeLonghiApi._recipe_to_brew_command(recipe, is_cold_brew=True, intensity=2, profile=1)
+        params = cmd[6 : -(1 + 2)]
         iced_val = None
         intensity_val = None
         i = 0
