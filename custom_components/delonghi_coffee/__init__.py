@@ -108,6 +108,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, "brew_custom", handle_brew_custom)
 
+    async def handle_cancel_brew(call) -> None:  # noqa: ANN001
+        """Handle the cancel_brew service call."""
+        from homeassistant.exceptions import HomeAssistantError as HAError
+        try:
+            await hass.async_add_executor_job(api.cancel_brew, dsn)
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            raise HAError(str(err)) from err
+
+    hass.services.async_register(DOMAIN, "cancel_brew", handle_cancel_brew)
+
+    async def handle_sync_recipes(call) -> None:  # noqa: ANN001
+        """Handle the sync_recipes service call."""
+        from homeassistant.exceptions import HomeAssistantError as HAError
+        profile = call.data.get("profile", coordinator.selected_profile or 1)
+        try:
+            await hass.async_add_executor_job(api.sync_recipes, dsn, profile)
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            raise HAError(str(err)) from err
+
+    hass.services.async_register(DOMAIN, "sync_recipes", handle_sync_recipes)
+
     return True
 
 
@@ -118,4 +139,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Remove service if no more entries
         if not hass.data.get(DOMAIN):
             hass.services.async_remove(DOMAIN, "brew_custom")
+            hass.services.async_remove(DOMAIN, "cancel_brew")
+            hass.services.async_remove(DOMAIN, "sync_recipes")
     return unload_ok

@@ -112,14 +112,14 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "mi_flat_white": {"name": "My Iced Flat White", "icon": "mdi:snowflake"},
     "mi_cold_milk": {"name": "My Iced Cold Milk", "icon": "mdi:snowflake"},
     # Cold Brew
-    "a_cb_coffee": {"name": "Cold Brew Coffee", "icon": "mdi:snowflake"},
-    "b_cb_coffee_ess": {"name": "Cold Brew Espresso", "icon": "mdi:snowflake"},
-    "c_cb_coffee_pot": {"name": "Cold Brew Pot", "icon": "mdi:snowflake"},
-    "d_cb_latte": {"name": "Cold Brew Latte", "icon": "mdi:snowflake"},
-    "e_cb_cappuccino": {"name": "Cold Brew Cappuccino", "icon": "mdi:snowflake"},
-    "f_cb_mug": {"name": "Cold Brew Mug", "icon": "mdi:snowflake"},
-    "g_cb_latte_mug": {"name": "Cold Brew Latte Mug", "icon": "mdi:snowflake"},
-    "h_cb_capp_mug": {"name": "Cold Brew Cappuccino Mug", "icon": "mdi:snowflake"},
+    "cb_coffee": {"name": "Cold Brew Coffee", "icon": "mdi:snowflake"},
+    "cb_coffee_ess": {"name": "Cold Brew Espresso", "icon": "mdi:snowflake"},
+    "cb_coffee_pot": {"name": "Cold Brew Pot", "icon": "mdi:snowflake"},
+    "cb_latte": {"name": "Cold Brew Latte", "icon": "mdi:snowflake"},
+    "cb_cappuccino": {"name": "Cold Brew Cappuccino", "icon": "mdi:snowflake"},
+    "cb_mug": {"name": "Cold Brew Mug", "icon": "mdi:snowflake"},
+    "cb_latte_mug": {"name": "Cold Brew Latte Mug", "icon": "mdi:snowflake"},
+    "cb_capp_mug": {"name": "Cold Brew Cappuccino Mug", "icon": "mdi:snowflake"},
 }
 
 # Power on / wake up command (Request ID 132, contents 0x02 0x01)

@@ -70,29 +70,15 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
     def is_on(self) -> bool | None:
         """Return True if alarm is active.
 
-        Inverted bits (13=tank position, 18=grid present) indicate a
-        positive state when SET. The alarm is active when the bit is NOT
-        set (meaning the component is missing).
-
-        To avoid false positives on machines that don't report these bits,
-        inverted alarms only activate after the coordinator has confirmed
-        the machine supports them (bit seen set at least once).
+        The API parser now handles inverted logic and machine support detection.
+        We simply check if our alarm bit is present in the active alarms list.
         """
-        alarm_word: int | None = self.coordinator.data.get("alarm_word")
-        if alarm_word is None:
+        alarms: list[dict[str, Any]] | None = self.coordinator.data.get("alarms")
+        if alarms is None:
             return None
 
-        bit_set = bool(alarm_word & (1 << self._alarm_bit))
-
-        if not self._inverted:
-            return bit_set
-
-        # Inverted alarm: only report problem if the machine actually
-        # supports this bit (we've seen it set at least once)
-        if self._alarm_bit not in self.coordinator.seen_alarm_bits:
-            if bit_set:
-                self.coordinator.seen_alarm_bits.add(self._alarm_bit)
-            else:
-                return False  # Never seen → assume unsupported, no problem
-        return not bit_set
+        for alarm in alarms:
+            if alarm.get("bit") == self._alarm_bit:
+                return True
+        return False
 

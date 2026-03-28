@@ -31,12 +31,13 @@ def _decode_utf16(data: bytes) -> str:
     properties (profile names vs custom recipe names). This detects
     whether null bytes sit at even positions (BE) or odd positions (LE).
     """
+    data = data.rstrip(b"\x00")
     if len(data) < 2:
         return ""
     nulls_even = sum(1 for i in range(0, min(len(data), 20), 2) if data[i] == 0)
     nulls_odd = sum(1 for i in range(1, min(len(data), 20), 2) if data[i] == 0)
     encoding = "utf-16-be" if nulls_even >= nulls_odd else "utf-16-le"
-    return data.decode(encoding, errors="replace").replace("\x00", "").strip()
+    return data.decode(encoding, errors="replace").strip()
 
 
 class DeLonghiAuthError(Exception):
@@ -86,6 +87,7 @@ class DeLonghiApi:
         self._devices: list[dict[str, Any]] = []
         self._device_name: str | None = None
         self._sw_version: str | None = None
+        self._seen_alarm_bits: set[int] = set()
 
         # Gigya always uses EU1 (confirmed from app manifest)
         self._gigya_url: str = GIGYA_URL
@@ -257,11 +259,13 @@ class DeLonghiApi:
         return self._devices
 
     @_retry
-    def get_properties(self, dsn: str) -> dict[str, Any]:
-        """Get all properties for a device."""
+    def get_properties(self, dsn: str, names: list[str] | None = None) -> dict[str, Any]:
+        """Get properties for a device. If names is provided, limits response."""
+        params = [("names[]", n) for n in names] if names else None
         resp = self._session.get(
             f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties.json",
             headers=self._headers(),
+            params=params,
             timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
@@ -406,8 +410,19 @@ class DeLonghiApi:
     def ping_connected(self, dsn: str) -> bool:
         """Send app_device_connected ping to force machine to push data updates.
 
-        Tries with app_id (newer models) then without (legacy models).
+        First attempts to send the true ECAM 0xE8 PING command on app_data_request.
+        Falls back to legacy app_device_connected dummy ping.
         """
+        # ECAM 0x0D 0x01 0xE8 + CRC
+        ping_body = bytes([0x0D, 0x01, 0xE8])
+        ping_cmd = ping_body + self._crc16(ping_body)
+
+        try:
+            return self.send_command(dsn, ping_cmd)
+        except DeLonghiApiError:
+            pass
+
+        # Fallback for ultra-legacy models that still use app_device_connected exclusively
         ts = struct.pack(">I", int(time.time()))
         headers = self._headers()
 
@@ -449,17 +464,13 @@ class DeLonghiApi:
         }
 
         try:
-            prop = self.get_property(dsn, "app_device_status")
-            result["status"] = prop.get("value", "UNKNOWN")
-        except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
-            _LOGGER.debug("Failed to get device status: %s", err)
+            # Batch fetch both properties dynamically
+            props = self.get_properties(
+                dsn, names=["app_device_status", "d302_monitor_machine", "d302_monitor"]
+            )
+            result["status"] = props.get("app_device_status", {}).get("value", "UNKNOWN")
 
-        try:
-            # Try newer property first, fall back to older
-            try:
-                monitor = self.get_property(dsn, "d302_monitor_machine")
-            except (requests.RequestException, DeLonghiApiError):
-                monitor = self.get_property(dsn, "d302_monitor")
+            monitor = props.get("d302_monitor_machine", props.get("d302_monitor", {}))
             monitor_val = monitor.get("value")
             if monitor_val:
                 raw = base64.b64decode(monitor_val)
@@ -470,8 +481,7 @@ class DeLonghiApi:
 
         return result
 
-    @staticmethod
-    def _parse_monitor_v2(raw: bytes) -> dict[str, Any]:
+    def _parse_monitor_v2(self, raw: bytes) -> dict[str, Any]:
         """Parse MonitorDataV2 binary data.
 
         Byte layout (type 2, Striker/Eletta Explore):
@@ -511,8 +521,19 @@ class DeLonghiApi:
 
         active_alarms: list[dict[str, Any]] = []
         for bit, meta in ALARMS.items():
-            if alarm_word & (1 << bit):
-                active_alarms.append({"bit": bit, **meta})
+            bit_set = bool(alarm_word & (1 << bit))
+            inverted = meta.get("inverted", False)
+
+            if inverted:
+                if bit_set:
+                    # Machine supports this inverted bit and it's OK
+                    self._seen_alarm_bits.add(bit)
+                elif bit in self._seen_alarm_bits:
+                    # Machine supports it, and now it's 0 (Missing/Error!)
+                    active_alarms.append({"bit": bit, **meta})
+            else:
+                if bit_set:
+                    active_alarms.append({"bit": bit, **meta})
 
         if active_alarms:
             _LOGGER.debug(
@@ -817,6 +838,24 @@ class DeLonghiApi:
 
         _LOGGER.info("Brewing custom %s: %s", beverage, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
+
+    @_retry
+    def cancel_brew(self, dsn: str) -> bool:
+        """Cancel the current brew/operation. Send ECAM 0x8F Cancel Command."""
+        cancel_body = bytes([0x0D, 0x01, 0x8F])
+        cancel_cmd = cancel_body + self._crc16(cancel_body)
+        _LOGGER.info("Sending CANCEL command to %s", dsn)
+        return self.send_command(dsn, cancel_cmd)
+
+    @_retry
+    def sync_recipes(self, dsn: str, profile: int = 1) -> bool:
+        """Force machine to synchronize and upload recipes to the cloud.
+        Sends ECAM 0xA9 (READ_RECIPES) for a specific profile.
+        """
+        sync_body = bytes([0x0D, 0x02, 0xA9, profile])
+        sync_cmd = sync_body + self._crc16(sync_body)
+        _LOGGER.info("Requesting recipes sync for profile %d on %s", profile, dsn)
+        return self.send_command(dsn, sync_cmd)
 
     def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str) -> None:
         """Check machine state before brewing. Raises DeLonghiApiError on problems."""
