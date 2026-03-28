@@ -428,6 +428,13 @@ class DeLonghiApi:
                 return False
         return False
 
+    # Pre-built monitor command: 0x84 with params 0F 03 02 + CRC
+    _MONITOR_CMD = bytes.fromhex("0d07840f03025640")
+
+    def request_monitor(self, dsn: str) -> bool:
+        """Send monitor command (0x84) to force machine to push fresh data."""
+        return self.send_command(dsn, self._MONITOR_CMD)
+
     def brew(self, dsn: str, recipe_ecam: bytes) -> bool:
         """Send a brew command."""
         return self.send_command(dsn, recipe_ecam)

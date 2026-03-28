@@ -56,7 +56,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             now = monotonic()
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 
-            # Always get status (lightweight — 1-2 API calls)
+            # Send monitor command to force machine to push fresh data
+            await self.hass.async_add_executor_job(
+                self.api.request_monitor, self.dsn
+            )
             status: dict[str, Any] = await self.hass.async_add_executor_job(
                 self.api.get_status, self.dsn
             )
@@ -66,11 +69,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if monitor_profile > 0:
                 self.selected_profile = monitor_profile
 
-            # Full refresh: ping + ONE properties fetch for everything
+            # Full refresh: ping + properties fetch for everything
             if need_full:
                 _LOGGER.debug("Full refresh (single properties fetch)")
 
-                # Ping to force data push
+                # Ping to force ALL properties to update (not just monitor)
                 await self.hass.async_add_executor_job(
                     self.api.ping_connected, self.dsn
                 )
