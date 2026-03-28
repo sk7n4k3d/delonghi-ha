@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "Cold Brew Cappuccino Taza Grande"
+      },
+      "cancel_brew": {
+        "name": "Cancelar"
+      },
+      "sync_recipes": {
+        "name": "Sincronizar recetas"
       }
     },
     "switch": {

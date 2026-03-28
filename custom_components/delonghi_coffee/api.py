@@ -257,11 +257,13 @@ class DeLonghiApi:
         return self._devices
 
     @_retry
-    def get_properties(self, dsn: str) -> dict[str, Any]:
-        """Get all properties for a device."""
+    def get_properties(self, dsn: str, names: list[str] | None = None) -> dict[str, Any]:
+        """Get properties for a device. If names is provided, limits response."""
+        params = [("names[]", n) for n in names] if names else None
         resp = self._session.get(
             f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties.json",
             headers=self._headers(),
+            params=params,
             timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
@@ -449,24 +451,19 @@ class DeLonghiApi:
         }
 
         try:
-            prop = self.get_property(dsn, "app_device_status")
-            result["status"] = prop.get("value", "UNKNOWN")
-        except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
-            _LOGGER.debug("Failed to get device status: %s", err)
+            props = self.get_properties(
+                dsn, names=["app_device_status", "d302_monitor_machine", "d302_monitor"]
+            )
+            result["status"] = props.get("app_device_status", {}).get("value", "UNKNOWN")
 
-        try:
-            # Try newer property first, fall back to older
-            try:
-                monitor = self.get_property(dsn, "d302_monitor_machine")
-            except (requests.RequestException, DeLonghiApiError):
-                monitor = self.get_property(dsn, "d302_monitor")
+            monitor = props.get("d302_monitor_machine", props.get("d302_monitor", {}))
             monitor_val = monitor.get("value")
             if monitor_val:
                 raw = base64.b64decode(monitor_val)
                 result["monitor_raw"] = raw.hex()
                 result.update(self._parse_monitor_v2(raw))
         except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
-            _LOGGER.debug("Monitor parse error: %s", err)
+            _LOGGER.debug("Status/monitor fetch error: %s", err)
 
         return result
 
@@ -817,6 +814,27 @@ class DeLonghiApi:
 
         _LOGGER.info("Brewing custom %s: %s", beverage, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
+
+    @_retry
+    def cancel_brew(self, dsn: str) -> bool:
+        """Cancel the current brew/operation. Send ECAM 0x8F Cancel Command."""
+        # len = total(5) - 1 = 4: [0x0D][0x04][0x8F] + CRC(2)
+        cancel_body = bytes([0x0D, 0x04, 0x8F])
+        cancel_cmd = cancel_body + self._crc16(cancel_body)
+        _LOGGER.info("Sending CANCEL command to %s", dsn)
+        return self.send_command(dsn, cancel_cmd)
+
+    @_retry
+    def sync_recipes(self, dsn: str, profile: int = 1) -> bool:
+        """Force machine to synchronize and upload recipes to the cloud.
+
+        Sends ECAM 0xA9 (READ_RECIPES) for a specific profile.
+        """
+        # len = total(6) - 1 = 5: [0x0D][0x05][0xA9][profile] + CRC(2)
+        sync_body = bytes([0x0D, 0x05, 0xA9, profile])
+        sync_cmd = sync_body + self._crc16(sync_body)
+        _LOGGER.info("Requesting recipes sync for profile %d on %s", profile, dsn)
+        return self.send_command(dsn, sync_cmd)
 
     def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str) -> None:
         """Check machine state before brewing. Raises DeLonghiApiError on problems."""

@@ -65,6 +65,12 @@ async def async_setup_entry(
             _LOGGER.info("Adding %d brew buttons", len(new_entities))
             async_add_entities(new_entities)
 
+    # Add static control buttons
+    async_add_entities([
+        DeLonghiCancelButton(api, coordinator, dsn, model, device_name, sw_version),
+        DeLonghiSyncButton(api, coordinator, dsn, model, device_name, sw_version),
+    ])
+
     # Add buttons for currently known beverages
     _add_buttons(coordinator.beverages)
 
@@ -127,3 +133,64 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
             raise HomeAssistantError(
                 f"Failed to brew {self._beverage_key}: {err}"
             ) from err
+
+
+class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
+    """Button to cancel the current brew operation."""
+
+    def __init__(
+        self,
+        api: DeLonghiApi,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._api = api
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_cancel_brew"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "cancel_brew"
+        self._attr_icon = "mdi:stop-circle-outline"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    async def async_press(self) -> None:
+        """Cancel current operation."""
+        try:
+            await self.hass.async_add_executor_job(self._api.cancel_brew, self._dsn)
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            raise HomeAssistantError(f"Failed to cancel: {err}") from err
+
+
+class DeLonghiSyncButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
+    """Button to force machine to sync its recipes to the cloud."""
+
+    def __init__(
+        self,
+        api: DeLonghiApi,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._api = api
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_sync_recipes"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "sync_recipes"
+        self._attr_icon = "mdi:cloud-sync-outline"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    async def async_press(self) -> None:
+        """Force sync recipes for the selected profile."""
+        profile = self.coordinator.selected_profile or 1
+        try:
+            await self.hass.async_add_executor_job(
+                self._api.sync_recipes, self._dsn, profile
+            )
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            raise HomeAssistantError(f"Failed to sync recipes: {err}") from err

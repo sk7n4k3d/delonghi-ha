@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "冷萃卡布奇诺大杯"
+      },
+      "cancel_brew": {
+        "name": "取消"
+      },
+      "sync_recipes": {
+        "name": "同步配方"
       }
     },
     "switch": {

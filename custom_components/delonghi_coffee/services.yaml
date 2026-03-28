@@ -85,3 +85,20 @@ brew_custom:
           min: 1
           max: 4
           step: 1
+
+cancel_brew:
+  name: Cancel Brew
+  description: Cancel the current brewing operation
+
+sync_recipes:
+  name: Sync Recipes
+  description: Force the machine to synchronize its recipes to the cloud
+  fields:
+    profile:
+      name: Profile
+      description: "User profile to sync (1-4). Defaults to currently selected profile."
+      selector:
+        number:
+          min: 1
+          max: 4
+          step: 1

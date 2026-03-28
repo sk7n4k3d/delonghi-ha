@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "Cold Brew Cappuccino Mug"
+      },
+      "cancel_brew": {
+        "name": "Cancel Brew"
+      },
+      "sync_recipes": {
+        "name": "Sync Recipes"
       }
     },
     "switch": {

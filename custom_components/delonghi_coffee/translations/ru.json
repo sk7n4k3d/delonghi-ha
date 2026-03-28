@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "Колд Брю Капучино Кружка"
+      },
+      "cancel_brew": {
+        "name": "Отмена"
+      },
+      "sync_recipes": {
+        "name": "Синхронизировать рецепты"
       }
     },
     "switch": {

@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "Колд Брю Капучіно Кухоль"
+      },
+      "cancel_brew": {
+        "name": "Скасувати"
+      },
+      "sync_recipes": {
+        "name": "Синхронізувати рецепти"
       }
     },
     "switch": {

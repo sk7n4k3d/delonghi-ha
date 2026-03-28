@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "콜드브루 카푸치노 머그"
+      },
+      "cancel_brew": {
+        "name": "취소"
+      },
+      "sync_recipes": {
+        "name": "레시피 동기화"
       }
     },
     "switch": {

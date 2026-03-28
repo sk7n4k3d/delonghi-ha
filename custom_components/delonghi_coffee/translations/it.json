@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "Cold Brew Cappuccino Tazza Grande"
+      },
+      "cancel_brew": {
+        "name": "Annulla"
+      },
+      "sync_recipes": {
+        "name": "Sincronizza ricette"
       }
     },
     "switch": {

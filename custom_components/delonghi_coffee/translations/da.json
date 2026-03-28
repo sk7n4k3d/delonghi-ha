@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "Cold Brew Cappuccino Krus"
+      },
+      "cancel_brew": {
+        "name": "Annuller"
+      },
+      "sync_recipes": {
+        "name": "Synkroniser opskrifter"
       }
     },
     "switch": {

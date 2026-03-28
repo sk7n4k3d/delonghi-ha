@@ -358,6 +358,12 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "コールドブリュー カプチーノ マグ"
+      },
+      "cancel_brew": {
+        "name": "キャンセル"
+      },
+      "sync_recipes": {
+        "name": "レシピを同期"
       }
     },
     "switch": {
