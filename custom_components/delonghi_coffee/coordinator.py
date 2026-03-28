@@ -133,6 +133,16 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 machine_state = "Off"
 
+            # Pre-seed inverted alarm bits when machine is in a normal state.
+            # If the machine is Ready/Brewing/etc, inverted bits that are SET
+            # mean the component is present (tank, grid). This avoids the
+            # cold-boot problem where HA starts with tank already missing
+            # and never sees bit=1 to "validate" the sensor.
+            if alarm_word is not None and machine_state in ("Ready", "Brewing", "Heating"):
+                for bit in (13, 18):  # Water Tank Missing, Grid Missing
+                    if alarm_word & (1 << bit):
+                        self.seen_alarm_bits.add(bit)
+
             return {
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": machine_state,

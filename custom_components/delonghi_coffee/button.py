@@ -30,10 +30,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     device_name: str = data["device_name"]
     sw_version: str | None = data.get("sw_version")
 
-    # Get available beverages from device
-    if not coordinator.beverages:
-        coordinator.beverages = await hass.async_add_executor_job(api.get_available_beverages, dsn)
-
     known_keys: set[str] = set()
 
     def _add_buttons(beverage_keys: list[str]) -> None:
@@ -144,6 +140,12 @@ class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity)
         self._attr_translation_key = "cancel_brew"
         self._attr_icon = "mdi:stop-circle-outline"
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def available(self) -> bool:
+        """Only available when machine is actively brewing."""
+        state = self.coordinator.data.get("machine_state", "Unknown")
+        return state in ("Brewing", "Grinding", "Milk Frothing", "Dispensing")
 
     async def async_press(self) -> None:
         """Cancel current operation."""
