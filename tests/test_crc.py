@@ -24,9 +24,6 @@ class TestCRC16:
     def test_brew_espresso_capture(self):
         """Brew espresso CRC from MITM capture."""
         # Full command: 0d 13 83 f0 01 03 08 00 01 00 28 1b 01 02 05 27 01 06 51 d7
-        body = bytes.fromhex("0d1383f00103080001002801b0102052701060")
-        # Rebuild from known payload
-        body = bytes.fromhex("0d1383f001030800010028")
         full = bytes.fromhex("0d1383f0010308000100281b010205270106")
         assert DeLonghiApi._crc16(full) == bytes.fromhex("51d7")
 

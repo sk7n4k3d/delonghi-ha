@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
+from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -70,9 +70,7 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         state = self.coordinator.data.get("machine_state", "Unknown")
         if state == "Unknown":
             return True
-        if self._monitor_stale_count >= 2 and self._last_commanded_on is not None:
-            return True
-        return False
+        return self._monitor_stale_count >= 2 and self._last_commanded_on is not None
 
     @property
     def is_on(self) -> bool:

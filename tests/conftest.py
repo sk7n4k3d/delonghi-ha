@@ -4,7 +4,6 @@ Mock homeassistant at module level so imports work during collection.
 """
 
 import sys
-from types import ModuleType
 from unittest.mock import MagicMock
 
 # Must happen before any test module imports custom_components

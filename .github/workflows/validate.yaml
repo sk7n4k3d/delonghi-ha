@@ -16,21 +16,25 @@ jobs:
         with:
           python-version: "3.12"
       - name: Validate JSON translations
-        run: python -c "
-          import json, glob, sys;
-          ok = True;
-          [
-            (print(f'OK  {f}') if True else None)
-            if json.load(open(f))
-            else None
-            for f in sorted(glob.glob('custom_components/*/translations/*.json'))
-          ]
-          " 2>&1 || { echo "::error::Invalid JSON found"; exit 1; }
+        run: |
+          python -c "
+          import json, glob, sys
+          errors = []
+          for f in sorted(glob.glob('custom_components/*/translations/*.json')):
+              try:
+                  json.load(open(f))
+                  print(f'OK  {f}')
+              except json.JSONDecodeError as e:
+                  errors.append(f'{f}: {e}')
+                  print(f'FAIL {f}: {e}')
+          if errors:
+              sys.exit(1)
+          "
       - name: Validate services.yaml
         run: |
           pip install pyyaml -q
           python -c "
-          import yaml, sys
+          import yaml
           with open('custom_components/delonghi_coffee/services.yaml') as f:
               data = yaml.safe_load(f)
           print(f'Services: {list(data.keys())}')

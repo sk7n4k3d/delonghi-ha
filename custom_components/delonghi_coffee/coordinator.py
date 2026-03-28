@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import timedelta
 from time import monotonic
 from typing import Any
@@ -56,10 +55,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             now = monotonic()
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 
-            # Send monitor command to force machine to push fresh data
-            await self.hass.async_add_executor_job(
-                self.api.request_monitor, self.dsn
-            )
+            # Read status (monitor property from cloud cache)
             status: dict[str, Any] = await self.hass.async_add_executor_job(
                 self.api.get_status, self.dsn
             )

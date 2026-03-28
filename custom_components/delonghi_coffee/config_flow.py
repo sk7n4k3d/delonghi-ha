@@ -6,7 +6,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.data_entry_flow import FlowResult
@@ -50,7 +49,6 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             region = user_input[CONF_REGION]
-            region_cfg = REGIONS[region]
 
             try:
                 api = DeLonghiApi(
