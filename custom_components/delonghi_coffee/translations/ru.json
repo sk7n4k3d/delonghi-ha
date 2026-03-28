@@ -359,6 +359,24 @@
       "brew_h_cb_capp_mug": {
         "name": "Колд Брю Капучино Кружка"
       },
+      "brew_doppio": {
+        "name": "Doppio+"
+      },
+      "brew_latte_macchiato": {
+        "name": "Latte Macchiato"
+      },
+      "brew_espr_macchiato": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_capp_doppio": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_long_black": {
+        "name": "Лонг Блэк"
+      },
+      "brew_mug_to_go": {
+        "name": "Кружка с собой"
+      },
       "cancel_brew": {
         "name": "Отмена"
       },

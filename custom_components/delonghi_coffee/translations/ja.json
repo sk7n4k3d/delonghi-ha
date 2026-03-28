@@ -359,6 +359,24 @@
       "brew_h_cb_capp_mug": {
         "name": "コールドブリュー カプチーノ マグ"
       },
+      "brew_doppio": {
+        "name": "Doppio+"
+      },
+      "brew_latte_macchiato": {
+        "name": "Latte Macchiato"
+      },
+      "brew_espr_macchiato": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_capp_doppio": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_long_black": {
+        "name": "ロングブラック"
+      },
+      "brew_mug_to_go": {
+        "name": "マグ トゥ ゴー"
+      },
       "cancel_brew": {
         "name": "キャンセル"
       },

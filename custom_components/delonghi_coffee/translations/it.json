@@ -359,6 +359,24 @@
       "brew_h_cb_capp_mug": {
         "name": "Cold Brew Cappuccino Tazza Grande"
       },
+      "brew_doppio": {
+        "name": "Doppio+"
+      },
+      "brew_latte_macchiato": {
+        "name": "Latte Macchiato"
+      },
+      "brew_espr_macchiato": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_capp_doppio": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_long_black": {
+        "name": "Long Black"
+      },
+      "brew_mug_to_go": {
+        "name": "Tazza Da Asporto"
+      },
       "cancel_brew": {
         "name": "Annulla"
       },

@@ -737,31 +737,42 @@ class DeLonghiApi:
             rec_props[:15],
         )
 
-        # Try the selected profile first, then fall back to any profile
+        # Try the selected profile first, then fall back to any profile.
+        # Two naming conventions:
+        #   Eletta Explore:  d302_rec_{profile}_{key}   → match "_rec_{profile}_{key}"
+        #   PrimaDonna Soul: d{num}_{profile}_rec_{key}  → match "_{profile}_rec_{key}"
         recipe_prop: dict[str, Any] | None = None
-        target = f"_rec_{profile}_{beverage_key}"
+        targets = [
+            f"_rec_{profile}_{beverage_key}",  # Eletta: _rec_2_espresso
+            f"_{profile}_rec_{beverage_key}",  # PrimaDonna: _2_rec_espresso
+        ]
         for name, prop in props.items():
-            if target in name and prop.get("value"):
-                _LOGGER.debug("brew_beverage: exact match on profile %d: %s", profile, name)
-                recipe_prop = prop
-                break
+            if prop.get("value") and any(t in name for t in targets):
+                val = prop["value"]
+                if isinstance(val, str) and not val.startswith("{"):
+                    _LOGGER.debug("brew_beverage: profile %d match: %s", profile, name)
+                    recipe_prop = prop
+                    break
 
         if not recipe_prop:
-            _LOGGER.debug("brew_beverage: no exact match for '%s', trying fallback", target)
+            _LOGGER.debug("brew_beverage: no profile %d match, trying fallback", profile)
+            # Fallback: try other profiles, then default (no profile)
             for name, prop in props.items():
-                # Match _rec_N_KEY or _rec_KEY_ exactly (not substring)
-                if (
-                    f"_rec_{beverage_key}_" in name
-                    or name.endswith(f"_rec_{beverage_key}")
-                    or f"_rec_1_{beverage_key}" in name
-                    or f"_rec_3_{beverage_key}" in name
-                    or f"_rec_4_{beverage_key}" in name
-                ) and prop.get("value"):
-                    val = prop["value"]
-                    if isinstance(val, str) and not val.startswith("{"):
-                        _LOGGER.debug("brew_beverage: fallback match: %s", name)
+                if not prop.get("value") or not isinstance(prop["value"], str) or prop["value"].startswith("{"):
+                    continue
+                if name.endswith(f"_rec_{beverage_key}"):
+                    _LOGGER.debug("brew_beverage: fallback match (default/other profile): %s", name)
+                    recipe_prop = prop
+                    break
+                for p in range(1, 6):  # Profiles 1-5
+                    if p == profile:
+                        continue
+                    if f"_rec_{p}_{beverage_key}" in name or f"_{p}_rec_{beverage_key}" in name:
+                        _LOGGER.debug("brew_beverage: fallback match (profile %d): %s", p, name)
                         recipe_prop = prop
                         break
+                if recipe_prop:
+                    break
 
         if not recipe_prop:
             _LOGGER.error(
@@ -1234,39 +1245,41 @@ class DeLonghiApi:
 
         beverages: set[str] = set()
 
-        # Add custom recipes (d240-d245) that have data
+        # Add custom recipes (d240-d245 for Eletta, d028-d033 for PrimaDonna Soul)
         for slot in range(1, 7):
-            prop_name = f"d{239 + slot}_rec_custom_{slot}"
-            if prop_name in props:
-                val = props[prop_name].get("value")
-                if val and isinstance(val, str) and not val.startswith("{"):
-                    bev_key = f"custom_{slot}"
-                    beverages.add(bev_key)
-                    _LOGGER.debug("Custom beverage discovered: %s", bev_key)
+            for prop_name in (f"d{239 + slot}_rec_custom_{slot}", f"d{27 + slot}_rec_custom_{slot}"):
+                if prop_name in props:
+                    val = props[prop_name].get("value")
+                    if val and isinstance(val, str) and not val.startswith("{"):
+                        bev_key = f"custom_{slot}"
+                        beverages.add(bev_key)
+                        _LOGGER.debug("Custom beverage discovered: %s (from %s)", bev_key, prop_name)
+                        break
+
+        # Extract beverage keys from recipe properties.
+        # Two naming conventions exist:
+        #   Eletta Explore:    d302_rec_{profile}_{key}  → split gives [prefix, "{profile}_{key}"]
+        #   PrimaDonna Soul:   d{num}_{profile}_rec_{key} → split gives ["{num}_{profile}", "{key}"]
+        #   PrimaDonna (default): d{num}_rec_{key}        → split gives ["{num}", "{key}"]
         for name in props:
-            if "_rec_2_" in name:
-                bev = name.split("_rec_2_", 1)[-1]
-                if bev and not bev.isdigit():
-                    beverages.add(bev)
+            if "_rec_" not in name or "custom" in name or "priority" in name or "recipe_custom_name" in name:
+                continue
+            parts = name.split("_rec_", 1)
+            if len(parts) != 2 or not parts[0].startswith("d"):
+                continue
+            rest = parts[1]  # e.g. "2_espresso" or "espresso" or "custom_1"
 
-        if not beverages:
-            for name in props:
-                if "_rec_1_" in name:
-                    bev = name.split("_rec_1_", 1)[-1]
-                    if bev and not bev.isdigit():
-                        beverages.add(bev)
+            # Eletta format: rest = "{profile}_{key}" where profile is a single digit
+            if len(rest) > 2 and rest[0].isdigit() and rest[1] == "_":
+                bev = rest[2:]
+            else:
+                # PrimaDonna format: rest is just the key (profile is before _rec_)
+                bev = rest
 
-        if not beverages:
-            for name in props:
-                # Generic fallback: match any d{NNN}_rec_{N}_{beverage} pattern
-                parts = name.split("_rec_", 1)
-                if len(parts) == 2 and parts[0].startswith("d"):
-                    rest = parts[1]
-                    idx = rest.find("_")
-                    if idx > 0:
-                        bev = rest[idx + 1 :]
-                        if bev and not bev.isdigit():
-                            beverages.add(bev)
+            if bev and not bev.isdigit() and not bev.startswith("custom_"):
+                beverages.add(bev)
+
+        _LOGGER.debug("parse_available_beverages: found %d beverages: %s", len(beverages), sorted(beverages))
 
         # Store custom names for button labels
         self._custom_recipe_names = custom_names

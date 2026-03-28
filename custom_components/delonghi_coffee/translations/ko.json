@@ -359,6 +359,24 @@
       "brew_h_cb_capp_mug": {
         "name": "콜드브루 카푸치노 머그"
       },
+      "brew_doppio": {
+        "name": "Doppio+"
+      },
+      "brew_latte_macchiato": {
+        "name": "Latte Macchiato"
+      },
+      "brew_espr_macchiato": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_capp_doppio": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_long_black": {
+        "name": "롱블랙"
+      },
+      "brew_mug_to_go": {
+        "name": "머그 투 고"
+      },
       "cancel_brew": {
         "name": "취소"
       },
