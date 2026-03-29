@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import functools
 import json
 import logging
@@ -66,10 +67,8 @@ def _retry(func):  # noqa: ANN001, ANN202
                 # Re-authenticate on 401 (token revoked server-side)
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 401:
                     _LOGGER.warning("Got 401, re-authenticating")
-                    try:
+                    with contextlib.suppress(DeLonghiAuthError, DeLonghiApiError):
                         args[0].authenticate()  # args[0] is self
-                    except (DeLonghiAuthError, DeLonghiApiError):
-                        pass
                 last_err = err
                 if attempt < RETRY_COUNT:
                     _LOGGER.debug(
