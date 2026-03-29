@@ -135,7 +135,6 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to power on: {err}") from err
         self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Power off the machine (standby)."""
@@ -148,4 +147,3 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to power off: {err}") from err
         self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()

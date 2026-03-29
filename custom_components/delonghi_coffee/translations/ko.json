@@ -130,6 +130,9 @@
       "total_black_beverages": {
         "name": "블랙 음료 합계"
       },
+      "total_bw_beverages": {
+        "name": "블랙+화이트 음료 합계"
+      },
       "total_water_beverages": {
         "name": "물 음료 합계"
       },

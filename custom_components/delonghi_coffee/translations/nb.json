@@ -130,6 +130,9 @@
       "total_black_beverages": {
         "name": "Svarte drikker totalt"
       },
+      "total_bw_beverages": {
+        "name": "Totalt svarte+hvite drikker"
+      },
       "total_water_beverages": {
         "name": "Vanndrikker totalt"
       },

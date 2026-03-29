@@ -130,6 +130,9 @@
       "total_black_beverages": {
         "name": "ブラック飲料合計"
       },
+      "total_bw_beverages": {
+        "name": "ブラック+ホワイト合計"
+      },
       "total_water_beverages": {
         "name": "お湯飲料合計"
       },

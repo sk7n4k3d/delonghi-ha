@@ -130,6 +130,9 @@
       "total_black_beverages": {
         "name": "黑咖啡总计"
       },
+      "total_bw_beverages": {
+        "name": "黑+白饮品总计"
+      },
       "total_water_beverages": {
         "name": "水饮品总计"
       },

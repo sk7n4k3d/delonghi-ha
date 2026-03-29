@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import logging
 import struct
@@ -50,6 +51,7 @@ class DeLonghiApiError(Exception):
 def _retry(func):  # noqa: ANN001, ANN202
     """Simple retry decorator with backoff (3 attempts, 2s delay)."""
 
+    @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         last_err: Exception | None = None
         for attempt in range(1, RETRY_COUNT + 1):
@@ -61,6 +63,13 @@ def _retry(func):  # noqa: ANN001, ANN202
                 # Don't retry 404s — property doesn't exist, retrying won't help
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 404:
                     raise
+                # Re-authenticate on 401 (token revoked server-side)
+                if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 401:
+                    _LOGGER.warning("Got 401, re-authenticating")
+                    try:
+                        args[0].authenticate()  # args[0] is self
+                    except (DeLonghiAuthError, DeLonghiApiError):
+                        pass
                 last_err = err
                 if attempt < RETRY_COUNT:
                     _LOGGER.debug(
@@ -80,7 +89,7 @@ def _retry(func):  # noqa: ANN001, ANN202
 class DeLonghiApi:
     """API client for De'Longhi coffee machines via Ayla Networks."""
 
-    def __init__(self, email: str, password: str, region: str = "EU") -> None:
+    def __init__(self, email: str, password: str, region: str = "EU", oem_model: str = "") -> None:
         self._email = email
         self._password = password
         self._session = requests.Session()
@@ -90,6 +99,8 @@ class DeLonghiApi:
         self._devices: list[dict[str, Any]] = []
         self._device_name: str | None = None
         self._sw_version: str | None = None
+        self._oem_model: str = oem_model
+        self._custom_recipe_names: dict[int, str] = {}
 
         # Gigya always uses EU1 (confirmed from app manifest)
         self._gigya_url: str = GIGYA_URL
@@ -101,8 +112,17 @@ class DeLonghiApi:
         self._ayla_user: str = region_cfg["ayla_user"]
         self._ayla_ads: str = region_cfg["ayla_ads"]
 
-        # Cache which command property works for this model (auto-detected on first success)
+        # Cache which command property works for this model
+        # For PrimaDonna (DL-pd-*): data_request without app_id
+        # For Eletta/Striker (DL-striker-*): app_data_request with app_id
         self._cmd_property: str | None = None
+        if oem_model.startswith("DL-pd-"):
+            self._cmd_property = "data_request"
+        elif oem_model.startswith("DL-striker-"):
+            self._cmd_property = "app_data_request"
+
+        # Cache whether ping_connected is supported (None = unknown, False = not supported)
+        self._ping_supported: bool | None = None
 
     @property
     def device_name(self) -> str | None:
@@ -398,8 +418,10 @@ class DeLonghiApi:
         Newer models (Eletta Explore): app_data_request, packet with app_id
         Older models (PrimaDonna Soul): data_request, packet without app_id
 
-        Auto-detects and caches the working property on first success.
-        Raises DeLonghiApiError on failure so @_retry can actually retry.
+        The command property is determined by model (DL-pd-* vs DL-striker-*).
+        If model is unknown, auto-detects by trying both — but only caches
+        when one returns 404 (proving the other is correct). A 201 from Ayla
+        only means "datapoint accepted by cloud", NOT "machine received it".
         """
         headers = self._headers()
 
@@ -408,7 +430,7 @@ class DeLonghiApi:
             ("data_request", False),  # legacy: without app_id
         ]
 
-        # Skip to known working property if already detected
+        # Use known property — either from model detection or previous 404
         if self._cmd_property:
             attempts = sorted(attempts, key=lambda a: a[0] != self._cmd_property)
 
@@ -428,31 +450,35 @@ class DeLonghiApi:
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code == 201:
-                if not self._cmd_property:
-                    self._cmd_property = prop_name
-                    _LOGGER.info("Detected command property: %s", prop_name)
                 _LOGGER.info("Command sent via %s: %s", prop_name, ecam_bytes.hex())
                 return True
             if resp.status_code == 404:
                 _LOGGER.debug("send_command: %s returned 404, trying next", prop_name)
+                # 404 proves this property doesn't exist — cache the other one
+                other = "data_request" if prop_name == "app_data_request" else "app_data_request"
+                if not self._cmd_property:
+                    self._cmd_property = other
+                    _LOGGER.info("Detected command property: %s (from 404 on %s)", other, prop_name)
                 continue
             # Non-404 error → retryable failure
             _LOGGER.error("send_command: %s returned HTTP %d: %s", prop_name, resp.status_code, resp.text[:200])
-            raise DeLonghiApiError(f"Command rejected by {prop_name}: HTTP {resp.status_code}")
+            resp.raise_for_status()
 
         raise DeLonghiApiError("No valid command property found (both endpoints returned 404)")
 
-    @_retry
     def ping_connected(self, dsn: str) -> bool:
         """Send app_device_connected ping to force machine to push data updates.
 
         Tries with app_id (newer models) then without (legacy models).
-        Raises DeLonghiApiError on failure so @_retry can retry.
+        Skips entirely if previous attempts showed the property doesn't exist.
         """
+        if self._ping_supported is False:
+            _LOGGER.debug("ping_connected: skipped (not supported on this model)")
+            return False
+
         ts = struct.pack(">I", int(time.time()))
         headers = self._headers()
 
-        # Try with app signature first (newer), then without (legacy)
         formats = ["with_app_id", "without_app_id"]
         for i, b64 in enumerate(
             (
@@ -468,13 +494,18 @@ class DeLonghiApi:
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code == 201:
+                self._ping_supported = True
                 _LOGGER.debug("ping_connected: success (%s)", formats[i])
                 return True
             if resp.status_code == 404:
                 _LOGGER.debug("ping_connected: %s returned 404, trying next", formats[i])
                 continue
             raise DeLonghiApiError(f"Ping failed: HTTP {resp.status_code}")
-        raise DeLonghiApiError("Ping failed: app_device_connected not found")
+
+        # Both formats returned 404 — property doesn't exist on this model
+        self._ping_supported = False
+        _LOGGER.info("ping_connected: not supported on this model, disabling future pings")
+        return False
 
     # Pre-built monitor command: 0x84 with params 0F 03 02 + CRC
     _MONITOR_CMD = bytes.fromhex("0d07840f03025640")
@@ -599,7 +630,7 @@ class DeLonghiApi:
         counter_map: dict[str, str] = {
             "d700_tot_bev_b": "total_black_beverages",
             "d701_tot_bev_b": "total_beverages",
-            "d701_tot_bev_bw": "total_beverages",
+            "d701_tot_bev_bw": "total_bw_beverages",
             "d703_tot_bev_w": "total_water_beverages",
             "d704_tot_bev_espressi": "total_espressos",
             "d705_tot_id1_espr": "espresso",
@@ -682,8 +713,15 @@ class DeLonghiApi:
                     pass
 
         # Computed total — sum all beverage categories
-        # d700 (black) + d701 (black+white) + d702 (other) + d703 (water)
-        total_parts = ["total_black_beverages", "total_beverages", "total_water_beverages"]
+        # Eletta: d701_tot_bev_b is THE total → use "total_beverages" directly
+        # PrimaDonna: d701_tot_bev_bw is black+white (already includes d700 black)
+        #   so total = d701 (bw) + d702 (other) + d703 (water) — do NOT add d700
+        if "total_beverages" in counters:
+            # Eletta model: d701 is the total, just add other + water
+            total_parts = ["total_beverages", "total_water_beverages"]
+        else:
+            # PrimaDonna model: d701 is black+white (superset of d700 black)
+            total_parts = ["total_bw_beverages", "total_water_beverages"]
         computed_total = 0
         has_parts = False
         for key in total_parts:
@@ -984,25 +1022,22 @@ class DeLonghiApi:
         if active_blocking:
             raise DeLonghiApiError(f"Cannot brew {beverage_key}: {', '.join(active_blocking)}")
 
-        # Check accessory requirement
+        # Check accessory requirement using monitor data already in status
         required_acc = self._get_recipe_accessory(recipe)
         if required_acc and required_acc > 1:
-            try:
-                monitor_prop = self.get_property(dsn, "d302_monitor_machine")
-                monitor_val = monitor_prop.get("value")
-                if monitor_val:
-                    raw = base64.b64decode(monitor_val)
+            monitor_raw = status.get("monitor_raw")
+            if monitor_raw:
+                try:
+                    raw = bytes.fromhex(monitor_raw)
                     current_acc = raw[5] if len(raw) > 5 else 0
-                    # Milk drinks need acc >= 2 (Latte Crema Hot/Cool)
-                    # acc 0 = nothing, 1 = hot water spout
                     if current_acc < 2:
                         acc_names = {0: "nothing", 1: "hot water spout"}
                         raise DeLonghiApiError(
                             f"Cannot brew {beverage_key}: milk module required "
                             f"(current: {acc_names.get(current_acc, current_acc)})"
                         )
-            except (KeyError, ValueError):
-                pass
+                except (ValueError, IndexError):
+                    pass
 
         _LOGGER.debug(
             "_pre_brew_check: OK — state=%s, alarms=%s, accessory_required=%s",

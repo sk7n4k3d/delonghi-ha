@@ -145,7 +145,7 @@ class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity)
     def available(self) -> bool:
         """Only available when machine is actively brewing."""
         state = self.coordinator.data.get("machine_state", "Unknown")
-        return state in ("Brewing", "Grinding", "Milk Frothing", "Dispensing")
+        return state == "Brewing"
 
     async def async_press(self) -> None:
         """Cancel current operation."""

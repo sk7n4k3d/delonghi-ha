@@ -130,6 +130,9 @@
       "total_black_beverages": {
         "name": "Усього чорних напоїв"
       },
+      "total_bw_beverages": {
+        "name": "Всього чорних+білих напоїв"
+      },
       "total_water_beverages": {
         "name": "Усього водних напоїв"
       },

@@ -130,6 +130,9 @@
       "total_black_beverages": {
         "name": "Total boissons noires"
       },
+      "total_bw_beverages": {
+        "name": "Total boissons noires+blanches"
+      },
       "total_water_beverages": {
         "name": "Total boissons eau"
       },
