@@ -760,7 +760,7 @@ class DeLonghiApi:
         Args:
             dsn: Device serial number.
             beverage_key: Beverage identifier (e.g. "espresso").
-            profile: User profile number (1-4, default 2).
+            profile: User profile number (1-5, default 2).
         """
         _LOGGER.debug("brew_beverage: fetching all properties for %s", dsn)
         props = self.get_properties(dsn)
@@ -904,6 +904,8 @@ class DeLonghiApi:
         bev_id = self._BEVERAGE_IDS.get(beverage)
         if bev_id is None:
             raise DeLonghiApiError(f"Unknown beverage: {beverage}")
+        if not 1 <= profile <= 5:
+            raise DeLonghiApiError(f"Profile must be 1-5, got {profile}")
 
         # Build param pairs
         brew_params = bytearray()
@@ -1049,7 +1051,7 @@ class DeLonghiApi:
     def _get_recipe_accessory(recipe: bytes) -> int | None:
         """Extract ACCESSORIO(28) param from recipe if present."""
         raw = recipe[6:-2]
-        big = {1, 9, 15}
+        big = DeLonghiApi._BIG_PARAMS
         i = 0
         while i < len(raw):
             pid = raw[i]
