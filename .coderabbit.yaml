@@ -1,0 +1,34 @@
+language: en
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/__pycache__/**"
+    - "!**/brand/**"
+  path_instructions:
+    - path: "custom_components/delonghi_coffee/api.py"
+      instructions: |
+        This is a reverse-engineered cloud API client for De'Longhi coffee machines
+        via Ayla Networks. Pay special attention to:
+        - Command property routing (app_data_request vs data_request) per model
+        - HTTP 201 from Ayla does NOT mean the machine received the command
+        - Rate limiting: minimize API calls, cache negative results
+        - Base64/hex encoding correctness for ECAM protocol
+        - CRC-16/SPI-FUJITSU checksums
+        - Thread safety (requests.Session used from HA executor threads)
+    - path: "custom_components/delonghi_coffee/coordinator.py"
+      instructions: |
+        HA DataUpdateCoordinator. Light poll every 60s, full refresh every 10min.
+        Watch for: unnecessary API calls, stale monitor detection logic,
+        alarm suppression edge cases.
+    - path: "custom_components/delonghi_coffee/switch.py"
+      instructions: |
+        Power switch with assumed_state logic. Known issue: cloud cache can be
+        stale for 30+ seconds after a command. The switch must not flash back
+        to the previous state.
+chat:
+  auto_reply: true
