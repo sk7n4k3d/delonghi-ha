@@ -140,9 +140,8 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
             attrs["lan_ip"] = lan.get("lan_ip")
         return attrs
 
-    # Percentage sensors that go down (not monotonically increasing)
 
-
+# Percentage sensors that go down (not monotonically increasing)
 _MEASUREMENT_SENSORS = {"grounds_percentage", "descale_progress", "filter_percentage"}
 
 
