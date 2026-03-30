@@ -56,6 +56,9 @@ SCAN_INTERVAL_SECONDS: Final = 60
 # Full refresh interval — counters, profiles, beans (heavy, includes ping)
 FULL_REFRESH_INTERVAL: Final = 600  # 10 minutes
 
+# MQTT keepalive interval — ping to prevent session expiry (cloud timeout ~300s)
+MQTT_KEEPALIVE_INTERVAL: Final = 240  # 4 minutes
+
 # HTTP timeouts (connect, read) in seconds
 REQUEST_TIMEOUT: Final = (5, 15)
 

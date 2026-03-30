@@ -20,6 +20,11 @@ from .sensor import _device_info
 
 _LOGGER = logging.getLogger(__name__)
 
+# Timing constants (from MITM capture of official Coffee Link app)
+_WAKE_DELAY: float = 15.0  # App waits ~15s after ping before sending command
+_RETRY_DELAY: float = 180.0  # App retries power on after ~3 minutes
+_STALE_THRESHOLD: int = 3  # Polls before trusting assumed state over monitor
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up switch entity."""
@@ -51,10 +56,11 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         super().__init__(coordinator)
         self._api = api
         self._dsn = dsn
-        self._assumed_on = False  # Assume off at startup (safe default)
-        self._last_commanded_on: bool | None = None  # What we last commanded
-        self._monitor_stale_count: int = 0  # How many polls returned same value after command
-        self._last_monitor_state: str | None = None  # Previous poll's monitor value
+        self._assumed_on = False
+        self._last_commanded_on: bool | None = None
+        self._monitor_stale_count: int = 0
+        self._last_monitor_state: str | None = None
+        self._cmd_lock = asyncio.Lock()
         self._attr_unique_id = f"{dsn}_power"
         self._attr_has_entity_name = True
         self._attr_translation_key = "power"
@@ -67,37 +73,26 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         state = self.coordinator.data.get("machine_state", "Unknown")
         if state == "Unknown":
             return True
-        return self._monitor_stale_count >= 2 and self._last_commanded_on is not None
+        return self._monitor_stale_count >= _STALE_THRESHOLD and self._last_commanded_on is not None
 
     @property
     def is_on(self) -> bool:
         """Return True if machine is on.
 
-        Trust the monitor when available — it works when the machine is ON.
-        After a power command, detect staleness if the monitor contradicts
-        the command for 2+ consecutive polls.
+        Trust the monitor when available. After a power command, detect
+        staleness if the monitor contradicts for 3+ consecutive polls.
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
 
-        # No monitor data at all → use assumed state
         if state == "Unknown":
-            _LOGGER.debug("Switch is_on: no monitor, assumed=%s", self._assumed_on)
             return self._assumed_on
 
-        # Detect stale monitor: after a power command, check if monitor
-        # reflects the change or stays frozen
         if self._last_commanded_on is not None:
             monitor_says_on = state not in ("Off", "Going to sleep")
 
             if monitor_says_on != self._last_commanded_on:
                 if state == self._last_monitor_state:
                     self._monitor_stale_count += 1
-                    _LOGGER.debug(
-                        "Switch: monitor stuck on '%s' after %s command (%d polls)",
-                        state,
-                        "ON" if self._last_commanded_on else "OFF",
-                        self._monitor_stale_count,
-                    )
                 else:
                     self._monitor_stale_count = 1
             else:
@@ -107,56 +102,90 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
 
         self._last_monitor_state = state
 
-        # If monitor contradicts our command (stale count >= 1), trust assumed state
-        if self._monitor_stale_count >= 1 and self._last_commanded_on is not None:
-            _LOGGER.debug(
-                "Switch is_on: monitor stale ('%s' x%d), using assumed=%s",
-                state,
-                self._monitor_stale_count,
-                self._assumed_on,
-            )
+        if self._monitor_stale_count >= _STALE_THRESHOLD and self._last_commanded_on is not None:
             return self._assumed_on
 
-        # Monitor is responsive → trust it (but don't overwrite assumed_on
-        # if we have a pending command — the monitor hasn't caught up yet)
         result = state not in ("Off", "Going to sleep")
         if self._last_commanded_on is None:
             self._assumed_on = result
-        _LOGGER.debug("Switch is_on: monitor=%s → %s", state, result)
         return result
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Power on the machine.
 
-        Sends a ping first to wake the WiFi module from deep sleep,
-        then waits briefly for the machine to become receptive before
-        sending the actual power ON command.
+        Sequence captured from official Coffee Link app via MITM:
+        1. Wake ping (app_device_connected)
+        2. Wait 15s for WiFi module to become receptive
+        3. Send power ON command (app_data_request)
+        4. Post-command ping (keeps MQTT session alive)
+        5. If no confirmation after 3min, retry once
         """
-        _LOGGER.info("Powering on %s", self._dsn)
-        try:
-            # Wake the machine's WiFi module with a ping
+        if self._cmd_lock.locked():
+            _LOGGER.warning("Power command already in progress, ignoring")
+            return
+
+        async with self._cmd_lock:
+            _LOGGER.info("Powering on %s", self._dsn)
+            try:
+                # Phase 1: Wake ping + delay (like app: ping → 15s wait)
+                try:
+                    await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                    _LOGGER.debug("Wake ping sent, waiting %.0fs", _WAKE_DELAY)
+                    await asyncio.sleep(_WAKE_DELAY)
+                except (DeLonghiApiError, DeLonghiAuthError):
+                    _LOGGER.debug("Wake ping failed, sending power ON anyway")
+
+                # Phase 2: Power ON command
+                await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
+                _LOGGER.info("Power ON command sent")
+
+                # Phase 3: Post-command ping (app does this immediately after)
+                try:
+                    await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                except (DeLonghiApiError, DeLonghiAuthError):
+                    pass
+
+                self._assumed_on = True
+                self._last_commanded_on = True
+                self._monitor_stale_count = 0
+            except (DeLonghiApiError, DeLonghiAuthError) as err:
+                raise HomeAssistantError(f"Failed to power on: {err}") from err
+            self.async_write_ha_state()
+
+            # Phase 4: Background retry after 3 min if monitor doesn't confirm
+            self.hass.async_create_task(self._retry_power_on())
+
+    async def _retry_power_on(self) -> None:
+        """Retry power on if monitor hasn't confirmed within 3 minutes."""
+        await asyncio.sleep(_RETRY_DELAY)
+
+        state = self.coordinator.data.get("machine_state", "Unknown")
+        if state in ("Off", "Unknown", "Going to sleep"):
+            _LOGGER.info("Power ON not confirmed after %.0fs, retrying", _RETRY_DELAY)
             try:
                 await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
-                _LOGGER.debug("Wake ping sent, waiting 3s for machine to become receptive")
-                await asyncio.sleep(3)
-            except (DeLonghiApiError, DeLonghiAuthError):
-                _LOGGER.debug("Wake ping failed, sending power ON anyway")
-            await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
-            self._assumed_on = True
-            self._last_commanded_on = True
-            self._monitor_stale_count = 0
-        except (DeLonghiApiError, DeLonghiAuthError) as err:
-            raise HomeAssistantError(f"Failed to power on: {err}") from err
-        self.async_write_ha_state()
+                await asyncio.sleep(_WAKE_DELAY)
+                await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
+                await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                _LOGGER.info("Power ON retry sent")
+            except (DeLonghiApiError, DeLonghiAuthError) as err:
+                _LOGGER.warning("Power ON retry failed: %s", err)
+        else:
+            _LOGGER.debug("Power ON confirmed by monitor (%s), no retry needed", state)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Power off the machine (standby)."""
-        _LOGGER.info("Powering off %s", self._dsn)
-        try:
-            await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
-            self._assumed_on = False
-            self._last_commanded_on = False
-            self._monitor_stale_count = 0
-        except (DeLonghiApiError, DeLonghiAuthError) as err:
-            raise HomeAssistantError(f"Failed to power off: {err}") from err
-        self.async_write_ha_state()
+        if self._cmd_lock.locked():
+            _LOGGER.warning("Power command already in progress, ignoring")
+            return
+
+        async with self._cmd_lock:
+            _LOGGER.info("Powering off %s", self._dsn)
+            try:
+                await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
+                self._assumed_on = False
+                self._last_commanded_on = False
+                self._monitor_stale_count = 0
+            except (DeLonghiApiError, DeLonghiAuthError) as err:
+                raise HomeAssistantError(f"Failed to power off: {err}") from err
+            self.async_write_ha_state()

@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
-from .const import DOMAIN, FULL_REFRESH_INTERVAL, SCAN_INTERVAL_SECONDS
+from .const import DOMAIN, FULL_REFRESH_INTERVAL, MQTT_KEEPALIVE_INTERVAL, SCAN_INTERVAL_SECONDS
 from .logger import get_diagnostic_dump
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +38,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.dsn = dsn
         self.beverages: list[str] = []
         self._last_full_refresh: float = 0
+        self._last_keepalive: float = 0
         self._cached_counters: dict[str, Any] = {}
         self._cached_profiles: dict[str, Any] = {}
         self._cached_beans: list[dict[str, Any]] = []
@@ -66,6 +67,18 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             monitor_profile = status.get("profile", 0)
             if monitor_profile > 0:
                 self.selected_profile = monitor_profile
+
+            # MQTT keepalive — ping every 4 min to prevent cloud session expiry.
+            # Without this, the MQTT session dies after ~5 min and commands
+            # (including power on) never reach the machine.
+            need_keepalive = (now - self._last_keepalive) >= MQTT_KEEPALIVE_INTERVAL
+            if need_keepalive and not need_full:  # full refresh already pings
+                try:
+                    await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
+                    self._last_keepalive = now
+                    _LOGGER.debug("MQTT keepalive ping sent")
+                except (DeLonghiApiError, DeLonghiAuthError):
+                    _LOGGER.debug("MQTT keepalive ping failed, will retry next cycle")
 
             # Full refresh: ping + properties fetch for everything
             if need_full:
@@ -96,6 +109,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._lan_config = await self.hass.async_add_executor_job(self.api.get_lan_config, self.dsn)
 
                 self._last_full_refresh = now
+                self._last_keepalive = now  # full refresh counts as keepalive
 
             # Track monitor staleness — if raw data never changes,
             # alarms from this data are unreliable
