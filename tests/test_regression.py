@@ -172,12 +172,16 @@ class TestIssue3CountersMissing:
         assert counters["total_water_ml"] == 0
 
     def test_computed_total_accounts_for_bw_split(self):
-        """Computed total for PrimaDonna uses bw + water + other (not double-counting d700)."""
+        """Computed total for PrimaDonna sums all separate categories.
+
+        Real data (jostrasser #3): d700 and d701_bw are SEPARATE categories.
+        d700=black(4827), d701_bw=with milk(34), d702=other(916), d703=water(3).
+        """
         api = DeLonghiApi.__new__(DeLonghiApi)
         props = _load_props("properties_primadonna_soul.json")
         counters = api.parse_counters(props)
-        # d701_bw (4827) includes d700 black (3200), so computed_total should NOT add d700
-        assert counters["computed_total"] == 4827 + 500 + 489  # bw + water + other
+        # d700(4827) + d701_bw(34) + d703(3) + d702(916) = 5780
+        assert counters["computed_total"] == 4827 + 34 + 3 + 916
 
     def test_json_sub_counters_parsed(self):
         """d734-d740 JSON sub-counters are parsed into separate keys."""
@@ -225,18 +229,18 @@ class TestIssue3jostrasser:
         assert counters["hot_water"] == 0
 
     def test_total_gap_explained(self):
-        """The gap between machine display and cloud is because
-        d700 = black only, d701_bw = black+white (superset).
-        computed_total should match machine by using d701_bw + d703 + d702."""
+        """Real data (jostrasser #3): d700 and d701_bw are SEPARATE categories.
+        d700=black(4827), d701_bw=with milk(34), d702=other(916), d703=water(3).
+        Machine display shows 5816 ≈ 5780 + d725_bean_system(35)."""
         api = DeLonghiApi.__new__(DeLonghiApi)
         props = {
-            "d700_tot_bev_b": {"value": "3200"},
-            "d701_tot_bev_bw": {"value": "4827"},
-            "d703_tot_bev_w": {"value": "500"},
-            "d702_tot_bev_other": {"value": '{"tot_bev_other": 489}'},
+            "d700_tot_bev_b": {"value": "4827"},
+            "d701_tot_bev_bw": {"value": "34"},
+            "d703_tot_bev_w": {"value": "3"},
+            "d702_tot_bev_other": {"value": "916"},
         }
         counters = api.parse_counters(props)
-        assert counters["computed_total"] == 5816
+        assert counters["computed_total"] == 5780
 
 
 class TestPingConnectedCaching:

@@ -886,15 +886,16 @@ class DeLonghiApi:
                     pass
 
         # Computed total — sum all beverage categories
-        # Eletta: d701_tot_bev_b is THE total → use "total_beverages" directly
-        # PrimaDonna: d701_tot_bev_bw is black+white (already includes d700 black)
-        #   so total = d701 (bw) + d702 (other) + d703 (water) — do NOT add d700
+        # Real user data (issue #3) proves d700 and d701_bw are SEPARATE:
+        #   jostrasser: d700=4827(black), d701_bw=34(with milk), d702=916(other), d703=3(water)
+        #   lodzen:     d700=52(black),   d701_bw=15(with milk), d702=0(other),   d703=8(water)
+        # Eletta: d701_tot_bev_b is THE total (no d700 property exists)
         if "total_beverages" in counters:
-            # Eletta model: d701 is the total, just add other + water
+            # Eletta model: d701 is the total, just add water
             total_parts = ["total_beverages", "total_water_beverages"]
         else:
-            # PrimaDonna model: d701 is black+white (superset of d700 black)
-            total_parts = ["total_bw_beverages", "total_water_beverages"]
+            # PrimaDonna model: d700(black) + d701(with milk) + d703(water) are separate
+            total_parts = ["total_black_beverages", "total_bw_beverages", "total_water_beverages"]
         computed_total = 0
         has_parts = False
         for key in total_parts:
@@ -902,6 +903,7 @@ class DeLonghiApi:
             if isinstance(val, int):
                 computed_total += val
                 has_parts = True
+        # d702 "other" — may be JSON (sub-keys) or direct integer
         other = counters.get("other_tot_bev_other") or counters.get("other_other")
         if isinstance(other, int):
             computed_total += other
@@ -1457,7 +1459,7 @@ class DeLonghiApi:
 
         # Add custom recipes (d240-d245 for Eletta, d028-d033 for PrimaDonna Soul)
         for slot in range(1, 7):
-            for prop_name in (f"d{239 + slot}_rec_custom_{slot}", f"d{27 + slot}_rec_custom_{slot}"):
+            for prop_name in (f"d{239 + slot}_rec_custom_{slot}", f"d{27 + slot:03d}_rec_custom_{slot}"):
                 if prop_name in props:
                     val = props[prop_name].get("value")
                     if val and isinstance(val, str) and not val.startswith("{"):

@@ -78,9 +78,9 @@ class TestPrimaDonnaSoulCounters:
     def test_split_totals(self):
         """PrimaDonna has separate black/bw/water totals."""
         counters = self.api.parse_counters(self.props)
-        assert counters["total_black_beverages"] == 3200  # d700
-        assert counters["total_bw_beverages"] == 4827  # d701_bw
-        assert counters["total_water_beverages"] == 500  # d703
+        assert counters["total_black_beverages"] == 4827  # d700 (real: jostrasser)
+        assert counters["total_bw_beverages"] == 34  # d701_bw (with milk)
+        assert counters["total_water_beverages"] == 3  # d703
 
     def test_no_total_beverages_key(self):
         """PrimaDonna doesn't have the Eletta-style total_beverages."""
@@ -121,10 +121,14 @@ class TestPrimaDonnaSoulCounters:
         assert counters["beverages_since_descale"] == 120
 
     def test_computed_total_primadonna(self):
-        """Computed total for PrimaDonna uses d701_bw + d703 + d702."""
+        """Computed total for PrimaDonna sums all separate categories.
+
+        Real data (jostrasser issue #3): d700=4827, d701_bw=34, d702=916, d703=3.
+        d700 and d701_bw are SEPARATE (not superset).
+        """
         counters = self.api.parse_counters(self.props)
-        # d701_bw=4827 + d703=500 + d702.tot_bev_other=489 = 5816
-        assert counters["computed_total"] == 5816
+        # d700=4827 + d701_bw=34 + d703=3 + d702=916 = 5780
+        assert counters["computed_total"] == 4827 + 34 + 3 + 916
 
     def test_descale_progress_primadonna(self):
         """Descale progress from d580_service_parameters."""
