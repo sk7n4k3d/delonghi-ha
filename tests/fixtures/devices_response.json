@@ -1,0 +1,16 @@
+[
+  {
+    "device": {
+      "dsn": "AC000W038925641",
+      "product_name": "DL-striker-cb",
+      "oem_model": "DL-striker-cb",
+      "model": "AY001MTC1",
+      "sw_version": "1.6",
+      "mac": "08:3a:8d:b6:df:50",
+      "lan_enabled": false,
+      "lan_ip": null,
+      "connection_status": "Online",
+      "connected_at": "2026-03-29T10:00:00Z"
+    }
+  }
+]

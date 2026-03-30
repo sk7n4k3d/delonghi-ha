@@ -8,3 +8,19 @@ ignore = ["E501", "SIM108"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["custom_components/delonghi_coffee"]
+omit = [
+    "custom_components/delonghi_coffee/__init__.py",
+    "custom_components/delonghi_coffee/config_flow.py",
+    "custom_components/delonghi_coffee/sensor.py",
+    "custom_components/delonghi_coffee/binary_sensor.py",
+    "custom_components/delonghi_coffee/button.py",
+    "custom_components/delonghi_coffee/switch.py",
+    "custom_components/delonghi_coffee/select.py",
+    "custom_components/delonghi_coffee/coordinator.py",
+]
+
+[tool.coverage.report]
+fail_under = 80

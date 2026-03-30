@@ -1,0 +1,139 @@
+"""Test profile and bean system parsing."""
+
+import base64
+import json
+from pathlib import Path
+
+from custom_components.delonghi_coffee.api import DeLonghiApi, _decode_utf16
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _load_props(filename: str) -> dict:
+    data = json.loads((FIXTURES / filename).read_text())
+    return {p["property"]["name"]: p["property"] for p in data}
+
+
+class TestProfileParsing:
+    """Profile names, colors, figures from d051/d052/d286."""
+
+    def setup_method(self):
+        self.api = DeLonghiApi.__new__(DeLonghiApi)
+
+    def test_empty_properties(self):
+        """No profile properties returns defaults."""
+        result = self.api.parse_profiles({})
+        assert result["active"] == 1
+        assert result["profiles"] == {}
+
+    def test_active_profile_from_d286(self):
+        """Active profile extracted from d286_mach_sett_profile."""
+        # Build a minimal binary: header(4 bytes) + profile byte
+        raw = bytes([0xD0, 0x05, 0x00, 0xF0, 0x03])  # profile = 3
+        props = {"d286_mach_sett_profile": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_profiles(props)
+        assert result["active"] == 3
+
+    def test_profile_names_from_d051(self):
+        """Profile names 1-3 extracted from d051_profile_name1_3."""
+        # Build: header(6) + 3x(20 bytes name UTF-16-BE + 2 bytes icon) + CRC(2)
+        name1 = "Seb".encode("utf-16-be").ljust(20, b"\x00")
+        name2 = "Guest".encode("utf-16-be").ljust(20, b"\x00")
+        name3 = "Kid".encode("utf-16-be").ljust(20, b"\x00")
+        header = bytes([0xD0, 0x50, 0xA6, 0xF0, 0x01, 0x01])
+        data = name1 + bytes([0x00, 0x00]) + name2 + bytes([0x01, 0x00]) + name3 + bytes([0x02, 0x00])
+        raw = header + data + bytes([0x00, 0x00])  # CRC placeholder
+        props = {"d051_profile_name1_3": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_profiles(props)
+        assert 1 in result["profiles"]
+        assert result["profiles"][1]["name"] == "Seb"
+        assert 2 in result["profiles"]
+        assert result["profiles"][2]["name"] == "Guest"
+
+    def test_profile4_from_d052(self):
+        """Profile 4 extracted from d052_profile_name4."""
+        name4 = "Extra".encode("utf-16-be").ljust(20, b"\x00")
+        header = bytes([0xD0, 0x20, 0xA6, 0xF0, 0x01, 0x01])
+        data = name4 + bytes([0x03])  # icon=3 → orange, kid
+        raw = header + data + bytes([0x00, 0x00])
+        props = {"d052_profile_name4": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_profiles(props)
+        assert 4 in result["profiles"]
+        assert result["profiles"][4]["name"] == "Extra"
+
+    def test_invalid_base64_skipped(self):
+        """Invalid base64 in profile properties doesn't crash."""
+        props = {"d051_profile_name1_3": {"value": "not_valid_base64!!!"}}
+        result = self.api.parse_profiles(props)
+        assert result["profiles"] == {}
+
+    def test_null_value_skipped(self):
+        """Null value for profile property is skipped."""
+        props = {"d051_profile_name1_3": {"value": None}}
+        result = self.api.parse_profiles(props)
+        assert result["profiles"] == {}
+
+
+class TestBeanSystemParsing:
+    """Bean Adapt system names from d250-d256."""
+
+    def setup_method(self):
+        self.api = DeLonghiApi.__new__(DeLonghiApi)
+
+    def test_empty_properties(self):
+        """No bean properties returns empty list."""
+        result = self.api.parse_bean_systems({})
+        assert result == []
+
+    def test_parse_bean_name(self):
+        """Bean name extracted from d250_beansystem_0."""
+        # Build minimal binary with a UTF-16 name
+        name = "Arabica".encode("utf-16-be")
+        raw = bytes([0xD0, 0x20, 0x00, 0xF0, 0x00]) + name + bytes([0x00, 0x00])
+        props = {"d250_beansystem_0": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_bean_systems(props)
+        assert len(result) == 1
+        assert result[0]["id"] == 0
+        assert "Arabica" in result[0]["name"]
+
+    def test_multiple_beans(self):
+        """Multiple bean systems parsed."""
+        props = {}
+        for i in range(3):
+            name = f"Bean{i}".encode("utf-16-be")
+            raw = bytes([0xD0, 0x20, 0x00, 0xF0, 0x00]) + name + bytes([0x00, 0x00])
+            props[f"d{250 + i}_beansystem_{i}"] = {"value": base64.b64encode(raw).decode()}
+        result = self.api.parse_bean_systems(props)
+        assert len(result) == 3
+
+    def test_invalid_value_fallback(self):
+        """Invalid base64 falls back to generic name."""
+        props = {"d250_beansystem_0": {"value": "!!invalid!!"}}
+        result = self.api.parse_bean_systems(props)
+        assert len(result) == 1
+        assert result[0]["name"] == "Bean 0"
+
+
+class TestDecodeUTF16Extended:
+    """Extended UTF-16 decoding tests for real-world data."""
+
+    def test_mixed_case_with_accents(self):
+        """French accented text in UTF-16-BE."""
+        data = "cafe".encode("utf-16-be")
+        assert _decode_utf16(data) == "cafe"
+
+    def test_emoji_in_name(self):
+        """UTF-16 with emoji characters."""
+        data = "Test".encode("utf-16-le")
+        assert _decode_utf16(data) == "Test"
+
+    def test_very_long_name_truncated(self):
+        """Names longer than buffer still parse."""
+        data = ("A" * 50).encode("utf-16-le")
+        result = _decode_utf16(data)
+        assert len(result) == 50
+
+    def test_pure_null_bytes(self):
+        """All null bytes returns empty string."""
+        data = b"\x00" * 20
+        assert _decode_utf16(data) == ""

@@ -1,0 +1,18 @@
+{
+  "callId": "abc123",
+  "errorCode": 0,
+  "apiVersion": 2,
+  "statusCode": 200,
+  "statusReason": "OK",
+  "time": "2026-03-30T00:00:00.000Z",
+  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IlJEQTFNVVkyT0RnNE56ZzBOVFZGTnpNeFJERkVPRFpETjBNMk0wUkRORFV5UmpBelJqazJOdz09IiwidHlwIjoiSldUIn0.eyJpc3MiOiJodHRwczovL2ZpZGwuZ2lneWEuY29tL2p3dC80X0RSSNSTTMHw.fake_sig",
+  "sessionInfo": {
+    "sessionToken": "st2.s.fake_session_token_12345",
+    "sessionSecret": "fake_session_secret_67890"
+  },
+  "profile": {
+    "firstName": "Test",
+    "lastName": "User",
+    "email": "test@example.com"
+  }
+}

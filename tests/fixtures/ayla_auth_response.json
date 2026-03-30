@@ -1,0 +1,7 @@
+{
+  "access_token": "fake_access_token_abc123",
+  "refresh_token": "fake_refresh_token_def456",
+  "expires_in": 86400,
+  "role": "EndUser",
+  "role_tags": []
+}
