@@ -23,5 +23,6 @@
   {"property": {"name": "d070_2_rec_cappuccino", "value": "0AwkpPAEHCAMZAQIFYAA=", "base_type": "string"}},
   {"property": {"name": "d060_1_rec_espresso", "value": "0AwkpPAEBCAMZAQIFYAA=", "base_type": "string"}},
   {"property": {"name": "data_request", "value": null, "base_type": "string"}},
-  {"property": {"name": "d580_service_parameters", "value": "{\"last_4_water_calc_qty\": 500, \"last_4_calc_threshold\": 1000, \"descale_status\": 0}", "base_type": "string"}}
+  {"property": {"name": "d580_service_parameters", "value": "{\"last_4_water_calc_qty\": 500, \"last_4_calc_threshold\": 1000, \"descale_status\": 0}", "base_type": "string"}},
+  {"property": {"name": "d270_serialnumber", "value": "ECAM61075MB12345", "base_type": "string"}}
 ]

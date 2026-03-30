@@ -177,6 +177,27 @@ MODEL_NAMES: Final[dict[str, str]] = {
     "DL-maestosa-good": "Maestosa",
 }
 
+# OEM model → TranscodeTable appModelId mapping
+# Credit: TranscodeTable approach from FrozenGalaxy/PyDeLonghiAPI
+OEM_TO_APP_MODEL: Final[dict[str, str]] = {
+    "DL-striker-cb": "STRIKER_COLD-BREW",
+    "DL-striker-best": "STRIKER_BEST",
+    "DL-pd-soul": "PD_SOUL",
+    "DL-pd-soul-better": "PD_SOUL_BETTER",
+    "DL-pd-class-better": "PD_CLASS_BETTER_INT",
+    "DL-pd-class-top": "PD_CLASS_TOP_INT",
+    "DL-pd-elite-better": "PD_ELITE_BETTER_EX1",
+    "DL-pd-elite-mid": "PD_ELITE_MID_INT",
+    "DL-pd-elite-multi": "PD_ELITE_MULTI_INT",
+    "DL-pd-s-restyle": "PD_S_RESTYLE_INT",
+    "DL-dinamica-plus": "DINAMICA_PLUS",
+    "DL-maestosa-best": "MAESTOSA_BEST",
+    "DL-maestosa-good": "MAESTOSA_GOOD",
+}
+
+# TranscodeTable API endpoint (De'Longhi backend)
+TRANSCODE_TABLE_URL: Final = "https://delonghibe.reply.it/api/getTranscodeTable.sr"
+
 MACHINE_STATES: Final[dict[int, str]] = {
     0: "Off",
     1: "Turning On",

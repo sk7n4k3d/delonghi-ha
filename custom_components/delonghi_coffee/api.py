@@ -13,14 +13,19 @@ from typing import Any
 
 import requests
 
+import re
+
 from .const import (
     APP_SIGNATURE,
     GIGYA_API_KEY,
     GIGYA_URL,
+    MODEL_NAMES,
+    OEM_TO_APP_MODEL,
     REGIONS,
     REQUEST_TIMEOUT,
     RETRY_COUNT,
     RETRY_DELAY,
+    TRANSCODE_TABLE_URL,
 )
 from .logger import ApiTimer, RateLimitTracker, sanitize
 
@@ -147,10 +152,20 @@ class DeLonghiApi:
         # Rate limiting tracker
         self._rate_tracker = RateLimitTracker()
 
+        # TranscodeTable cache (fetched from De'Longhi backend)
+        # Credit: TranscodeTable approach from FrozenGalaxy/PyDeLonghiAPI
+        self._transcode_table: list[dict] | None = None
+        self._model_info: dict[str, Any] | None = None
+
     @property
     def rate_tracker(self) -> RateLimitTracker:
         """Return the API rate limit tracker."""
         return self._rate_tracker
+
+    @property
+    def model_info(self) -> dict[str, Any] | None:
+        """Return cached model info from TranscodeTable matching."""
+        return self._model_info
 
     @property
     def device_name(self) -> str | None:
@@ -161,6 +176,120 @@ class DeLonghiApi:
     def sw_version(self) -> str | None:
         """Return device software version from last get_devices call."""
         return self._sw_version
+
+    # ── Model identification (TranscodeTable) ─────────────────────────
+    # Credit: TranscodeTable approach from FrozenGalaxy/PyDeLonghiAPI
+
+    @staticmethod
+    def parse_serial_number(value: str | None) -> dict[str, str] | None:
+        """Parse d270_serialnumber to extract SKU-matching digits.
+
+        The serial format is typically: ECAM{model}{suffix}{production_info}
+        e.g. "ECAM45065S12345" or "ECAM61075MB12345"
+        We extract the numeric portion for TranscodeTable matching.
+        """
+        if not value:
+            return None
+        # Extract all digit sequences from the serial
+        digits = re.findall(r"\d+", value)
+        all_digits = "".join(digits)
+        return {"raw": value, "digits": all_digits}
+
+    @staticmethod
+    def match_transcode_table(
+        table: list[dict],
+        sku_digits: str | None = None,
+        oem_model: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Match a machine in the TranscodeTable by SKU digits or OEM model.
+
+        Priority: SKU digits match > OEM model mapping.
+        Returns the first matching machine entry with all capability fields.
+        """
+        # Try SKU digits match first (most precise)
+        if sku_digits and len(sku_digits) >= 6:
+            suffix = sku_digits[:6]  # First 6 digits from serial
+            for machine in table:
+                pc = machine.get("product_code", "")
+                if pc.endswith(suffix) and machine.get("appModelId") != "default":
+                    return machine
+
+        # Fall back to OEM model → appModelId mapping
+        if oem_model:
+            target_app_id = OEM_TO_APP_MODEL.get(oem_model)
+            if target_app_id:
+                for machine in table:
+                    if machine.get("appModelId") == target_app_id:
+                        return machine
+
+        return None
+
+    def fetch_transcode_table(self) -> None:
+        """Fetch and cache the TranscodeTable from De'Longhi backend.
+
+        Gracefully degrades if the fetch fails (returns None, uses fallbacks).
+        """
+        if self._transcode_table is not None:
+            return  # Already cached
+
+        try:
+            resp = self._session.post(
+                TRANSCODE_TABLE_URL,
+                json={"locale": "en_US", "currentVersion": "1.0"},
+                timeout=REQUEST_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                self._transcode_table = data.get("machines", [])
+                _LOGGER.info("TranscodeTable loaded: %d machines", len(self._transcode_table))
+            else:
+                _LOGGER.warning("TranscodeTable fetch failed: HTTP %d", resp.status_code)
+        except Exception as err:
+            _LOGGER.warning("TranscodeTable fetch failed: %s", err)
+
+    def identify_model(self, props: dict[str, Any]) -> dict[str, Any]:
+        """Identify the machine model from properties and TranscodeTable.
+
+        Returns a dict with model info:
+        - name: Friendly display name
+        - appModelId: TranscodeTable application model ID
+        - nProfiles, nStandardRecipes, connectionType, protocolVersion (if available)
+        """
+        # Return cached result
+        if self._model_info is not None:
+            return self._model_info
+
+        # Parse serial number for SKU matching
+        serial_prop = props.get("d270_serialnumber", {})
+        serial_val = serial_prop.get("value") if isinstance(serial_prop, dict) else None
+        serial_info = self.parse_serial_number(serial_val)
+        sku_digits = serial_info["digits"] if serial_info else None
+
+        # Try TranscodeTable match
+        if self._transcode_table:
+            match = self.match_transcode_table(
+                self._transcode_table,
+                sku_digits=sku_digits,
+                oem_model=self._oem_model,
+            )
+            if match:
+                self._model_info = match
+                _LOGGER.info(
+                    "Model identified: %s (%s) via TranscodeTable",
+                    match.get("name"),
+                    match.get("appModelId"),
+                )
+                return self._model_info
+
+        # Fallback to static MODEL_NAMES
+        friendly = MODEL_NAMES.get(self._oem_model, self._oem_model)
+        self._model_info = {
+            "name": friendly,
+            "appModelId": OEM_TO_APP_MODEL.get(self._oem_model, self._oem_model),
+            "source": "fallback",
+        }
+        _LOGGER.info("Model identified (fallback): %s", friendly)
+        return self._model_info
 
     def authenticate(self) -> bool:
         """Full auth flow: Gigya login -> JWT -> Ayla token_sign_in."""
