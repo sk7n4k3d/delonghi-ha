@@ -140,6 +140,11 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
         if lan:
             attrs["lan_enabled"] = lan.get("lan_enabled", False)
             attrs["lan_ip"] = lan.get("lan_ip")
+
+        # ContentStack catalog info
+        catalog = self.coordinator.data.get("drink_catalog", {})
+        if catalog:
+            attrs["contentstack_drinks"] = len(catalog)
         return attrs
 
 
@@ -258,11 +263,30 @@ class DeLonghiBeanSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return all bean profiles as attributes."""
+        """Return all bean profiles + ContentStack bean adapt calibration."""
         beans = self.coordinator.data.get("beans", [])
         attrs: dict[str, Any] = {}
         for bean in beans:
             bid = bean["id"]
             attrs[f"bean_{bid}_name"] = bean.get("name", "")
             attrs[f"bean_{bid}_english"] = bean.get("english_name", "")
+
+        # ContentStack bean adapt calibration data
+        ba = self.coordinator.data.get("bean_adapt", {})
+        if ba:
+            attrs["bean_types"] = ba.get("bean_types", [])
+            attrs["roasting_levels"] = ba.get("roasting_levels", [])
+            attrs["taste_feedback"] = ba.get("taste_feedback", [])
+            attrs["grinder_range"] = f"{ba.get('grinder_min', 0)}-{ba.get('grinder_max', 0)} step={ba.get('grinder_step', 0)}"
+            attrs["flow_range"] = f"{ba.get('flow_min', 0)}-{ba.get('flow_max', 0)} delta={ba.get('flow_delta', 0)}"
+            attrs["preinfusion_water"] = f"{ba.get('preinfusion_water_min', 0)}-{ba.get('preinfusion_water_max', 0)} mL"
+            for bt in ba.get("bean_table", []):
+                attrs[f"powder_qty_{bt.get('bean_type', '').replace(' ', '_').lower()}"] = bt.get("powder_quantity", "")
+            for rt in ba.get("roasting_table", []):
+                level = rt.get("roast_level", "").lower()
+                attrs[f"roast_{level}_stoichio"] = rt.get("stoichio_ratio", "")
+                attrs[f"roast_{level}_machine_level"] = rt.get("machine_roasting_level", "")
+                attrs[f"roast_{level}_temperature"] = rt.get("temperature", "")
+
+        attrs["coffee_beans_catalog_count"] = self.coordinator.data.get("coffee_beans_count", 0)
         return attrs

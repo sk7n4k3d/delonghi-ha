@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import DOMAIN, FULL_REFRESH_INTERVAL, MQTT_KEEPALIVE_INTERVAL, SCAN_INTERVAL_SECONDS
+from .contentstack import fetch_bean_adapt, fetch_coffee_beans, fetch_drink_catalog
 from .logger import get_diagnostic_dump
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.selected_profile: int | None = None  # Set from machine on first refresh
         self.seen_alarm_bits: set[int] = set()  # Track which inverted bits the machine supports
         self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
+        self.drink_catalog: dict[int, dict] = {}  # ContentStack drink_id → {name, clusters, ingredients}
+        self.bean_adapt: dict[str, Any] | None = None  # ContentStack bean adapt calibration
+        self.coffee_beans: list[dict[str, Any]] = []  # ContentStack coffee bean catalog
+        self._contentstack_loaded: bool = False
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
         self._monitor_last_changed: float = monotonic()
@@ -107,6 +112,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Fetch LAN config once (first full refresh only)
                 if self._lan_config is None:
                     self._lan_config = await self.hass.async_add_executor_job(self.api.get_lan_config, self.dsn)
+
+                # ContentStack: fetch drink catalog + bean adapt once
+                if not self._contentstack_loaded:
+                    await self._load_contentstack()
 
                 self._last_full_refresh = now
                 self._last_keepalive = now  # full refresh counts as keepalive
@@ -182,6 +191,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "api_rate": self.api.rate_tracker.current_rate,
                 "api_total_calls": self.api.rate_tracker.total_calls,
                 "diagnostic": self._last_diagnostic if self.diagnostic_mode else {},
+                "drink_catalog": self.drink_catalog,
+                "bean_adapt": self.bean_adapt or {},
+                "coffee_beans_count": len(self.coffee_beans),
             }
         except DeLonghiAuthError as err:
             raise UpdateFailed(f"Authentication error: {err}") from err
@@ -189,3 +201,61 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Error fetching data: {err}") from err
         except Exception as err:
             raise UpdateFailed(f"Unexpected error: {err}") from err
+
+    async def _load_contentstack(self) -> None:
+        """Load drink catalog and bean adapt from ContentStack CMS (once).
+
+        ContentStack prod_drink titles follow the pattern:
+        "{DrinkName} {ECAM_MODEL} {SKU} {FW_VERSION}"
+        e.g. "Espresso ECAM63050 0132250181 1.1-1.0-2.5"
+
+        We search by ECAM model name (e.g. "ECAM63050") extracted from
+        the serial number or DSN. Falls back to OEM model keywords.
+        """
+        # Try to get ECAM model from serial number (d270_serialnumber)
+        model_pattern = ""
+        if self._last_all_props:
+            serial_prop = self._last_all_props.get("d270_serialnumber", {})
+            serial_val = serial_prop.get("value", "")
+            if serial_val:
+                # Extract "ECAM" + digits pattern from serial
+                import re
+                match = re.search(r"ECAM\d+", serial_val, re.IGNORECASE)
+                if match:
+                    model_pattern = match.group(0)
+
+        if not model_pattern:
+            # Map OEM model to ECAM pattern
+            oem = self.api._oem_model or ""
+            oem_ecam_map = {
+                "DL-striker-cb": "ECAM63050",
+                "DL-striker-best": "ECAM63075",
+                "DL-pd-soul": "ECAM61",
+                "DL-dinamica-plus": "ECAM37",
+            }
+            model_pattern = oem_ecam_map.get(oem, "")
+
+        if not model_pattern:
+            _LOGGER.debug("ContentStack: cannot determine ECAM model, skipping")
+            self._contentstack_loaded = True
+            return
+
+        try:
+            self.drink_catalog = await self.hass.async_add_executor_job(
+                fetch_drink_catalog, model_pattern
+            )
+            self.bean_adapt = await self.hass.async_add_executor_job(
+                fetch_bean_adapt, model_pattern
+            )
+            self.coffee_beans = await self.hass.async_add_executor_job(
+                fetch_coffee_beans
+            )
+            self._contentstack_loaded = True
+            _LOGGER.info(
+                "ContentStack loaded: %d drinks, bean_adapt=%s, %d coffee beans",
+                len(self.drink_catalog),
+                bool(self.bean_adapt),
+                len(self.coffee_beans),
+            )
+        except Exception:
+            _LOGGER.warning("ContentStack load failed, will retry next refresh")

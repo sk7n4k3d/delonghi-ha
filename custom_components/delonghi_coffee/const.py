@@ -66,44 +66,78 @@ REQUEST_TIMEOUT: Final = (5, 15)
 RETRY_COUNT: Final = 3
 RETRY_DELAY: Final = 2  # seconds
 
-# Beverage profiles — mapped from captured data
+# Beverage profiles — complete catalog from ContentStack + Ayla recipe keys
+# Keys match Ayla recipe property names; drink_id is the ContentStack/ECAM numeric ID
 BEVERAGES: Final[dict[str, dict[str, str]]] = {
-    # Standard
-    "espresso": {"name": "Espresso", "icon": "mdi:coffee"},
-    "regular": {"name": "Coffee", "icon": "mdi:coffee"},
-    "long_coffee": {"name": "Long Coffee", "icon": "mdi:coffee-outline"},
-    "2x_espresso": {"name": "Double Espresso", "icon": "mdi:coffee"},
-    "doppio_pl": {"name": "Doppio+", "icon": "mdi:coffee"},
-    "doppio": {"name": "Doppio+", "icon": "mdi:coffee"},
-    "americano": {"name": "Americano", "icon": "mdi:coffee-outline"},
-    "cappuccino": {"name": "Cappuccino", "icon": "mdi:coffee-maker-outline"},
-    "latte_macch": {"name": "Latte Macchiato", "icon": "mdi:glass-mug-variant"},
-    "latte_macchiato": {"name": "Latte Macchiato", "icon": "mdi:glass-mug-variant"},
-    "caffelatte": {"name": "Caffe Latte", "icon": "mdi:glass-mug-variant"},
-    "flat_white": {"name": "Flat White", "icon": "mdi:coffee"},
-    "espr_macch": {"name": "Espresso Macchiato", "icon": "mdi:coffee"},
-    "espr_macchiato": {"name": "Espresso Macchiato", "icon": "mdi:coffee"},
-    "hot_milk": {"name": "Hot Milk", "icon": "mdi:cup"},
-    "capp_doppio_pl": {"name": "Cappuccino Doppio+", "icon": "mdi:coffee-maker-outline"},
-    "capp_doppio": {"name": "Cappuccino Doppio+", "icon": "mdi:coffee-maker-outline"},
-    "capp_reverse": {"name": "Cappuccino Mix", "icon": "mdi:coffee-maker-outline"},
-    "hot_water": {"name": "Hot Water", "icon": "mdi:water-boiler"},
-    "tea": {"name": "Tea", "icon": "mdi:tea"},
-    "coffee_pot": {"name": "Coffee Pot", "icon": "mdi:coffee-maker"},
-    "cortado": {"name": "Cortado", "icon": "mdi:coffee"},
-    "long_black": {"name": "Long Black", "icon": "mdi:coffee-outline"},
-    "mug_to_go": {"name": "Mug To Go", "icon": "mdi:coffee-to-go"},
-    "brew_over_ice": {"name": "Brew Over Ice", "icon": "mdi:snowflake"},
-    # Iced
-    "over_ice_espr": {"name": "Iced Espresso", "icon": "mdi:snowflake"},
-    "i_americano": {"name": "Iced Americano", "icon": "mdi:snowflake"},
-    "i_cappuccino": {"name": "Iced Cappuccino", "icon": "mdi:snowflake"},
-    "i_latte_macch": {"name": "Iced Latte Macchiato", "icon": "mdi:snowflake"},
-    "i_capp_mix": {"name": "Iced Cappuccino Mix", "icon": "mdi:snowflake"},
-    "i_flatwhite": {"name": "Iced Flat White", "icon": "mdi:snowflake"},
-    "i_coldmilk": {"name": "Iced Cold Milk", "icon": "mdi:snowflake"},
-    "i_caffelatte": {"name": "Iced Caffe Latte", "icon": "mdi:snowflake"},
-    # My (personalized)
+    # ── Hot Coffee (1-25) ───────────────────────────────────────────────
+    "espresso": {"name": "Espresso", "icon": "mdi:coffee", "drink_id": "1"},
+    "regular": {"name": "Coffee", "icon": "mdi:coffee", "drink_id": "2"},
+    "long_coffee": {"name": "Long Coffee", "icon": "mdi:coffee-outline", "drink_id": "3"},
+    "2x_espresso": {"name": "Double Espresso", "icon": "mdi:coffee", "drink_id": "4"},
+    "doppio_pl": {"name": "Doppio+", "icon": "mdi:coffee", "drink_id": "5"},
+    "doppio": {"name": "Doppio+", "icon": "mdi:coffee", "drink_id": "5"},
+    "americano": {"name": "Americano", "icon": "mdi:coffee-outline", "drink_id": "6"},
+    "cappuccino": {"name": "Cappuccino", "icon": "mdi:coffee-maker-outline", "drink_id": "7"},
+    "latte_macch": {"name": "Latte Macchiato", "icon": "mdi:glass-mug-variant", "drink_id": "8"},
+    "latte_macchiato": {"name": "Latte Macchiato", "icon": "mdi:glass-mug-variant", "drink_id": "8"},
+    "caffelatte": {"name": "Caffe Latte", "icon": "mdi:glass-mug-variant", "drink_id": "9"},
+    "flat_white": {"name": "Flat White", "icon": "mdi:coffee", "drink_id": "10"},
+    "espr_macch": {"name": "Espresso Macchiato", "icon": "mdi:coffee", "drink_id": "11"},
+    "espr_macchiato": {"name": "Espresso Macchiato", "icon": "mdi:coffee", "drink_id": "11"},
+    "hot_milk": {"name": "Hot Milk", "icon": "mdi:cup", "drink_id": "12"},
+    "capp_doppio_pl": {"name": "Cappuccino Doppio+", "icon": "mdi:coffee-maker-outline", "drink_id": "13"},
+    "capp_doppio": {"name": "Cappuccino Doppio+", "icon": "mdi:coffee-maker-outline", "drink_id": "13"},
+    "capp_reverse": {"name": "Cappuccino Mix", "icon": "mdi:coffee-maker-outline", "drink_id": "15"},
+    "hot_water": {"name": "Hot Water", "icon": "mdi:water-boiler", "drink_id": "16"},
+    "espresso_lungo": {"name": "Espresso Lungo", "icon": "mdi:coffee-outline", "drink_id": "20"},
+    "tea": {"name": "Tea", "icon": "mdi:tea", "drink_id": "22"},
+    "coffee_pot": {"name": "Coffee Pot", "icon": "mdi:coffee-maker", "drink_id": "23"},
+    "cortado": {"name": "Cortado", "icon": "mdi:coffee", "drink_id": "24"},
+    "long_black": {"name": "Long Black", "icon": "mdi:coffee-outline", "drink_id": "25"},
+    # ── New Hot (ContentStack) ──────────────────────────────────────────
+    "brew_over_ice": {"name": "Brew Over Ice", "icon": "mdi:snowflake", "drink_id": "27"},
+    "verlangerter": {"name": "Verlängerter", "icon": "mdi:coffee-outline", "drink_id": "28"},
+    "cafe_con_leche": {"name": "Café Con Leche", "icon": "mdi:glass-mug-variant", "drink_id": "29"},
+    "cafe_au_lait": {"name": "Café Au Lait", "icon": "mdi:glass-mug-variant", "drink_id": "30"},
+    "galao": {"name": "Galão", "icon": "mdi:glass-mug-variant", "drink_id": "31"},
+    # ── Iced (50-57) ────────────────────────────────────────────────────
+    "i_americano": {"name": "Iced Americano", "icon": "mdi:snowflake", "drink_id": "50"},
+    "i_cappuccino": {"name": "Iced Cappuccino", "icon": "mdi:snowflake", "drink_id": "51"},
+    "i_latte_macch": {"name": "Iced Latte Macchiato", "icon": "mdi:snowflake", "drink_id": "52"},
+    "i_capp_mix": {"name": "Iced Cappuccino Mix", "icon": "mdi:snowflake", "drink_id": "53"},
+    "i_flatwhite": {"name": "Iced Flat White", "icon": "mdi:snowflake", "drink_id": "54"},
+    "i_coldmilk": {"name": "Iced Cold Milk", "icon": "mdi:snowflake", "drink_id": "55"},
+    "i_caffelatte": {"name": "Iced Caffe Latte", "icon": "mdi:snowflake", "drink_id": "56"},
+    "over_ice_espr": {"name": "Iced Espresso", "icon": "mdi:snowflake", "drink_id": "57"},
+    # ── Mug Hot (80-87) ─────────────────────────────────────────────────
+    "mug_americano": {"name": "Mug Americano", "icon": "mdi:coffee-to-go", "drink_id": "80"},
+    "mug_cappuccino": {"name": "Mug Cappuccino", "icon": "mdi:coffee-to-go", "drink_id": "81"},
+    "mug_latte_macch": {"name": "Mug Latte Macchiato", "icon": "mdi:coffee-to-go", "drink_id": "82"},
+    "mug_caffelatte": {"name": "Mug Caffe Latte", "icon": "mdi:coffee-to-go", "drink_id": "83"},
+    "mug_capp_mix": {"name": "Mug Cappuccino Mix", "icon": "mdi:coffee-to-go", "drink_id": "84"},
+    "mug_flat_white": {"name": "Mug Flat White", "icon": "mdi:coffee-to-go", "drink_id": "85"},
+    "mug_hot_milk": {"name": "Mug Hot Milk", "icon": "mdi:coffee-to-go", "drink_id": "86"},
+    "mug_coffee": {"name": "Mug Coffee", "icon": "mdi:coffee-to-go", "drink_id": "87"},
+    # ── Mug Cold (100-107) ──────────────────────────────────────────────
+    "mug_i_brew_over_ice": {"name": "Mug Iced Brew Over Ice", "icon": "mdi:snowflake", "drink_id": "100"},
+    "mug_i_americano": {"name": "Mug Iced Americano", "icon": "mdi:snowflake", "drink_id": "101"},
+    "mug_i_cappuccino": {"name": "Mug Iced Cappuccino", "icon": "mdi:snowflake", "drink_id": "102"},
+    "mug_i_latte_macch": {"name": "Mug Iced Latte Macchiato", "icon": "mdi:snowflake", "drink_id": "103"},
+    "mug_i_caffelatte": {"name": "Mug Iced Caffe Latte", "icon": "mdi:snowflake", "drink_id": "104"},
+    "mug_i_capp_mix": {"name": "Mug Iced Cappuccino Mix", "icon": "mdi:snowflake", "drink_id": "105"},
+    "mug_i_flat_white": {"name": "Mug Iced Flat White", "icon": "mdi:snowflake", "drink_id": "106"},
+    "mug_i_cold_milk": {"name": "Mug Iced Cold Milk", "icon": "mdi:snowflake", "drink_id": "107"},
+    # ── Cold Brew (120-124) ─────────────────────────────────────────────
+    "a_cb_coffee": {"name": "Cold Brew Coffee", "icon": "mdi:snowflake", "drink_id": "120"},
+    "b_cb_coffee_ess": {"name": "Cold Brew Essence", "icon": "mdi:snowflake", "drink_id": "121"},
+    "c_cb_coffee_pot": {"name": "Cold Brew Pot", "icon": "mdi:snowflake", "drink_id": "122"},
+    "d_cb_latte": {"name": "Cold Brew Latte", "icon": "mdi:snowflake", "drink_id": "123"},
+    "e_cb_cappuccino": {"name": "Cold Brew Cappuccino", "icon": "mdi:snowflake", "drink_id": "124"},
+    # ── Cold Brew Mug (140-142) ─────────────────────────────────────────
+    "f_cb_mug": {"name": "Cold Brew Mug", "icon": "mdi:snowflake", "drink_id": "140"},
+    "g_cb_latte_mug": {"name": "Cold Brew Latte Mug", "icon": "mdi:snowflake", "drink_id": "141"},
+    "h_cb_capp_mug": {"name": "Cold Brew Cappuccino Mug", "icon": "mdi:snowflake", "drink_id": "142"},
+    # ── My (personalized) ──────────────────────────────────────────────
     "m_americano": {"name": "My Americano", "icon": "mdi:coffee-outline"},
     "m_cappuccino": {"name": "My Cappuccino", "icon": "mdi:coffee-maker-outline"},
     "m_latte_macch": {"name": "My Latte Macchiato", "icon": "mdi:glass-mug-variant"},
@@ -111,7 +145,8 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "m_capp_mix": {"name": "My Cappuccino Mix", "icon": "mdi:coffee-maker-outline"},
     "m_flat_white": {"name": "My Flat White", "icon": "mdi:coffee"},
     "m_hot_milk": {"name": "My Hot Milk", "icon": "mdi:cup"},
-    # My Iced
+    "mug_to_go": {"name": "Mug To Go", "icon": "mdi:coffee-to-go"},
+    # ── My Iced ─────────────────────────────────────────────────────────
     "mi_over_ice": {"name": "My Iced", "icon": "mdi:snowflake"},
     "mi_americano": {"name": "My Iced Americano", "icon": "mdi:snowflake"},
     "mi_capp": {"name": "My Iced Cappuccino", "icon": "mdi:snowflake"},
@@ -120,15 +155,13 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "mi_capp_mix": {"name": "My Iced Cappuccino Mix", "icon": "mdi:snowflake"},
     "mi_flat_white": {"name": "My Iced Flat White", "icon": "mdi:snowflake"},
     "mi_cold_milk": {"name": "My Iced Cold Milk", "icon": "mdi:snowflake"},
-    # Cold Brew
-    "a_cb_coffee": {"name": "Cold Brew Coffee", "icon": "mdi:snowflake"},
-    "b_cb_coffee_ess": {"name": "Cold Brew Espresso", "icon": "mdi:snowflake"},
-    "c_cb_coffee_pot": {"name": "Cold Brew Pot", "icon": "mdi:snowflake"},
-    "d_cb_latte": {"name": "Cold Brew Latte", "icon": "mdi:snowflake"},
-    "e_cb_cappuccino": {"name": "Cold Brew Cappuccino", "icon": "mdi:snowflake"},
-    "f_cb_mug": {"name": "Cold Brew Mug", "icon": "mdi:snowflake"},
-    "g_cb_latte_mug": {"name": "Cold Brew Latte Mug", "icon": "mdi:snowflake"},
-    "h_cb_capp_mug": {"name": "Cold Brew Cappuccino Mug", "icon": "mdi:snowflake"},
+}
+
+# ContentStack drink_id → recipe key reverse mapping (for beverage discovery)
+DRINK_ID_TO_KEY: Final[dict[int, str]] = {
+    int(meta["drink_id"]): key
+    for key, meta in BEVERAGES.items()
+    if "drink_id" in meta
 }
 
 # Power on / wake up command (Request ID 132, contents 0x02 0x01)
