@@ -5,13 +5,12 @@ import struct
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from custom_components.delonghi_coffee.api import (
     DeLonghiApi,
     DeLonghiApiError,
-    DeLonghiAuthError,
 )
-
-import pytest
 
 
 class TestPacketBuilding:
@@ -34,6 +33,7 @@ class TestPacketBuilding:
         self.api._ping_supported = None
         self.api._rate_tracker = MagicMock()
         from custom_components.delonghi_coffee.const import APP_SIGNATURE
+
         self._app_sig = APP_SIGNATURE
 
     def test_with_app_id(self):
@@ -157,16 +157,20 @@ class TestPreBrewCheck:
         """Cannot brew when machine is Off."""
         # Fake recipe
         recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
-        with patch.object(self.api, "get_status", return_value={"machine_state": "Off", "alarms": []}):
-            with pytest.raises(DeLonghiApiError, match="machine is off"):
-                self.api._pre_brew_check("DSN", recipe, "espresso")
+        with (
+            patch.object(self.api, "get_status", return_value={"machine_state": "Off", "alarms": []}),
+            pytest.raises(DeLonghiApiError, match="machine is off"),
+        ):
+            self.api._pre_brew_check("DSN", recipe, "espresso")
 
     def test_machine_brewing_blocks_brew(self):
         """Cannot brew when machine is already Brewing."""
         recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
-        with patch.object(self.api, "get_status", return_value={"machine_state": "Brewing", "alarms": []}):
-            with pytest.raises(DeLonghiApiError, match="already brewing"):
-                self.api._pre_brew_check("DSN", recipe, "espresso")
+        with (
+            patch.object(self.api, "get_status", return_value={"machine_state": "Brewing", "alarms": []}),
+            pytest.raises(DeLonghiApiError, match="already brewing"),
+        ):
+            self.api._pre_brew_check("DSN", recipe, "espresso")
 
     def test_water_tank_alarm_blocks_brew(self):
         """Water Tank Empty alarm blocks brewing."""
@@ -175,9 +179,11 @@ class TestPreBrewCheck:
             "machine_state": "Ready",
             "alarms": [{"bit": 0, "name": "Water Tank Empty"}],
         }
-        with patch.object(self.api, "get_status", return_value=status):
-            with pytest.raises(DeLonghiApiError, match="Water Tank Empty"):
-                self.api._pre_brew_check("DSN", recipe, "espresso")
+        with (
+            patch.object(self.api, "get_status", return_value=status),
+            pytest.raises(DeLonghiApiError, match="Water Tank Empty"),
+        ):
+            self.api._pre_brew_check("DSN", recipe, "espresso")
 
     def test_ready_machine_passes(self):
         """Ready machine with no alarms passes pre-brew check."""

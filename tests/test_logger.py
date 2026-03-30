@@ -42,7 +42,7 @@ class TestSanitize:
 
     def test_mask_access_token(self):
         """Access tokens in JSON-like strings must be masked."""
-        msg = 'access_token=abcdef1234567890xyz'
+        msg = "access_token=abcdef1234567890xyz"
         result = sanitize(msg)
         assert "abcdef1234567890xyz" not in result
 
@@ -82,7 +82,7 @@ class TestSanitize:
 
     def test_multiple_sensitive_values(self):
         """Multiple credentials in one message all get masked."""
-        msg = 'auth_token abc123 password=secret123 access_token=tok456789012345'
+        msg = "auth_token abc123 password=secret123 access_token=tok456789012345"
         result = sanitize(msg)
         assert "abc123" not in result
         assert "secret123" not in result

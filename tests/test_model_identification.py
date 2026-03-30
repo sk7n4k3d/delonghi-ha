@@ -2,11 +2,9 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from custom_components.delonghi_coffee.api import DeLonghiApi
-
-import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -97,9 +95,7 @@ class TestTranscodeTableMatching:
 
     def test_oem_fallback_when_sku_fails(self):
         """If SKU doesn't match, falls back to oem_model."""
-        match = DeLonghiApi.match_transcode_table(
-            self.table, sku_digits="999999", oem_model="DL-pd-soul"
-        )
+        match = DeLonghiApi.match_transcode_table(self.table, sku_digits="999999", oem_model="DL-pd-soul")
         assert match is not None
         assert "PD_SOUL" in match["appModelId"]
 

@@ -3,11 +3,9 @@
 import base64
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from custom_components.delonghi_coffee.api import DeLonghiApi, DeLonghiApiError
-
-import pytest
+from custom_components.delonghi_coffee.api import DeLonghiApi
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -60,8 +58,8 @@ class TestIssue11BrewPrimaDonnaSoul:
         # The recipe lookup should find d060_2_rec_espresso for profile 2
         recipe_prop = None
         targets = [
-            f"_rec_2_espresso",  # Eletta format
-            f"_2_rec_espresso",  # PrimaDonna format
+            "_rec_2_espresso",  # Eletta format
+            "_2_rec_espresso",  # PrimaDonna format
         ]
         for name, prop in props.items():
             if prop.get("value") and any(t in name for t in targets):
@@ -143,16 +141,19 @@ class TestIssue9RateLimiting:
     def test_scan_interval_is_60s(self):
         """Scan interval should be 60 seconds (not 30)."""
         from custom_components.delonghi_coffee.const import SCAN_INTERVAL_SECONDS
+
         assert SCAN_INTERVAL_SECONDS == 60
 
     def test_full_refresh_is_600s(self):
         """Full refresh interval should be 10 minutes."""
         from custom_components.delonghi_coffee.const import FULL_REFRESH_INTERVAL
+
         assert FULL_REFRESH_INTERVAL == 600
 
     def test_retry_count_is_3(self):
         """Retry count should be 3."""
         from custom_components.delonghi_coffee.const import RETRY_COUNT
+
         assert RETRY_COUNT == 3
 
 
@@ -195,6 +196,7 @@ class TestIssue6ModelIdentification:
     def test_known_models_mapped(self):
         """All known OEM models have friendly names."""
         from custom_components.delonghi_coffee.const import MODEL_NAMES
+
         assert "DL-striker-cb" in MODEL_NAMES
         assert "DL-pd-soul" in MODEL_NAMES
         assert MODEL_NAMES["DL-striker-cb"] == "Eletta Explore"
@@ -203,6 +205,7 @@ class TestIssue6ModelIdentification:
     def test_unknown_model_passthrough(self):
         """Unknown model falls through as-is (no crash)."""
         from custom_components.delonghi_coffee.const import MODEL_NAMES
+
         assert MODEL_NAMES.get("DL-unknown", "DL-unknown") == "DL-unknown"
 
 

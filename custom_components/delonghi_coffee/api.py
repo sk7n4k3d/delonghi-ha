@@ -7,13 +7,12 @@ import contextlib
 import functools
 import json
 import logging
+import re
 import struct
 import time
 from typing import Any
 
 import requests
-
-import re
 
 from .const import (
     APP_SIGNATURE,
@@ -83,7 +82,7 @@ def _retry(func):  # noqa: ANN001, ANN202
                         args[0].authenticate()  # args[0] is self
                 # Rate limited — longer backoff
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 429:
-                    delay = RETRY_DELAY * (2 ** attempt)  # 4, 8, 16s for 429
+                    delay = RETRY_DELAY * (2**attempt)  # 4, 8, 16s for 429
                     _LOGGER.warning(
                         "Rate limited (429) on %s — backing off %ds (attempt %d/%d)",
                         func.__name__,
@@ -592,7 +591,7 @@ class DeLonghiApi:
         # chances of the cloud actually forwarding to the machine.
         if self._cmd_property == "data_request":
             attempts = [
-                ("data_request", True),   # try with app_id first (newer firmware)
+                ("data_request", True),  # try with app_id first (newer firmware)
                 ("data_request", False),  # legacy: without app_id
             ]
         elif self._cmd_property == "app_data_request":
@@ -633,7 +632,9 @@ class DeLonghiApi:
                     _LOGGER.info("Detected command property: data_request (from 404 on app_data_request)")
                 continue
             # Non-404 error → retryable failure
-            _LOGGER.error("send_command: %s returned HTTP %d: %s", prop_name, resp.status_code, sanitize(resp.text[:200]))
+            _LOGGER.error(
+                "send_command: %s returned HTTP %d: %s", prop_name, resp.status_code, sanitize(resp.text[:200])
+            )
             resp.raise_for_status()
 
         raise DeLonghiApiError("No valid command property found (all endpoints returned 404)")

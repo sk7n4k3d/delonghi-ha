@@ -3,3 +3,4 @@ __pycache__/
 # Debug/test files
 test_api.py
 docs/mitm_*
+.coverage

@@ -78,8 +78,7 @@ class RateLimitTracker:
         rate = len(self._calls)
         if rate >= self._warn_threshold and not self._warned:
             _LOGGER.warning(
-                "API rate approaching limit: %d calls in last %d min (threshold: %d). "
-                "Risk of IP ban from Ayla cloud.",
+                "API rate approaching limit: %d calls in last %d min (threshold: %d). Risk of IP ban from Ayla cloud.",
                 rate,
                 self._window // 60,
                 self._warn_threshold,

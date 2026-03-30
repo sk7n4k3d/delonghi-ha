@@ -4,7 +4,7 @@ import base64
 import json
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -24,9 +24,7 @@ def _mock_response(status_code: int, json_data: dict | list | None = None, text:
     resp.status_code = status_code
     resp.text = text or json.dumps(json_data or {})
     resp.json.return_value = json_data or {}
-    resp.raise_for_status.side_effect = (
-        requests.HTTPError(response=resp) if status_code >= 400 else None
-    )
+    resp.raise_for_status.side_effect = requests.HTTPError(response=resp) if status_code >= 400 else None
     return resp
 
 
@@ -41,9 +39,9 @@ class TestAuthentication:
 
         api._session = MagicMock()
         api._session.post.side_effect = [
-            _mock_response(200, gigya_data),   # Gigya login
+            _mock_response(200, gigya_data),  # Gigya login
             _mock_response(200, {"id_token": "jwt_token_here"}),  # getJWT
-            _mock_response(200, ayla_data),    # Ayla token_sign_in
+            _mock_response(200, ayla_data),  # Ayla token_sign_in
         ]
 
         result = api.authenticate()
@@ -55,9 +53,7 @@ class TestAuthentication:
         """Gigya login with wrong credentials raises AuthError."""
         api = DeLonghiApi("bad@example.com", "wrong", region="EU")
         api._session = MagicMock()
-        api._session.post.return_value = _mock_response(
-            200, {"errorCode": 403042, "errorMessage": "Invalid LoginID"}
-        )
+        api._session.post.return_value = _mock_response(200, {"errorCode": 403042, "errorMessage": "Invalid LoginID"})
 
         with pytest.raises(DeLonghiAuthError, match="Gigya login failed"):
             api.authenticate()
@@ -69,7 +65,7 @@ class TestAuthentication:
 
         api._session = MagicMock()
         api._session.post.side_effect = [
-            _mock_response(200, gigya_data),   # Gigya OK
+            _mock_response(200, gigya_data),  # Gigya OK
             _mock_response(200, {"id_token": "jwt"}),  # getJWT OK
             _mock_response(401, text="Unauthorized"),  # Ayla fails
         ]
@@ -82,7 +78,8 @@ class TestAuthentication:
         api = DeLonghiApi("test@example.com", "password", region="EU")
         api._session = MagicMock()
         api._session.post.return_value = _mock_response(
-            200, {"errorCode": 0}  # No id_token, no sessionInfo
+            200,
+            {"errorCode": 0},  # No id_token, no sessionInfo
         )
 
         with pytest.raises(DeLonghiAuthError, match="No id_token"):
@@ -119,11 +116,14 @@ class TestAuthentication:
 
         api._session = MagicMock()
         api._session.post.side_effect = [
-            _mock_response(200, {
-                "errorCode": 0,
-                "id_token": "direct_id_token",
-            }),  # Gigya login with id_token, no sessionInfo
-            _mock_response(200, ayla_data),    # Ayla token_sign_in
+            _mock_response(
+                200,
+                {
+                    "errorCode": 0,
+                    "id_token": "direct_id_token",
+                },
+            ),  # Gigya login with id_token, no sessionInfo
+            _mock_response(200, ayla_data),  # Ayla token_sign_in
         ]
 
         result = api.authenticate()
@@ -184,9 +184,9 @@ class TestGetProperties:
     def test_get_named_properties(self):
         """Fetch specific named properties."""
         api = self._make_api()
-        api._session.get.return_value = _mock_response(200, [
-            {"property": {"name": "app_device_status", "value": "RUN"}}
-        ])
+        api._session.get.return_value = _mock_response(
+            200, [{"property": {"name": "app_device_status", "value": "RUN"}}]
+        )
 
         props = api.get_properties("DSN", names=["app_device_status"])
         assert "app_device_status" in props
@@ -310,10 +310,13 @@ class TestGetStatus:
         api = self._make_api()
         # Monitor: ready state, profile 1, no alarms
         monitor_b64 = base64.b64encode(bytes.fromhex("d00ca4f001020000000700000000")).decode()
-        api._session.get.return_value = _mock_response(200, [
-            {"property": {"name": "app_device_status", "value": "RUN"}},
-            {"property": {"name": "d302_monitor_machine", "value": monitor_b64}},
-        ])
+        api._session.get.return_value = _mock_response(
+            200,
+            [
+                {"property": {"name": "app_device_status", "value": "RUN"}},
+                {"property": {"name": "d302_monitor_machine", "value": monitor_b64}},
+            ],
+        )
 
         status = api.get_status("DSN")
         assert status["status"] == "RUN"
@@ -323,9 +326,12 @@ class TestGetStatus:
     def test_status_no_monitor(self):
         """Status without monitor data returns defaults."""
         api = self._make_api()
-        api._session.get.return_value = _mock_response(200, [
-            {"property": {"name": "app_device_status", "value": "RUN"}},
-        ])
+        api._session.get.return_value = _mock_response(
+            200,
+            [
+                {"property": {"name": "app_device_status", "value": "RUN"}},
+            ],
+        )
 
         status = api.get_status("DSN")
         assert status["status"] == "RUN"
@@ -356,20 +362,26 @@ class TestGetLanConfig:
         api = self._make_api()
         api._session.get.side_effect = [
             # Device info
-            _mock_response(200, {
-                "device": {
-                    "lan_enabled": True,
-                    "lan_ip": "192.168.1.100",
-                    "connection_status": "Online",
-                }
-            }),
+            _mock_response(
+                200,
+                {
+                    "device": {
+                        "lan_enabled": True,
+                        "lan_ip": "192.168.1.100",
+                        "connection_status": "Online",
+                    }
+                },
+            ),
             # LAN key
-            _mock_response(200, {
-                "lanip": {
-                    "lanip_key": "0123456789abcdef",
-                    "lanip_key_id": 12345,
-                }
-            }),
+            _mock_response(
+                200,
+                {
+                    "lanip": {
+                        "lanip_key": "0123456789abcdef",
+                        "lanip_key_id": 12345,
+                    }
+                },
+            ),
         ]
 
         config = api.get_lan_config("DSN")
@@ -380,13 +392,16 @@ class TestGetLanConfig:
     def test_lan_disabled(self):
         """LAN disabled skips key fetch."""
         api = self._make_api()
-        api._session.get.return_value = _mock_response(200, {
-            "device": {
-                "lan_enabled": False,
-                "lan_ip": None,
-                "connection_status": "Online",
-            }
-        })
+        api._session.get.return_value = _mock_response(
+            200,
+            {
+                "device": {
+                    "lan_enabled": False,
+                    "lan_ip": None,
+                    "connection_status": "Online",
+                }
+            },
+        )
 
         config = api.get_lan_config("DSN")
         assert config["lan_enabled"] is False
@@ -397,9 +412,9 @@ class TestGetLanConfig:
         api = self._make_api()
         api._session.get.side_effect = [
             # Device info
-            _mock_response(200, {
-                "device": {"lan_enabled": True, "lan_ip": "192.168.1.100", "connection_status": "Online"}
-            }),
+            _mock_response(
+                200, {"device": {"lan_enabled": True, "lan_ip": "192.168.1.100", "connection_status": "Online"}}
+            ),
             # lan.json → 404
             MagicMock(
                 status_code=404,
@@ -457,11 +472,14 @@ class TestTokenRefreshHTTP:
         api._ayla_refresh = "refresh_token"
         api._token_expires = time.time() - 100  # expired
         api._session = MagicMock()
-        api._session.post.return_value = _mock_response(200, {
-            "access_token": "new_token",
-            "refresh_token": "new_refresh",
-            "expires_in": 86400,
-        })
+        api._session.post.return_value = _mock_response(
+            200,
+            {
+                "access_token": "new_token",
+                "refresh_token": "new_refresh",
+                "expires_in": 86400,
+            },
+        )
 
         api._ensure_token()
         assert api._ayla_token == "new_token"

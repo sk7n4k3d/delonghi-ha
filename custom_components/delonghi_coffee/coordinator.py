@@ -150,9 +150,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Build diagnostic dump if enabled
             if self.diagnostic_mode and self._last_all_props:
-                self._last_diagnostic = get_diagnostic_dump(
-                    self._last_all_props, self._cached_counters, status
-                )
+                self._last_diagnostic = get_diagnostic_dump(self._last_all_props, self._cached_counters, status)
 
             return {
                 "status": status.get("status", "UNKNOWN"),

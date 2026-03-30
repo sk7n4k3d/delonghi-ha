@@ -170,22 +170,14 @@ class TestCounterEdgeCases:
 
     def test_descale_threshold_zero(self):
         """Zero threshold in descale calculation doesn't divide by zero."""
-        props = {
-            "d580_service_parameters": {
-                "value": '{"last_4_water_calc_qty": 100, "last_4_calc_threshold": 0}'
-            }
-        }
+        props = {"d580_service_parameters": {"value": '{"last_4_water_calc_qty": 100, "last_4_calc_threshold": 0}'}}
         counters = self.api.parse_counters(props)
         # threshold=0 → the if guard prevents division
         assert "descale_progress" not in counters
 
     def test_descale_over_100(self):
         """Descale progress capped at 100%."""
-        props = {
-            "d580_service_parameters": {
-                "value": '{"last_4_water_calc_qty": 2000, "last_4_calc_threshold": 1000}'
-            }
-        }
+        props = {"d580_service_parameters": {"value": '{"last_4_water_calc_qty": 2000, "last_4_calc_threshold": 1000}'}}
         counters = self.api.parse_counters(props)
         assert counters["descale_progress"] == 100
 
