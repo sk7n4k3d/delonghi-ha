@@ -13,6 +13,8 @@ from homeassistant.data_entry_flow import FlowResult
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import CONF_REGION, DOMAIN, REGIONS
 
+CONF_DIAGNOSTIC_MODE = "diagnostic_mode"
+
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
@@ -126,4 +128,36 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=STEP_REAUTH_DATA_SCHEMA,
             description_placeholders={"email": self._reauth_entry.data[CONF_EMAIL] if self._reauth_entry else ""},
             errors=errors,
+        )
+
+    @staticmethod
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> DeLonghiOptionsFlow:
+        """Get the options flow for this handler."""
+        return DeLonghiOptionsFlow(config_entry)
+
+
+class DeLonghiOptionsFlow(config_entries.OptionsFlow):
+    """Handle options for De'Longhi Coffee."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            # Apply diagnostic mode to coordinator
+            data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id, {})
+            coordinator = data.get("coordinator")
+            if coordinator:
+                coordinator.diagnostic_mode = user_input.get(CONF_DIAGNOSTIC_MODE, False)
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self._config_entry.options.get(CONF_DIAGNOSTIC_MODE, False)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_DIAGNOSTIC_MODE, default=current): bool,
+                }
+            ),
         )

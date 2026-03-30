@@ -134,6 +134,8 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
             "profile": self.coordinator.data.get("profile", 0),
             "active_alarms": [a["name"] for a in alarms],
             "alarm_count": len(alarms),
+            "api_calls_hour": self.coordinator.data.get("api_rate", 0),
+            "api_total_calls": self.coordinator.data.get("api_total_calls", 0),
         }
         if lan:
             attrs["lan_enabled"] = lan.get("lan_enabled", False)

@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import DOMAIN, FULL_REFRESH_INTERVAL, SCAN_INTERVAL_SECONDS
+from .logger import get_diagnostic_dump
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +49,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._monitor_stale_count: int = 0
         self._monitor_last_changed: float = monotonic()
         self._monitor_stale_timeout: int = 2700  # 45 minutes (machine auto-sleep is 30min)
+        self.diagnostic_mode: bool = False
+        self._last_diagnostic: dict[str, Any] = {}
+        self._last_all_props: dict[str, Any] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -75,6 +79,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
                 all_props: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_properties, self.dsn)
+                self._last_all_props = all_props
 
                 # Parse everything from the single fetch
                 self._cached_counters = self.api.parse_counters(all_props)
@@ -143,6 +148,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if alarm_word & (1 << bit):
                         self.seen_alarm_bits.add(bit)
 
+            # Build diagnostic dump if enabled
+            if self.diagnostic_mode and self._last_all_props:
+                self._last_diagnostic = get_diagnostic_dump(
+                    self._last_all_props, self._cached_counters, status
+                )
+
             return {
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": machine_state,
@@ -156,6 +167,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "profiles": self._cached_profiles.get("profiles", {}),
                 "beans": self._cached_beans,
                 "lan_config": self._lan_config or {},
+                "api_rate": self.api.rate_tracker.current_rate,
+                "api_total_calls": self.api.rate_tracker.total_calls,
+                "diagnostic": self._last_diagnostic if self.diagnostic_mode else {},
             }
         except DeLonghiAuthError as err:
             raise UpdateFailed(f"Authentication error: {err}") from err

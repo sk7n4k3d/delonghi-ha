@@ -22,6 +22,7 @@ from .const import (
     RETRY_COUNT,
     RETRY_DELAY,
 )
+from .logger import ApiTimer, RateLimitTracker, sanitize
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +51,13 @@ class DeLonghiApiError(Exception):
 
 
 def _retry(func):  # noqa: ANN001, ANN202
-    """Simple retry decorator with backoff (3 attempts, 2s delay)."""
+    """Retry decorator with exponential backoff (3 attempts, 2/4/8s delays).
+
+    - 404: no retry (property doesn't exist)
+    - 401: re-authenticate then retry
+    - 429: longer backoff (rate limited by Ayla)
+    - Other errors: exponential backoff
+    """
 
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -69,17 +76,31 @@ def _retry(func):  # noqa: ANN001, ANN202
                     _LOGGER.warning("Got 401, re-authenticating")
                     with contextlib.suppress(DeLonghiAuthError, DeLonghiApiError):
                         args[0].authenticate()  # args[0] is self
+                # Rate limited — longer backoff
+                if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 429:
+                    delay = RETRY_DELAY * (2 ** attempt)  # 4, 8, 16s for 429
+                    _LOGGER.warning(
+                        "Rate limited (429) on %s — backing off %ds (attempt %d/%d)",
+                        func.__name__,
+                        delay,
+                        attempt,
+                        RETRY_COUNT,
+                    )
+                    time.sleep(delay)
+                    last_err = err
+                    continue
                 last_err = err
                 if attempt < RETRY_COUNT:
+                    delay = RETRY_DELAY * (2 ** (attempt - 1))  # 2, 4s exponential
                     _LOGGER.debug(
                         "Attempt %d/%d failed for %s: %s — retrying in %ds",
                         attempt,
                         RETRY_COUNT,
                         func.__name__,
                         err,
-                        RETRY_DELAY,
+                        delay,
                     )
-                    time.sleep(RETRY_DELAY)
+                    time.sleep(delay)
         raise DeLonghiApiError(f"{func.__name__} failed after {RETRY_COUNT} attempts: {last_err}") from last_err
 
     return wrapper
@@ -122,6 +143,14 @@ class DeLonghiApi:
 
         # Cache whether ping_connected is supported (None = unknown, False = not supported)
         self._ping_supported: bool | None = None
+
+        # Rate limiting tracker
+        self._rate_tracker = RateLimitTracker()
+
+    @property
+    def rate_tracker(self) -> RateLimitTracker:
+        """Return the API rate limit tracker."""
+        return self._rate_tracker
 
     @property
     def device_name(self) -> str | None:
@@ -207,8 +236,8 @@ class DeLonghiApi:
             )
 
             if ayla_resp.status_code != 200:
-                _LOGGER.error("Ayla auth failed: %s %s", ayla_resp.status_code, ayla_resp.text)
-                raise DeLonghiAuthError(f"Ayla auth failed: {ayla_resp.status_code} {ayla_resp.text}")
+                _LOGGER.error("Ayla auth failed: %s %s", ayla_resp.status_code, sanitize(ayla_resp.text[:200]))
+                raise DeLonghiAuthError(f"Ayla auth failed: {ayla_resp.status_code}")
 
             ayla_data: dict[str, Any] = ayla_resp.json()
             self._ayla_token = ayla_data["access_token"]
@@ -280,23 +309,23 @@ class DeLonghiApi:
     @_retry
     def get_properties(self, dsn: str, names: list[str] | None = None) -> dict[str, Any]:
         """Get properties for a device. If names is provided, limits response."""
-        params = [("names[]", n) for n in names] if names else None
-        resp = self._session.get(
-            f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties.json",
-            headers=self._headers(),
-            params=params,
-            timeout=REQUEST_TIMEOUT,
-        )
-        resp.raise_for_status()
-        result = {p["property"]["name"]: p["property"] for p in resp.json()}
-        _LOGGER.debug(
-            "get_properties(%s, names=%s): %d properties returned (%s)",
-            dsn,
-            names,
-            len(result),
-            ", ".join(sorted(result.keys())[:20]) + ("..." if len(result) > 20 else ""),
-        )
-        return result
+        with ApiTimer("get_properties", self._rate_tracker):
+            params = [("names[]", n) for n in names] if names else None
+            resp = self._session.get(
+                f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties.json",
+                headers=self._headers(),
+                params=params,
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            result = {p["property"]["name"]: p["property"] for p in resp.json()}
+            _LOGGER.debug(
+                "get_properties(names=%s): %d properties (%s)",
+                names,
+                len(result),
+                ", ".join(sorted(result.keys())[:20]) + ("..." if len(result) > 20 else ""),
+            )
+            return result
 
     @_retry
     def get_property(self, dsn: str, name: str) -> dict[str, Any]:
@@ -417,21 +446,37 @@ class DeLonghiApi:
         Newer models (Eletta Explore): app_data_request, packet with app_id
         Older models (PrimaDonna Soul): data_request, packet without app_id
 
+        For PrimaDonna Soul, we try BOTH packet formats (with/without app_id)
+        because different firmware versions may require different formats even
+        on the same property endpoint.
+
         The command property is determined by model (DL-pd-* vs DL-striker-*).
         If model is unknown, auto-detects by trying both — but only caches
         when one returns 404 (proving the other is correct). A 201 from Ayla
         only means "datapoint accepted by cloud", NOT "machine received it".
         """
+        self._rate_tracker.record()
         headers = self._headers()
 
-        attempts = [
-            ("app_data_request", True),  # newer: with app_id
-            ("data_request", False),  # legacy: without app_id
-        ]
-
-        # Use known property — either from model detection or previous 404
-        if self._cmd_property:
-            attempts = sorted(attempts, key=lambda a: a[0] != self._cmd_property)
+        # Build attempt list: (property_name, include_app_id)
+        # For PrimaDonna models, try both formats on data_request to maximize
+        # chances of the cloud actually forwarding to the machine.
+        if self._cmd_property == "data_request":
+            attempts = [
+                ("data_request", True),   # try with app_id first (newer firmware)
+                ("data_request", False),  # legacy: without app_id
+            ]
+        elif self._cmd_property == "app_data_request":
+            attempts = [
+                ("app_data_request", True),  # Eletta: with app_id
+            ]
+        else:
+            # Unknown model: try all combinations
+            attempts = [
+                ("app_data_request", True),
+                ("data_request", True),
+                ("data_request", False),
+            ]
 
         for prop_name, include_app_id in attempts:
             _LOGGER.debug(
@@ -449,21 +494,20 @@ class DeLonghiApi:
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code == 201:
-                _LOGGER.info("Command sent via %s: %s", prop_name, ecam_bytes.hex())
+                _LOGGER.info("Command sent via %s (app_id=%s): %s", prop_name, include_app_id, ecam_bytes.hex())
                 return True
             if resp.status_code == 404:
                 _LOGGER.debug("send_command: %s returned 404, trying next", prop_name)
                 # 404 proves this property doesn't exist — cache the other one
-                other = "data_request" if prop_name == "app_data_request" else "app_data_request"
-                if not self._cmd_property:
-                    self._cmd_property = other
-                    _LOGGER.info("Detected command property: %s (from 404 on %s)", other, prop_name)
+                if prop_name == "app_data_request" and not self._cmd_property:
+                    self._cmd_property = "data_request"
+                    _LOGGER.info("Detected command property: data_request (from 404 on app_data_request)")
                 continue
             # Non-404 error → retryable failure
-            _LOGGER.error("send_command: %s returned HTTP %d: %s", prop_name, resp.status_code, resp.text[:200])
+            _LOGGER.error("send_command: %s returned HTTP %d: %s", prop_name, resp.status_code, sanitize(resp.text[:200]))
             resp.raise_for_status()
 
-        raise DeLonghiApiError("No valid command property found (both endpoints returned 404)")
+        raise DeLonghiApiError("No valid command property found (all endpoints returned 404)")
 
     def ping_connected(self, dsn: str) -> bool:
         """Send app_device_connected ping to force machine to push data updates.

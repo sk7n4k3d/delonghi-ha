@@ -64,6 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.debug("Could not fetch device info, using defaults")
 
     coordinator = DeLonghiCoordinator(hass, api, dsn)
+    coordinator.diagnostic_mode = entry.options.get("diagnostic_mode", False)
     await coordinator.async_config_entry_first_refresh()
 
     # Resolve friendly model name from OEM model

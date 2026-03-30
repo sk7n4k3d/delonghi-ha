@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -125,9 +126,21 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         return result
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Power on the machine."""
+        """Power on the machine.
+
+        Sends a ping first to wake the WiFi module from deep sleep,
+        then waits briefly for the machine to become receptive before
+        sending the actual power ON command.
+        """
         _LOGGER.info("Powering on %s", self._dsn)
         try:
+            # Wake the machine's WiFi module with a ping
+            try:
+                await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                _LOGGER.debug("Wake ping sent, waiting 3s for machine to become receptive")
+                await asyncio.sleep(3)
+            except (DeLonghiApiError, DeLonghiAuthError):
+                _LOGGER.debug("Wake ping failed, sending power ON anyway")
             await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
             self._assumed_on = True
             self._last_commanded_on = True

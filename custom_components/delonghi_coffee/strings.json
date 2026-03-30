@@ -29,6 +29,16 @@
       "reauth_successful": "Re-authentication successful"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De'Longhi Coffee Options",
+        "data": {
+          "diagnostic_mode": "Diagnostic Mode (exposes raw properties for debugging)"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "machine_status": {
