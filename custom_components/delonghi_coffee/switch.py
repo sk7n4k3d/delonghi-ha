@@ -69,11 +69,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
 
     @property
     def assumed_state(self) -> bool:
-        """Return True if state is assumed (no monitor available or stale)."""
-        state = self.coordinator.data.get("machine_state", "Unknown")
-        if state == "Unknown":
-            return True
-        return self._monitor_stale_count >= _STALE_THRESHOLD and self._last_commanded_on is not None
+        """Always True — cloud monitor is unreliable and can show stale state."""
+        return True
 
     @property
     def is_on(self) -> bool:
