@@ -164,6 +164,35 @@ DRINK_ID_TO_KEY: Final[dict[int, str]] = {
     if "drink_id" in meta
 }
 
+
+def resolve_beverage_meta(
+    bev_key: str,
+    custom_recipe_names: dict[str, str],
+) -> tuple[dict[str, str], bool]:
+    """Resolve a beverage key to (meta, is_known).
+
+    Used by the button platform to map a beverage key to a display name and
+    icon. Selection priority:
+        1. User-named custom recipe (custom_1..custom_6) — use the label.
+        2. Beverage defined in BEVERAGES — use its name/icon.
+        3. Unknown key — title-case fallback with the default coffee icon.
+
+    Returns:
+        A tuple of (meta dict with 'name' + 'icon', is_known flag).
+        is_known is True when the beverage has either a custom name or a
+        BEVERAGES entry, False for the title-cased fallback path.
+    """
+    custom_name = custom_recipe_names.get(bev_key)
+    if custom_name:
+        return {"name": custom_name, "icon": "mdi:coffee-to-go"}, True
+    if bev_key in BEVERAGES:
+        # Return a copy so callers can mutate it safely.
+        return {"name": BEVERAGES[bev_key]["name"], "icon": BEVERAGES[bev_key]["icon"]}, True
+    return {
+        "name": bev_key.replace("_", " ").title(),
+        "icon": "mdi:coffee",
+    }, False
+
 # Power on / wake up command (Request ID 132, contents 0x02 0x01)
 POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")
 

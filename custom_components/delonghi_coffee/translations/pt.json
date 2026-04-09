@@ -380,6 +380,69 @@
       "brew_mug_to_go": {
         "name": "Caneca Para Levar"
       },
+      "brew_cafe_au_lait": {
+        "name": "Café au lait"
+      },
+      "brew_cafe_con_leche": {
+        "name": "Café con leche"
+      },
+      "brew_espresso_lungo": {
+        "name": "Espresso Lungo"
+      },
+      "brew_galao": {
+        "name": "Galão"
+      },
+      "brew_mug_americano": {
+        "name": "Caneca Americano"
+      },
+      "brew_mug_caffelatte": {
+        "name": "Caneca Caffè Latte"
+      },
+      "brew_mug_capp_mix": {
+        "name": "Caneca Cappuccino Mix"
+      },
+      "brew_mug_cappuccino": {
+        "name": "Caneca Cappuccino"
+      },
+      "brew_mug_coffee": {
+        "name": "Caneca Café"
+      },
+      "brew_mug_flat_white": {
+        "name": "Caneca Flat White"
+      },
+      "brew_mug_hot_milk": {
+        "name": "Caneca Leite Quente"
+      },
+      "brew_mug_i_americano": {
+        "name": "Caneca Americano Gelado"
+      },
+      "brew_mug_i_brew_over_ice": {
+        "name": "Caneca Café com Gelo"
+      },
+      "brew_mug_i_caffelatte": {
+        "name": "Caneca Caffè Latte Gelado"
+      },
+      "brew_mug_i_capp_mix": {
+        "name": "Caneca Cappuccino Mix Gelado"
+      },
+      "brew_mug_i_cappuccino": {
+        "name": "Caneca Cappuccino Gelado"
+      },
+      "brew_mug_i_cold_milk": {
+        "name": "Caneca Leite Frio"
+      },
+      "brew_mug_i_flat_white": {
+        "name": "Caneca Flat White Gelado"
+      },
+      "brew_mug_i_latte_macch": {
+        "name": "Caneca Latte Macchiato Gelado"
+      },
+      "brew_mug_latte_macch": {
+        "name": "Caneca Latte Macchiato"
+      },
+      "brew_verlangerter": {
+        "name": "Verlängerter"
+      },
       "cancel_brew": {
         "name": "Cancelar"
       },

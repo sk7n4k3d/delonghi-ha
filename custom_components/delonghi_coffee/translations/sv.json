@@ -380,6 +380,69 @@
       "brew_mug_to_go": {
         "name": "Mugg To Go"
       },
+      "brew_cafe_au_lait": {
+        "name": "Café Au Lait"
+      },
+      "brew_cafe_con_leche": {
+        "name": "Café Con Leche"
+      },
+      "brew_espresso_lungo": {
+        "name": "Espresso Lungo"
+      },
+      "brew_galao": {
+        "name": "Galão"
+      },
+      "brew_mug_americano": {
+        "name": "Mug Americano"
+      },
+      "brew_mug_caffelatte": {
+        "name": "Mug Caffè Latte"
+      },
+      "brew_mug_capp_mix": {
+        "name": "Mug Cappuccino Mix"
+      },
+      "brew_mug_cappuccino": {
+        "name": "Mug Cappuccino"
+      },
+      "brew_mug_coffee": {
+        "name": "Mug Coffee"
+      },
+      "brew_mug_flat_white": {
+        "name": "Mug Flat White"
+      },
+      "brew_mug_hot_milk": {
+        "name": "Mug Hot Milk"
+      },
+      "brew_mug_i_americano": {
+        "name": "Mug Iced Americano"
+      },
+      "brew_mug_i_brew_over_ice": {
+        "name": "Mug Brew Over Ice"
+      },
+      "brew_mug_i_caffelatte": {
+        "name": "Mug Iced Caffè Latte"
+      },
+      "brew_mug_i_capp_mix": {
+        "name": "Mug Iced Cappuccino Mix"
+      },
+      "brew_mug_i_cappuccino": {
+        "name": "Mug Iced Cappuccino"
+      },
+      "brew_mug_i_cold_milk": {
+        "name": "Mug Cold Milk"
+      },
+      "brew_mug_i_flat_white": {
+        "name": "Mug Iced Flat White"
+      },
+      "brew_mug_i_latte_macch": {
+        "name": "Mug Iced Latte Macchiato"
+      },
+      "brew_mug_latte_macch": {
+        "name": "Mug Latte Macchiato"
+      },
+      "brew_verlangerter": {
+        "name": "Verlängerter"
+      },
       "cancel_brew": {
         "name": "Avbryt"
       },

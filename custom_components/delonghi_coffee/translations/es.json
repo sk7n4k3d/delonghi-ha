@@ -380,6 +380,69 @@
       "brew_mug_to_go": {
         "name": "Taza Para Llevar"
       },
+      "brew_cafe_au_lait": {
+        "name": "Café au lait"
+      },
+      "brew_cafe_con_leche": {
+        "name": "Café con leche"
+      },
+      "brew_espresso_lungo": {
+        "name": "Espresso Lungo"
+      },
+      "brew_galao": {
+        "name": "Galão"
+      },
+      "brew_mug_americano": {
+        "name": "Taza Americano"
+      },
+      "brew_mug_caffelatte": {
+        "name": "Taza Caffè Latte"
+      },
+      "brew_mug_capp_mix": {
+        "name": "Taza Cappuccino Mix"
+      },
+      "brew_mug_cappuccino": {
+        "name": "Taza Cappuccino"
+      },
+      "brew_mug_coffee": {
+        "name": "Taza Café"
+      },
+      "brew_mug_flat_white": {
+        "name": "Taza Flat White"
+      },
+      "brew_mug_hot_milk": {
+        "name": "Taza Leche Caliente"
+      },
+      "brew_mug_i_americano": {
+        "name": "Taza Americano Helado"
+      },
+      "brew_mug_i_brew_over_ice": {
+        "name": "Taza Café con Hielo"
+      },
+      "brew_mug_i_caffelatte": {
+        "name": "Taza Caffè Latte Helado"
+      },
+      "brew_mug_i_capp_mix": {
+        "name": "Taza Cappuccino Mix Helado"
+      },
+      "brew_mug_i_cappuccino": {
+        "name": "Taza Cappuccino Helado"
+      },
+      "brew_mug_i_cold_milk": {
+        "name": "Taza Leche Fría"
+      },
+      "brew_mug_i_flat_white": {
+        "name": "Taza Flat White Helado"
+      },
+      "brew_mug_i_latte_macch": {
+        "name": "Taza Latte Macchiato Helado"
+      },
+      "brew_mug_latte_macch": {
+        "name": "Taza Latte Macchiato"
+      },
+      "brew_verlangerter": {
+        "name": "Verlängerter"
+      },
       "cancel_brew": {
         "name": "Cancelar"
       },
