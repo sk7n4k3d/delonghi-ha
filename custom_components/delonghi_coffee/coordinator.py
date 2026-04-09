@@ -222,54 +222,16 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         "{DrinkName} {ECAM_MODEL} {SKU} {FW_VERSION}"
         e.g. "Espresso ECAM63050 0132250181 1.1-1.0-2.5"
 
-        We search by ECAM model name (e.g. "ECAM63050") extracted from
-        whichever source we can find it in: serial number first (most
-        precise), then TranscodeTable model info, then the static OEM map.
+        A full enumeration of the catalog (2026-04-09) returned only
+        ECAM47 and ECAM63 families. Machines in other families
+        (PrimaDonna Soul ECAM61, Dinamica Plus ECAM37, …) still get a
+        lookup attempt so future data updates are picked up automatically,
+        but the contentstack module itself skips the HTTP fetch for
+        families it knows are not indexed. See issue #6.
         """
         import re
 
-        model_pattern = ""
-
-        # 1. d270_serialnumber (most reliable — comes from the hardware).
-        if self._last_all_props:
-            serial_prop = self._last_all_props.get("d270_serialnumber", {})
-            serial_val = serial_prop.get("value", "")
-            if serial_val:
-                match = re.search(r"ECAM\d+", serial_val, re.IGNORECASE)
-                if match:
-                    model_pattern = match.group(0)
-
-        # 2. TranscodeTable model info (populated by api.identify_model).
-        #    The appModelId / product_code often carries the ECAM pattern
-        #    even when the serial doesn't (e.g. certain PrimaDonna batches).
-        if not model_pattern and self.api.model_info:
-            info = self.api.model_info
-            for field in ("appModelId", "product_code", "name"):
-                value = info.get(field, "")
-                if isinstance(value, str):
-                    match = re.search(r"ECAM\d+", value, re.IGNORECASE)
-                    if match:
-                        model_pattern = match.group(0)
-                        break
-
-        # 3. Static OEM model map — last-resort fallback.
-        if not model_pattern:
-            oem = self.api._oem_model or ""
-            oem_ecam_map = {
-                "DL-striker-cb": "ECAM63050",
-                "DL-striker-best": "ECAM63075",
-                "DL-pd-soul": "ECAM61",
-                "DL-pd-": "ECAM61",  # any PrimaDonna variant → ECAM61 family
-                "DL-dinamica-plus": "ECAM37",
-            }
-            # Try exact match first, then prefix match.
-            model_pattern = oem_ecam_map.get(oem, "")
-            if not model_pattern:
-                for prefix, ecam in oem_ecam_map.items():
-                    if prefix.endswith("-") and oem.startswith(prefix):
-                        model_pattern = ecam
-                        break
-
+        model_pattern = self._detect_contentstack_pattern()
         if not model_pattern:
             _LOGGER.debug(
                 "ContentStack: cannot determine ECAM model (oem=%s, serial=%s), skipping",
@@ -279,12 +241,23 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._contentstack_loaded = True
             return
 
+        # Derive a model_name hint from TranscodeTable for cases where the
+        # dotted variant ("ECAM610.75") might one day appear in title data.
+        model_name = ""
+        if self.api.model_info:
+            raw_name = self.api.model_info.get("name", "")
+            if isinstance(raw_name, str):
+                compact = re.sub(r"[^A-Za-z0-9]", "", raw_name.replace(".", ""))
+                m = re.search(r"ECAM\d+", compact, re.IGNORECASE)
+                if m:
+                    model_name = m.group(0)
+
         try:
             self.drink_catalog = await self.hass.async_add_executor_job(
-                fetch_drink_catalog, model_pattern
+                fetch_drink_catalog, model_pattern, model_name
             )
             self.bean_adapt = await self.hass.async_add_executor_job(
-                fetch_bean_adapt, model_pattern
+                fetch_bean_adapt, model_pattern, model_name
             )
             self.coffee_beans = await self.hass.async_add_executor_job(
                 fetch_coffee_beans
@@ -298,3 +271,43 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except Exception:
             _LOGGER.warning("ContentStack load failed, will retry next refresh")
+
+    def _detect_contentstack_pattern(self) -> str:
+        """Return the best ECAM pattern for ContentStack title lookups.
+
+        Order of precedence:
+        1. ``d270_serialnumber`` — hardware serial, e.g. ``ECAM61075MB...``.
+        2. TranscodeTable model info (``appModelId``/``product_code``/``name``).
+        3. Static OEM → ECAM family map for known CMS-indexed models.
+        """
+        import re
+
+        if self._last_all_props:
+            serial_prop = self._last_all_props.get("d270_serialnumber", {})
+            serial_val = serial_prop.get("value", "") if isinstance(serial_prop, dict) else ""
+            if serial_val:
+                match = re.search(r"ECAM\d+", serial_val, re.IGNORECASE)
+                if match:
+                    return match.group(0).upper()
+
+        if self.api.model_info:
+            info = self.api.model_info
+            for field in ("appModelId", "product_code", "name"):
+                value = info.get(field, "")
+                if isinstance(value, str):
+                    # Drop punctuation so "ECAM610.75" collapses to "ECAM61075".
+                    cleaned = value.replace(".", "")
+                    match = re.search(r"ECAM\d+", cleaned, re.IGNORECASE)
+                    if match:
+                        return match.group(0).upper()
+
+        oem = self.api._oem_model or ""
+        # Only list families actually indexed in ContentStack. Everything
+        # else falls through to an empty pattern and skips the fetch — we
+        # used to map DL-pd-* → ECAM61, which silently returned zero drinks
+        # on every startup and caused issue #6 to appear unfixed.
+        oem_ecam_map = {
+            "DL-striker-cb": "ECAM63050",
+            "DL-striker-best": "ECAM63075",
+        }
+        return oem_ecam_map.get(oem, "")

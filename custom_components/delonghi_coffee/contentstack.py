@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import requests
@@ -20,6 +21,50 @@ _CS_HEADERS = {
     "environment": _CS_ENV,
 }
 _CS_TIMEOUT = (5, 15)
+
+# Model families that De'Longhi actually populates in the ContentStack CMS.
+# A full enumeration of the prod_drink content type on 2026-04-09 returned
+# only ECAM47060/70/80 and ECAM63030/50/60/70/630 entries — no ECAM61
+# (PrimaDonna Soul), ECAM37 (Dinamica Plus), ECAM45 or any other family.
+# When the machine model sits outside this set, we skip the fetch entirely
+# instead of logging warnings on every setup. See issue #6 for details.
+_SUPPORTED_FAMILIES: tuple[str, ...] = ("ECAM47", "ECAM63")
+
+
+def _iter_pattern_candidates(pattern: str) -> list[str]:
+    """Yield progressively shorter ECAM prefixes for CMS lookup.
+
+    ContentStack prod_drink titles embed the compact ECAM model
+    (e.g. ``ECAM63050``). For unknown machines in a supported family we
+    retry with a shorter prefix until we hit entries — "ECAM63099" →
+    "ECAM6309" → "ECAM630" → "ECAM63". We bottom out at a two-digit
+    family prefix so we never query "ECAM" on its own (which would match
+    the entire catalog).
+    """
+    match = re.fullmatch(r"(ECAM)(\d+)", pattern.upper())
+    if not match:
+        return [pattern] if pattern else []
+    prefix, digits = match.group(1), match.group(2)
+    # Always keep the caller's exact pattern first, even when it's shorter
+    # than the two-digit family floor.
+    stop = min(2, len(digits))
+    candidates = [f"{prefix}{digits[:n]}" for n in range(len(digits), stop - 1, -1)]
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for cand in candidates:
+        if cand not in seen:
+            unique.append(cand)
+            seen.add(cand)
+    return unique
+
+
+def is_family_supported(pattern: str) -> bool:
+    """Return True when ``pattern`` belongs to a family present in the CMS."""
+    if not pattern:
+        return False
+    upper = pattern.upper()
+    return any(upper.startswith(family) for family in _SUPPORTED_FAMILIES)
 
 
 def _cs_get(content_type: str, query: dict[str, Any] | None = None, limit: int = 100, skip: int = 0) -> list[dict[str, Any]]:
@@ -53,20 +98,43 @@ def fetch_drink_catalog(sku: str, model_name: str = "") -> dict[int, dict[str, A
     Returns:
         Dict of drink_id → {name, clusters, ingredients: [{name, min, max, default}]}.
     """
-    # Try SKU in title first, then model name
-    patterns = [sku]
+    # Build the list of candidate title patterns to probe. We try the caller's
+    # primary pattern first, then fall back to its family-prefix variants for
+    # unknown models (e.g. ECAM63099 → ECAM6309 → ECAM630 → ECAM63). If a
+    # separate model_name was provided, we append its candidates too.
+    patterns: list[str] = _iter_pattern_candidates(sku) if sku else []
     if model_name and model_name != sku:
-        patterns.append(model_name)
+        for candidate in _iter_pattern_candidates(model_name):
+            if candidate not in patterns:
+                patterns.append(candidate)
+
+    # Short-circuit on families we know are absent from the CMS. Spamming
+    # the HTTP endpoint on every setup just to rediscover that ECAM61 isn't
+    # indexed is pointless; see issue #6.
+    if patterns and not any(is_family_supported(p) for p in patterns):
+        _LOGGER.info(
+            "ContentStack: family not indexed for '%s' (supported: %s), skipping drink fetch",
+            sku or model_name,
+            ", ".join(_SUPPORTED_FAMILIES),
+        )
+        return {}
 
     entries: list[dict[str, Any]] = []
     for pattern in patterns:
+        if not is_family_supported(pattern):
+            continue
         entries = _cs_get("prod_drink", query={"title": {"$regex": pattern}}, limit=100)
         if entries:
             _LOGGER.info("ContentStack: found %d drinks for pattern '%s'", len(entries), pattern)
             break
 
     if not entries:
-        _LOGGER.warning("ContentStack: no drinks found for SKU=%s model=%s", sku, model_name)
+        _LOGGER.info(
+            "ContentStack: no drinks indexed for SKU=%s model=%s (tried %s)",
+            sku,
+            model_name,
+            ", ".join(patterns) or "<none>",
+        )
         return {}
 
     catalog: dict[int, dict[str, Any]] = {}
@@ -110,16 +178,34 @@ def fetch_bean_adapt(sku: str, model_name: str = "") -> dict[str, Any] | None:
         Dict with bean_table, roasting_table, grinder settings, flow settings,
         or None if not found.
     """
-    patterns = [sku]
+    patterns: list[str] = _iter_pattern_candidates(sku) if sku else []
     if model_name and model_name != sku:
-        patterns.append(model_name)
+        for candidate in _iter_pattern_candidates(model_name):
+            if candidate not in patterns:
+                patterns.append(candidate)
 
+    if patterns and not any(is_family_supported(p) for p in patterns):
+        _LOGGER.info(
+            "ContentStack: bean_adapt not indexed for '%s' (supported: %s), skipping",
+            sku or model_name,
+            ", ".join(_SUPPORTED_FAMILIES),
+        )
+        return None
+
+    entries: list[dict[str, Any]] = []
     for pattern in patterns:
+        if not is_family_supported(pattern):
+            continue
         entries = _cs_get("bean_adapt", query={"title": {"$regex": pattern}}, limit=5)
         if entries:
             break
-    else:
-        _LOGGER.debug("ContentStack: no bean adapt data for SKU=%s model=%s", sku, model_name)
+    if not entries:
+        _LOGGER.debug(
+            "ContentStack: no bean adapt data for SKU=%s model=%s (tried %s)",
+            sku,
+            model_name,
+            ", ".join(patterns) or "<none>",
+        )
         return None
 
     entry = entries[0]
