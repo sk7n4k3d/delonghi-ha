@@ -91,6 +91,45 @@
       "brew_over_ice": {
         "name": "Cafés glacés"
       },
+      "cortado": {
+        "name": "Cortados"
+      },
+      "long_black": {
+        "name": "Long blacks"
+      },
+      "travel_mug": {
+        "name": "Mugs de voyage"
+      },
+      "preground_brews": {
+        "name": "Cafés prémoulus"
+      },
+      "beverages_modified": {
+        "name": "Boissons modifiées"
+      },
+      "beverages_aborted": {
+        "name": "Préparations annulées"
+      },
+      "beverages_doubled": {
+        "name": "Doubles shots"
+      },
+      "bean_system_1_uses": {
+        "name": "Utilisations profil grain 1"
+      },
+      "bean_system_2_uses": {
+        "name": "Utilisations profil grain 2"
+      },
+      "bean_system_3_uses": {
+        "name": "Utilisations profil grain 3"
+      },
+      "bean_system_4_uses": {
+        "name": "Utilisations profil grain 4"
+      },
+      "bean_system_5_uses": {
+        "name": "Utilisations profil grain 5"
+      },
+      "bean_system_6_uses": {
+        "name": "Utilisations profil grain 6"
+      },
       "grounds_count": {
         "name": "Marcs éjectés"
       },

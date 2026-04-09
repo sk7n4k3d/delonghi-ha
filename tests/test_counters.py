@@ -82,10 +82,12 @@ class TestPrimaDonnaSoulCounters:
         assert counters["total_bw_beverages"] == 34  # d701_bw (with milk)
         assert counters["total_water_beverages"] == 3  # d703
 
-    def test_no_total_beverages_key(self):
-        """PrimaDonna doesn't have the Eletta-style total_beverages."""
+    def test_total_beverages_aliases_computed(self):
+        """PrimaDonna has no d701_tot_bev_b, so total_beverages is aliased
+        from computed_total — otherwise the Total Beverages sensor would be
+        permanently unknown (reported in issue #3 by @jostrasser)."""
         counters = self.api.parse_counters(self.props)
-        assert "total_beverages" not in counters
+        assert counters["total_beverages"] == counters["computed_total"]
 
     def test_json_counters(self):
         """JSON sub-counters from d734_tot_bev_usage."""
@@ -134,6 +136,73 @@ class TestPrimaDonnaSoulCounters:
         """Descale progress from d580_service_parameters."""
         counters = self.api.parse_counters(self.props)
         assert counters["descale_progress"] == 50  # 500/1000 * 100
+
+
+class TestPrimaDonnaSoulReal:
+    """Real PrimaDonna Soul layout (from issue #3 @jostrasser's full debug log).
+
+    On the real firmware, d733-d748 are **individual integer counters** —
+    not JSON aggregates like the Eletta. The custom-beverage total lives in
+    its own `d741_tot_custom_b_bw` property and there is no
+    `d580_service_parameters`.
+    """
+
+    def setup_method(self):
+        self.api = DeLonghiApi.__new__(DeLonghiApi)
+        self.props = _load_props("properties_primadonna_soul_real.json")
+
+    def test_core_totals_present(self):
+        counters = self.api.parse_counters(self.props)
+        assert counters["total_black_beverages"] == 52
+        assert counters["total_bw_beverages"] == 15
+        assert counters["total_water_beverages"] == 8
+        # d702 is a plain integer 0 on PrimaDonna — should map to other_tot_bev_other
+        assert counters["other_tot_bev_other"] == 0
+
+    def test_custom_beverages_from_d741(self):
+        """Resolves @jostrasser's 'Coffee Custom Beverages = unknown'."""
+        counters = self.api.parse_counters(self.props)
+        assert counters["usage_tot_custom_b_bw"] == 4
+
+    def test_new_primadonna_drinks(self):
+        """Cortado, Long Black, Travel Mug are PrimaDonna-only counters."""
+        counters = self.api.parse_counters(self.props)
+        assert counters["cortado"] == 0
+        assert counters["long_black"] == 0
+        assert counters["travel_mug"] == 0
+
+    def test_modified_and_aborted_counters(self):
+        """d742 / d747 / d748 are actionable usage stats."""
+        counters = self.api.parse_counters(self.props)
+        assert counters["beverages_modified"] == 12
+        assert counters["beverages_aborted"] == 5
+        assert counters["beverages_doubled"] == 3
+
+    def test_bean_system_usage(self):
+        """d721-d726 bean profile usage counters."""
+        counters = self.api.parse_counters(self.props)
+        assert counters["bean_system_5_uses"] == 35
+        assert counters["bean_system_1_uses"] == 0
+
+    def test_total_beverages_aliased(self):
+        """With no d701_tot_bev_b the 'Total Beverages' sensor still works."""
+        counters = self.api.parse_counters(self.props)
+        assert counters["total_beverages"] == counters["computed_total"]
+        assert counters["computed_total"] == 52 + 15 + 8 + 0  # d700+d701_bw+d703+d702
+
+    def test_descale_progress_absent(self):
+        """No d580 on PrimaDonna — descale_progress is intentionally missing."""
+        counters = self.api.parse_counters(self.props)
+        assert "descale_progress" not in counters
+
+    def test_d733_d740_not_parsed_as_json(self):
+        """The PrimaDonna d733+ integer values must not poison the counters dict
+        with stray mug_/taste_/water_qty_ keys."""
+        counters = self.api.parse_counters(self.props)
+        bad_prefixes = ("mug_", "taste_", "iced_", "mug_bev_", "mug_iced_", "cold_brew_", "water_qty_")
+        for key in counters:
+            for p in bad_prefixes:
+                assert not key.startswith(p), f"leaked JSON prefix: {key}"
 
 
 class TestCounterEdgeCases:
