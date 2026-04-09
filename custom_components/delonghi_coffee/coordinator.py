@@ -223,33 +223,59 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         e.g. "Espresso ECAM63050 0132250181 1.1-1.0-2.5"
 
         We search by ECAM model name (e.g. "ECAM63050") extracted from
-        the serial number or DSN. Falls back to OEM model keywords.
+        whichever source we can find it in: serial number first (most
+        precise), then TranscodeTable model info, then the static OEM map.
         """
-        # Try to get ECAM model from serial number (d270_serialnumber)
+        import re
+
         model_pattern = ""
+
+        # 1. d270_serialnumber (most reliable — comes from the hardware).
         if self._last_all_props:
             serial_prop = self._last_all_props.get("d270_serialnumber", {})
             serial_val = serial_prop.get("value", "")
             if serial_val:
-                # Extract "ECAM" + digits pattern from serial
-                import re
                 match = re.search(r"ECAM\d+", serial_val, re.IGNORECASE)
                 if match:
                     model_pattern = match.group(0)
 
+        # 2. TranscodeTable model info (populated by api.identify_model).
+        #    The appModelId / product_code often carries the ECAM pattern
+        #    even when the serial doesn't (e.g. certain PrimaDonna batches).
+        if not model_pattern and self.api.model_info:
+            info = self.api.model_info
+            for field in ("appModelId", "product_code", "name"):
+                value = info.get(field, "")
+                if isinstance(value, str):
+                    match = re.search(r"ECAM\d+", value, re.IGNORECASE)
+                    if match:
+                        model_pattern = match.group(0)
+                        break
+
+        # 3. Static OEM model map — last-resort fallback.
         if not model_pattern:
-            # Map OEM model to ECAM pattern
             oem = self.api._oem_model or ""
             oem_ecam_map = {
                 "DL-striker-cb": "ECAM63050",
                 "DL-striker-best": "ECAM63075",
                 "DL-pd-soul": "ECAM61",
+                "DL-pd-": "ECAM61",  # any PrimaDonna variant → ECAM61 family
                 "DL-dinamica-plus": "ECAM37",
             }
+            # Try exact match first, then prefix match.
             model_pattern = oem_ecam_map.get(oem, "")
+            if not model_pattern:
+                for prefix, ecam in oem_ecam_map.items():
+                    if prefix.endswith("-") and oem.startswith(prefix):
+                        model_pattern = ecam
+                        break
 
         if not model_pattern:
-            _LOGGER.debug("ContentStack: cannot determine ECAM model, skipping")
+            _LOGGER.debug(
+                "ContentStack: cannot determine ECAM model (oem=%s, serial=%s), skipping",
+                self.api._oem_model or "?",
+                (self._last_all_props.get("d270_serialnumber", {}) or {}).get("value", "?"),
+            )
             self._contentstack_loaded = True
             return
 
