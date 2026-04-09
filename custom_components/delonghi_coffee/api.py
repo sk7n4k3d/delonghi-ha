@@ -431,6 +431,24 @@ class DeLonghiApi:
             dev = self._devices[0]
             self._device_name = dev.get("product_name")
             self._sw_version = dev.get("sw_version")
+            # Backfill oem_model from Ayla metadata if the config entry
+            # didn't carry it (older installs predate model detection).
+            # Without this, ContentStack + cmd_property routing both fail
+            # silently on PrimaDonna Soul / etc.
+            if not self._oem_model:
+                ayla_oem = dev.get("oem_model") or dev.get("model")
+                if ayla_oem:
+                    self._oem_model = ayla_oem
+                    _LOGGER.info(
+                        "Backfilled oem_model from Ayla metadata: %s",
+                        ayla_oem,
+                    )
+                    # Re-apply the cmd_property routing now that we know
+                    # the model — mirrors the __init__ branch.
+                    if ayla_oem.startswith("DL-pd-"):
+                        self._cmd_property = "data_request"
+                    elif ayla_oem.startswith("DL-striker-"):
+                        self._cmd_property = "app_data_request"
 
         return self._devices
 
