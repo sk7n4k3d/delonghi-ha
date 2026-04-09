@@ -55,3 +55,23 @@ def test_all_languages_have_same_button_keys():
         data = json.loads(path.read_text(encoding="utf-8"))
         keys = set(data.get("entity", {}).get("button", {}).keys())
         assert keys == en_keys, f"{path.name} button keys differ from en.json: {en_keys - keys | keys - en_keys}"
+
+
+def test_every_beverage_has_english_translation():
+    """Every key in BEVERAGES must have a matching `brew_{key}` entry in en.json.
+
+    Regression guard for #11: when a beverage is in BEVERAGES but has no
+    translation, the button entity silently shows the raw translation key
+    ("Brew Espresso Lungo") instead of the localised name. This test fails
+    fast when someone adds a beverage to const.py without updating en.json.
+    """
+    from custom_components.delonghi_coffee.const import BEVERAGES
+
+    en = json.loads((TRANSLATIONS_DIR / "en.json").read_text(encoding="utf-8"))
+    button_keys = set(en["entity"]["button"].keys())
+
+    missing = sorted(bev for bev in BEVERAGES if f"brew_{bev}" not in button_keys)
+    assert not missing, (
+        f"BEVERAGES keys without matching en.json translation: {missing}. "
+        "Add `brew_<key>` entries to every translations/*.json file."
+    )

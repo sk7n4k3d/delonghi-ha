@@ -380,6 +380,69 @@
       "brew_mug_to_go": {
         "name": "Becher To Go"
       },
+      "brew_cafe_au_lait": {
+        "name": "Café au Lait"
+      },
+      "brew_cafe_con_leche": {
+        "name": "Café con Leche"
+      },
+      "brew_espresso_lungo": {
+        "name": "Espresso Lungo"
+      },
+      "brew_galao": {
+        "name": "Galão"
+      },
+      "brew_mug_americano": {
+        "name": "Becher Americano"
+      },
+      "brew_mug_caffelatte": {
+        "name": "Becher Caffè Latte"
+      },
+      "brew_mug_capp_mix": {
+        "name": "Becher Cappuccino Mix"
+      },
+      "brew_mug_cappuccino": {
+        "name": "Becher Cappuccino"
+      },
+      "brew_mug_coffee": {
+        "name": "Becher Kaffee"
+      },
+      "brew_mug_flat_white": {
+        "name": "Becher Flat White"
+      },
+      "brew_mug_hot_milk": {
+        "name": "Becher Heiße Milch"
+      },
+      "brew_mug_i_americano": {
+        "name": "Becher Eis-Americano"
+      },
+      "brew_mug_i_brew_over_ice": {
+        "name": "Becher Eiskaffee"
+      },
+      "brew_mug_i_caffelatte": {
+        "name": "Becher Eis-Caffè-Latte"
+      },
+      "brew_mug_i_capp_mix": {
+        "name": "Becher Eis-Cappuccino-Mix"
+      },
+      "brew_mug_i_cappuccino": {
+        "name": "Becher Eis-Cappuccino"
+      },
+      "brew_mug_i_cold_milk": {
+        "name": "Becher Kalte Milch"
+      },
+      "brew_mug_i_flat_white": {
+        "name": "Becher Eis-Flat-White"
+      },
+      "brew_mug_i_latte_macch": {
+        "name": "Becher Eis-Latte-Macchiato"
+      },
+      "brew_mug_latte_macch": {
+        "name": "Becher Latte Macchiato"
+      },
+      "brew_verlangerter": {
+        "name": "Verlängerter"
+      },
       "cancel_brew": {
         "name": "Abbrechen"
       },

@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
-from .const import BEVERAGES, DOMAIN
+from .const import BEVERAGES, DOMAIN, resolve_beverage_meta
 from .coordinator import DeLonghiCoordinator
 from .sensor import _device_info
 
@@ -35,28 +35,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     def _add_buttons(beverage_keys: list[str]) -> None:
         """Create button entities for newly discovered beverages."""
         new_entities: list[ButtonEntity] = []
+        unknown_keys: list[str] = []
         for bev_key in beverage_keys:
             if bev_key in known_keys:
                 continue
             known_keys.add(bev_key)
-            # Check for custom recipe name first
-            custom_name = coordinator.custom_recipe_names.get(bev_key)
-            if custom_name:
-                meta = {"name": custom_name, "icon": "mdi:coffee-to-go"}
-            else:
-                meta = BEVERAGES.get(
-                    bev_key,
-                    {
-                        "name": bev_key.replace("_", " ").title(),
-                        "icon": "mdi:coffee",
-                    },
-                )
+            meta, is_known = resolve_beverage_meta(bev_key, coordinator.custom_recipe_names)
+            if not is_known:
+                unknown_keys.append(bev_key)
             new_entities.append(
                 DeLonghiBrewButton(api, coordinator, dsn, model, device_name, sw_version, bev_key, meta)
             )
         if new_entities:
             _LOGGER.info("Adding %d brew buttons", len(new_entities))
             async_add_entities(new_entities)
+        if unknown_keys:
+            _LOGGER.warning(
+                "Unknown beverage keys — buttons created with default name/icon: %s. "
+                "Please open an issue so these can be added to BEVERAGES.",
+                unknown_keys,
+            )
 
     # Add static control buttons
     async_add_entities(
