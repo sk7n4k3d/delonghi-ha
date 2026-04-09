@@ -199,6 +199,23 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
+    def available(self) -> bool:
+        """Return True only when the underlying counter source exists.
+
+        When the machine firmware does not expose this counter at all
+        (e.g. ``descale_progress`` on PrimaDonna Soul), the key is simply
+        missing from ``coordinator.data['counters']``. Reporting the
+        sensor as unavailable is the correct HA semantic — users see
+        ``unavailable`` instead of ``unknown`` and alerting rules skip
+        it. A counter that exists but equals ``0`` remains available.
+        See issue #3 (jostrasser).
+        """
+        if not super().available:
+            return False
+        counters: dict[str, Any] = self.coordinator.data.get("counters", {})
+        return self._counter_key in counters
+
+    @property
     def native_value(self) -> float | int | None:
         """Return current counter value."""
         counters: dict[str, Any] = self.coordinator.data.get("counters", {})
