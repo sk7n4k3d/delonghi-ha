@@ -125,20 +125,25 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             _LOGGER.info("Powering on %s", self._dsn)
             try:
                 # Phase 1: Wake ping + delay (like app: ping → 15s wait)
+                # Fallback to request_monitor if ping unsupported (PrimaDonna Soul et al.)
                 try:
-                    await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
-                    _LOGGER.debug("Wake ping sent, waiting %.0fs", _WAKE_DELAY)
+                    ping_ok = await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                    if not ping_ok:
+                        await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
+                    _LOGGER.debug("Wake sent, waiting %.0fs", _WAKE_DELAY)
                     await asyncio.sleep(_WAKE_DELAY)
                 except (DeLonghiApiError, DeLonghiAuthError):
-                    _LOGGER.debug("Wake ping failed, sending power ON anyway")
+                    _LOGGER.debug("Wake failed, sending power ON anyway")
 
                 # Phase 2: Power ON command
                 await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
                 _LOGGER.info("Power ON command sent")
 
-                # Phase 3: Post-command ping (app does this immediately after)
+                # Phase 3: Post-command refresh (force the machine to push its new state)
                 try:
-                    await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                    ping_ok = await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                    if not ping_ok:
+                        await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
                 except (DeLonghiApiError, DeLonghiAuthError):
                     pass
 
@@ -160,10 +165,14 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         if state in ("Off", "Unknown", "Going to sleep"):
             _LOGGER.info("Power ON not confirmed after %.0fs, retrying", _RETRY_DELAY)
             try:
-                await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                ping_ok = await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                if not ping_ok:
+                    await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
                 await asyncio.sleep(_WAKE_DELAY)
                 await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
-                await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                ping_ok = await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                if not ping_ok:
+                    await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
                 _LOGGER.info("Power ON retry sent")
             except (DeLonghiApiError, DeLonghiAuthError) as err:
                 _LOGGER.warning("Power ON retry failed: %s", err)
@@ -180,6 +189,17 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             _LOGGER.info("Powering off %s", self._dsn)
             try:
                 await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
+
+                # Post-command refresh — force the machine to push its new state
+                # so the HA monitor reflects Off immediately instead of relying on
+                # the next full refresh cycle.
+                try:
+                    ping_ok = await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
+                    if not ping_ok:
+                        await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
+                except (DeLonghiApiError, DeLonghiAuthError):
+                    pass
+
                 self._assumed_on = False
                 self._last_commanded_on = False
                 self._monitor_stale_count = 0

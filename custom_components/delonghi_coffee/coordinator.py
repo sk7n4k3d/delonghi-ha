@@ -76,24 +76,37 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.
             # Without this, the MQTT session dies after ~5 min and commands
             # (including power on) never reach the machine.
+            #
+            # On models where app_device_connected is unsupported (PrimaDonna Soul
+            # et al.), ping_connected returns False immediately. We fall back to
+            # request_monitor (ECAM 0x84) which is idempotent and works on all
+            # models — it asks the machine to push its monitor data, which also
+            # keeps the cloud session alive and refreshes sensor values.
             need_keepalive = (now - self._last_keepalive) >= MQTT_KEEPALIVE_INTERVAL
             if need_keepalive and not need_full:  # full refresh already pings
                 try:
-                    await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
+                    ping_ok = await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
+                    if not ping_ok:
+                        _LOGGER.debug("ping_connected unsupported, falling back to request_monitor")
+                        await self.hass.async_add_executor_job(self.api.request_monitor, self.dsn)
                     self._last_keepalive = now
-                    _LOGGER.debug("MQTT keepalive ping sent")
+                    _LOGGER.debug("MQTT keepalive sent")
                 except (DeLonghiApiError, DeLonghiAuthError):
-                    _LOGGER.debug("MQTT keepalive ping failed, will retry next cycle")
+                    _LOGGER.debug("MQTT keepalive failed, will retry next cycle")
 
             # Full refresh: ping + properties fetch for everything
             if need_full:
                 _LOGGER.debug("Full refresh (single properties fetch)")
 
-                # Ping to force ALL properties to update (not just monitor)
+                # Force the machine to push ALL properties (not just monitor).
+                # ping_connected on supported models, request_monitor as universal fallback.
                 try:
-                    await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
+                    ping_ok = await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
+                    if not ping_ok:
+                        _LOGGER.debug("ping_connected unsupported, falling back to request_monitor")
+                        await self.hass.async_add_executor_job(self.api.request_monitor, self.dsn)
                 except (DeLonghiApiError, DeLonghiAuthError):
-                    _LOGGER.debug("Ping failed during refresh, continuing with cached data")
+                    _LOGGER.debug("Refresh wake failed, continuing with cached data")
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
                 all_props: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_properties, self.dsn)
