@@ -63,6 +63,35 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
     @property
+    def available(self) -> bool:
+        """Return True only when this alarm bit is known to be supported.
+
+        The machine reports alarms as a single bitmask. There is no way
+        to tell "bit 5 is off" from "bit 5 does not exist on this
+        firmware", so the heuristic is:
+
+        * if ``alarm_word`` is missing entirely, every alarm is
+          unavailable (HA shows ``unavailable`` instead of ``off``),
+        * inverted bits (tank/grid present) stay unavailable until we
+          have seen them set at least once on this machine — that proves
+          the firmware actually drives the bit.
+
+        See issue #3 — jostrasser.
+        """
+        if not super().available:
+            return False
+        alarm_word: int | None = self.coordinator.data.get("alarm_word")
+        if alarm_word is None:
+            return False
+        if self._inverted and self._alarm_bit not in self.coordinator.seen_alarm_bits:
+            # Opportunistically learn support from the current word.
+            if alarm_word & (1 << self._alarm_bit):
+                self.coordinator.seen_alarm_bits.add(self._alarm_bit)
+                return True
+            return False
+        return True
+
+    @property
     def is_on(self) -> bool | None:
         """Return True if alarm is active.
 
@@ -70,24 +99,14 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
         positive state when SET. The alarm is active when the bit is NOT
         set (meaning the component is missing).
 
-        To avoid false positives on machines that don't report these bits,
-        inverted alarms only activate after the coordinator has confirmed
-        the machine supports them (bit seen set at least once).
+        Availability is enforced by :meth:`available`, so this only runs
+        when the bit is known to be supported.
         """
         alarm_word: int | None = self.coordinator.data.get("alarm_word")
         if alarm_word is None:
             return None
 
         bit_set = bool(alarm_word & (1 << self._alarm_bit))
-
         if not self._inverted:
             return bit_set
-
-        # Inverted alarm: only report problem if the machine actually
-        # supports this bit (we've seen it set at least once)
-        if self._alarm_bit not in self.coordinator.seen_alarm_bits:
-            if bit_set:
-                self.coordinator.seen_alarm_bits.add(self._alarm_bit)
-            else:
-                return False  # Never seen → assume unsupported, no problem
         return not bit_set
