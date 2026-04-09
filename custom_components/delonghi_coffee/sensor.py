@@ -285,6 +285,17 @@ class DeLonghiBeanSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
             bid = bean["id"]
             attrs[f"bean_{bid}_name"] = bean.get("name", "")
             attrs[f"bean_{bid}_english"] = bean.get("english_name", "")
+            # Raw Bean Adapt parameter tail — exposed verbatim so users can
+            # share captures for issue #7 without an invented decoder.
+            raw_hex = bean.get("raw_params_hex", "")
+            if raw_hex:
+                attrs[f"bean_{bid}_raw_params_hex"] = raw_hex
+
+        # Global Bean Adapt parameter block (d260_beansystem_par).
+        bs_par = self.coordinator.data.get("bean_system_par", {})
+        if isinstance(bs_par, dict) and bs_par.get("raw_hex"):
+            attrs["bean_system_par_raw_hex"] = bs_par["raw_hex"]
+            attrs["bean_system_par_bytes"] = bs_par.get("raw_bytes", 0)
 
         # ContentStack bean adapt calibration data
         ba = self.coordinator.data.get("bean_adapt", {})

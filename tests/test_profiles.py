@@ -113,6 +113,59 @@ class TestBeanSystemParsing:
         assert len(result) == 1
         assert result[0]["name"] == "Bean 0"
 
+    def test_raw_params_hex_is_empty_when_no_tail_bytes(self):
+        """Without trailing param bytes the raw hex field stays empty."""
+        name = "Arabica".encode("utf-16-be")
+        raw = bytes([0xD0, 0x20, 0x00, 0xF0, 0x00]) + name + bytes([0x00, 0x00])
+        props = {"d250_beansystem_0": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_bean_systems(props)
+        assert result[0]["raw_params_hex"] == ""
+
+    def test_raw_params_hex_captures_bean_adapt_tail(self):
+        """Bean Adapt tail bytes after the 40-byte name block are exposed as hex.
+
+        Issue #7: MattG-K's write capture showed a 5-byte tail after the
+        UTF-16 name (temperature, intensity, grinder, ...). We don't
+        decode those fields yet but we expose them verbatim so users can
+        share samples without inventing a decoder.
+        """
+        # Build 40 bytes of name (local + english) + 5 tail bytes matching
+        # MattG-K's Packet 1: 0A 02 04 00 01.
+        local = ("Grains 1" + "\x00" * 12).encode("utf-16-be")[:40]
+        local = local.ljust(40, b"\x00")
+        tail = bytes([0x0A, 0x02, 0x04, 0x00, 0x01])
+        data = local + tail
+        raw = bytes([0xD0, 0x20, 0x00, 0xF0, 0x00]) + data + bytes([0x00, 0x00])
+        props = {"d250_beansystem_0": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_bean_systems(props)
+        assert result[0]["raw_params_hex"] == "0a02040001"
+        assert result[0]["raw_bytes"] == len(raw)
+
+
+class TestBeanSystemParParsing:
+    """d260_beansystem_par raw block parsing (issue #7 diagnostics)."""
+
+    def setup_method(self):
+        self.api = DeLonghiApi.__new__(DeLonghiApi)
+
+    def test_missing_property_returns_empty(self):
+        assert self.api.parse_bean_system_par({}) == {}
+
+    def test_null_value_returns_empty(self):
+        assert self.api.parse_bean_system_par({"d260_beansystem_par": {"value": None}}) == {}
+
+    def test_valid_payload_exposes_raw_hex(self):
+        raw = bytes(range(16))
+        props = {"d260_beansystem_par": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_bean_system_par(props)
+        assert result["raw_hex"] == raw.hex()
+        assert result["raw_bytes"] == 16
+
+    def test_invalid_base64_reports_error(self):
+        props = {"d260_beansystem_par": {"value": "!!!not-base64!!!"}}
+        result = self.api.parse_bean_system_par(props)
+        assert result.get("error") == "decode_failed"
+
 
 class TestDecodeUTF16Extended:
     """Extended UTF-16 decoding tests for real-world data."""
