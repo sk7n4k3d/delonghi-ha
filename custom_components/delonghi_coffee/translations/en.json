@@ -101,6 +101,45 @@
       "brew_over_ice": {
         "name": "Brew Over Ice"
       },
+      "cortado": {
+        "name": "Cortados"
+      },
+      "long_black": {
+        "name": "Long Blacks"
+      },
+      "travel_mug": {
+        "name": "Travel Mugs"
+      },
+      "preground_brews": {
+        "name": "Pre-ground Brews"
+      },
+      "beverages_modified": {
+        "name": "Modified Beverages"
+      },
+      "beverages_aborted": {
+        "name": "Aborted Brews"
+      },
+      "beverages_doubled": {
+        "name": "Double Shots"
+      },
+      "bean_system_1_uses": {
+        "name": "Bean Profile 1 Uses"
+      },
+      "bean_system_2_uses": {
+        "name": "Bean Profile 2 Uses"
+      },
+      "bean_system_3_uses": {
+        "name": "Bean Profile 3 Uses"
+      },
+      "bean_system_4_uses": {
+        "name": "Bean Profile 4 Uses"
+      },
+      "bean_system_5_uses": {
+        "name": "Bean Profile 5 Uses"
+      },
+      "bean_system_6_uses": {
+        "name": "Bean Profile 6 Uses"
+      },
       "grounds_count": {
         "name": "Grounds Ejected"
       },

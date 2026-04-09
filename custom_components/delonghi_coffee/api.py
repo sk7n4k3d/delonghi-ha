@@ -803,7 +803,24 @@ class DeLonghiApi:
         return self.parse_counters(self.get_properties(dsn))
 
     def parse_counters(self, props: dict[str, Any]) -> dict[str, Any]:
-        """Get beverage counters, maintenance stats, and JSON sub-counters."""
+        """Get beverage counters, maintenance stats, and JSON sub-counters.
+
+        Models differ in two ways:
+
+        1. **Total beverage property**: Eletta Explore exposes `d701_tot_bev_b`
+           (the total). PrimaDonna Soul splits it into `d700_tot_bev_b` (black),
+           `d701_tot_bev_bw` (black+white) and `d703_tot_bev_w` (water).
+
+        2. **d702 / d733-d740 shape**: on Eletta these are *JSON aggregates*
+           with sub-keys like `tot_custom_b_bw`. On PrimaDonna Soul they are
+           *individual integer counters* with completely different semantics
+           (d733=taste_espressi, d734=taste_coffee, etc.) and the custom
+           beverage total lives in its own property `d741_tot_custom_b_bw`.
+
+           We detect the shape at runtime: strings that start with `{` are
+           parsed as JSON, everything else is treated as a direct integer
+           named after the raw property key.
+        """
 
         # Dump raw counter properties for debugging model differences
         for name in sorted(props):
@@ -814,16 +831,15 @@ class DeLonghiApi:
 
         counters: dict[str, Any] = {}
 
-        # Simple integer counters
-        # Some properties differ between models:
-        #   Eletta Explore: d701_tot_bev_b (total beverages)
-        #   PrimaDonna Soul: d700_tot_bev_b (black), d701_tot_bev_bw (black+white), d703_tot_bev_w (water)
+        # --- Simple integer counters ---
         counter_map: dict[str, str] = {
+            # Totals — Eletta has d701_tot_bev_b; PrimaDonna has d700 / d701_bw / d703
             "d700_tot_bev_b": "total_black_beverages",
             "d701_tot_bev_b": "total_beverages",
             "d701_tot_bev_bw": "total_bw_beverages",
             "d703_tot_bev_w": "total_water_beverages",
             "d704_tot_bev_espressi": "total_espressos",
+            # Individual drinks
             "d705_tot_id1_espr": "espresso",
             "d706_tot_id2_coffee": "coffee",
             "d707_tot_id3_long": "long_coffee",
@@ -840,7 +856,17 @@ class DeLonghiApi:
             "d718_id16_hotwater": "hot_water",
             "d719_id22_tea": "tea",
             "d720_tot_id23_coffee_pot": "coffee_pot",
+            # PrimaDonna Soul extras (d721-d748 observed in #3 jostrasser log)
+            "d727_id24_cortado": "cortado",
+            "d728_id25_long_black": "long_black",
+            "d729_id26_travel_mug": "travel_mug",
             "d730_tot_id27_brew_over_ice": "brew_over_ice",
+            "d731_pregr_coff_cnt": "preground_brews",
+            "d741_tot_custom_b_bw": "usage_tot_custom_b_bw",
+            "d742_tot_bev_no_original": "beverages_modified",
+            "d747_bev_abort_cnt": "beverages_aborted",
+            "d748_bev_2x_cnt": "beverages_doubled",
+            # Maintenance
             "d551_cnt_coffee_fondi": "grounds_count",
             "d552_cnt_calc_tot": "descale_count",
             "d553_water_tot_qty": "total_water_ml",
@@ -862,7 +888,11 @@ class DeLonghiApi:
                     except (ValueError, TypeError):
                         counters[friendly] = val
 
-        # JSON counters — parse sub-fields
+        # --- JSON aggregates (Eletta only) ---
+        # On PrimaDonna Soul these same d7xx properties are individual integer
+        # counters with different names (e.g. d733_taste_espressi vs
+        # d733_tot_bev_counters). We check the shape at runtime — only parse as
+        # JSON if the value actually is one.
         json_props: dict[str, str] = {
             "d702_tot_bev_other": "other",
             "d733_tot_bev_counters": "mug",
@@ -888,7 +918,19 @@ class DeLonghiApi:
                     except json.JSONDecodeError:
                         pass
 
-        # Descale progress — calculate % from service parameters
+        # --- d702 fallback: direct integer on PrimaDonna ---
+        # The Eletta d702_tot_bev_other is JSON; PrimaDonna stores it as an
+        # integer ("other" category count). Expose as other_tot_bev_other so
+        # the existing "Coffee Other Beverages" sensor lights up.
+        if "other_tot_bev_other" not in counters and "d702_tot_bev_other" in props:
+            raw = props["d702_tot_bev_other"].get("value")
+            if raw is not None:
+                with contextlib.suppress(ValueError, TypeError):
+                    counters["other_tot_bev_other"] = int(raw)
+
+        # --- Descale progress (Eletta only — reads d580_service_parameters) ---
+        # PrimaDonna Soul has no d580. Users can watch `beverages_since_descale`
+        # (d558_bev_cnt_desc_on) as a proxy — it's already exposed.
         if "d580_service_parameters" in props:
             val = props["d580_service_parameters"].get("value")
             if val and isinstance(val, str) and val.startswith("{"):
@@ -903,16 +945,33 @@ class DeLonghiApi:
                 except (json.JSONDecodeError, ValueError, TypeError):
                     pass
 
-        # Computed total — sum all beverage categories
-        # Real user data (issue #3) proves d700 and d701_bw are SEPARATE:
-        #   jostrasser: d700=4827(black), d701_bw=34(with milk), d702=916(other), d703=3(water)
-        #   lodzen:     d700=52(black),   d701_bw=15(with milk), d702=0(other),   d703=8(water)
-        # Eletta: d701_tot_bev_b is THE total (no d700 property exists)
+        # --- Bean system usage counters (d721-d726 / id200-id205) ---
+        # PrimaDonna Soul tracks how often each bean profile has been used.
+        bean_map = {
+            "d721_id200_bs_1": 1,
+            "d722_id201_bs_2": 2,
+            "d723_id202_bs_3": 3,
+            "d724_id203_bs_4": 4,
+            "d725_id204_bs_5": 5,
+            "d726_id205_bs_6": 6,
+        }
+        for prop_name, bs_id in bean_map.items():
+            if prop_name in props:
+                val = props[prop_name].get("value")
+                if val is not None:
+                    with contextlib.suppress(ValueError, TypeError):
+                        counters[f"bean_system_{bs_id}_uses"] = int(val)
+
+        # --- Computed total — sum all beverage categories ---
+        # Real user data (issue #3) proves d700 and d701_bw are SEPARATE on PrimaDonna:
+        #   jostrasser: d700=4827(black), d701_bw=34(milk), d702=916(other), d703=3(water)
+        #   lodzen:     d700=52(black),   d701_bw=15(milk), d702=0(other),   d703=8(water)
+        # Eletta: d701_tot_bev_b is THE total (no d700 property exists).
         if "total_beverages" in counters:
-            # Eletta model: d701 is the total, just add water
+            # Eletta: d701 is the total; water is separate.
             total_parts = ["total_beverages", "total_water_beverages"]
         else:
-            # PrimaDonna model: d700(black) + d701(with milk) + d703(water) are separate
+            # PrimaDonna: d700(black) + d701_bw(with milk) + d703(water).
             total_parts = ["total_black_beverages", "total_bw_beverages", "total_water_beverages"]
         computed_total = 0
         has_parts = False
@@ -921,24 +980,17 @@ class DeLonghiApi:
             if isinstance(val, int):
                 computed_total += val
                 has_parts = True
-        # d702 "other" — may be JSON (sub-keys) or direct integer
+        # Include "other" category if the sensor has a numeric value.
         other = counters.get("other_tot_bev_other") or counters.get("other_other")
         if isinstance(other, int):
             computed_total += other
             has_parts = True
-        # d702 as direct integer (not JSON sub-key)
-        if "d702_tot_bev_other" in props:
-            raw_val = props["d702_tot_bev_other"].get("value")
-            if raw_val is not None:
-                try:
-                    other_direct = int(raw_val)
-                    if not isinstance(other, int):
-                        computed_total += other_direct
-                        has_parts = True
-                except (ValueError, TypeError):
-                    pass
         if has_parts:
             counters["computed_total"] = computed_total
+            # On PrimaDonna there's no d701_tot_bev_b, so "Total Beverages"
+            # would be permanently blank. Alias computed_total into it so the
+            # existing sensor shows a meaningful value everywhere.
+            counters.setdefault("total_beverages", computed_total)
 
         return counters
 

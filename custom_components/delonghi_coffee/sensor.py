@@ -16,7 +16,7 @@ from .coordinator import DeLonghiCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-COUNTER_SENSORS: dict[str, dict[str, str]] = {
+COUNTER_SENSORS: dict[str, dict[str, Any]] = {
     # Core counters
     "total_beverages": {"name": "Total Beverages", "icon": "mdi:coffee", "unit": "cups"},
     "total_espressos": {"name": "Total Espressos", "icon": "mdi:coffee", "unit": "cups"},
@@ -37,6 +37,14 @@ COUNTER_SENSORS: dict[str, dict[str, str]] = {
     "tea": {"name": "Teas", "icon": "mdi:tea", "unit": "cups"},
     "coffee_pot": {"name": "Coffee Pots", "icon": "mdi:coffee-maker", "unit": "cups"},
     "brew_over_ice": {"name": "Brew Over Ice", "icon": "mdi:snowflake", "unit": "cups"},
+    # PrimaDonna Soul extras (d727-d731, d742, d747-d748 from issue #3 logs)
+    "cortado": {"name": "Cortados", "icon": "mdi:coffee", "unit": "cups"},
+    "long_black": {"name": "Long Blacks", "icon": "mdi:coffee-outline", "unit": "cups"},
+    "travel_mug": {"name": "Travel Mugs", "icon": "mdi:coffee-to-go-outline", "unit": "cups"},
+    "preground_brews": {"name": "Pre-ground Brews", "icon": "mdi:grain", "unit": "cups"},
+    "beverages_modified": {"name": "Modified Beverages", "icon": "mdi:cog-outline", "unit": "cups"},
+    "beverages_aborted": {"name": "Aborted Brews", "icon": "mdi:cancel", "unit": "times"},
+    "beverages_doubled": {"name": "Double Shots", "icon": "mdi:multiplication", "unit": "times"},
     # Maintenance
     "grounds_count": {"name": "Grounds Ejected", "icon": "mdi:delete-variant", "unit": "pucks"},
     "grounds_percentage": {"name": "Grounds Container", "icon": "mdi:delete-variant", "unit": "%"},
@@ -46,12 +54,19 @@ COUNTER_SENSORS: dict[str, dict[str, str]] = {
     "filter_percentage": {"name": "Water Filter Usage", "icon": "mdi:filter", "unit": "%"},
     "filter_replacements": {"name": "Filter Replacements", "icon": "mdi:filter-check", "unit": "times"},
     "water_through_filter_ml": {"name": "Water Through Filter", "icon": "mdi:water", "unit": "L", "scale": 0.001},
-    # PrimaDonna Soul specific
+    # PrimaDonna Soul specific totals
     "total_black_beverages": {"name": "Total Black Beverages", "icon": "mdi:coffee", "unit": "cups"},
     "total_bw_beverages": {"name": "Total Black+White Beverages", "icon": "mdi:coffee", "unit": "cups"},
     "total_water_beverages": {"name": "Total Water Beverages", "icon": "mdi:water", "unit": "cups"},
     "milk_clean_count": {"name": "Milk Cleans", "icon": "mdi:spray-bottle", "unit": "times"},
     "beverages_since_descale": {"name": "Beverages Since Descale", "icon": "mdi:counter", "unit": "cups"},
+    # Bean system usage (PrimaDonna Soul, d721-d726)
+    "bean_system_1_uses": {"name": "Bean Profile 1 Uses", "icon": "mdi:seed-outline", "unit": "cups"},
+    "bean_system_2_uses": {"name": "Bean Profile 2 Uses", "icon": "mdi:seed-outline", "unit": "cups"},
+    "bean_system_3_uses": {"name": "Bean Profile 3 Uses", "icon": "mdi:seed-outline", "unit": "cups"},
+    "bean_system_4_uses": {"name": "Bean Profile 4 Uses", "icon": "mdi:seed-outline", "unit": "cups"},
+    "bean_system_5_uses": {"name": "Bean Profile 5 Uses", "icon": "mdi:seed-outline", "unit": "cups"},
+    "bean_system_6_uses": {"name": "Bean Profile 6 Uses", "icon": "mdi:seed-outline", "unit": "cups"},
     # Computed
     "computed_total": {"name": "Total All Beverages", "icon": "mdi:coffee", "unit": "cups"},
     # Custom / other
