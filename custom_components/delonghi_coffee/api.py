@@ -16,10 +16,14 @@ import requests
 
 from .const import (
     APP_SIGNATURE,
+    BEAN_NAME_MAX_BYTES,
     GIGYA_API_KEY,
     GIGYA_URL,
     MODEL_NAMES,
     OEM_TO_APP_MODEL,
+    OPCODE_READ_BEAN_SYSTEM,
+    OPCODE_SELECT_BEAN_SYSTEM,
+    OPCODE_WRITE_BEAN_SYSTEM,
     REGIONS,
     REQUEST_TIMEOUT,
     RETRY_COUNT,
@@ -1228,6 +1232,139 @@ class DeLonghiApi:
         sync_cmd = sync_body + self._crc16(sync_body)
         _LOGGER.info("Requesting recipes sync for profile %d on %s", profile, dsn)
         return self.send_command(dsn, sync_cmd)
+
+    # ── Bean Adapt (issue #7) ─────────────────────────────────────────────
+    # Opcodes shared by @MattG-K: 0xB9 select, 0xBA read, 0xBB write. Full
+    # framing mirrors every other ECAM command already in use:
+    #   [0x0D][len][opcode][payload][CRC-16/SPI-FUJITSU]
+    # where ``len = total_size - 1``.
+
+    @staticmethod
+    def _build_bean_select_body(slot: int) -> bytes:
+        """Build Select Bean System (0xB9) body — single slot byte payload."""
+        if not 1 <= slot <= 7:
+            raise DeLonghiApiError(f"Bean slot must be 1-7, got {slot}")
+        # total = 1(header) + 1(len) + 1(opcode) + 1(slot) + 2(crc) = 6
+        return bytes([0x0D, 0x05, OPCODE_SELECT_BEAN_SYSTEM, slot])
+
+    @staticmethod
+    def _build_bean_read_body(slot: int) -> bytes:
+        """Build Read Bean System (0xBA) body — single slot byte payload."""
+        if not 1 <= slot <= 7:
+            raise DeLonghiApiError(f"Bean slot must be 1-7, got {slot}")
+        # total = 6, len = 5 (same layout as select)
+        return bytes([0x0D, 0x05, OPCODE_READ_BEAN_SYSTEM, slot])
+
+    @staticmethod
+    def _encode_bean_name(name: str) -> bytes:
+        """Encode a bean profile name as 40 bytes UTF-16-BE, null padded.
+
+        The Coffee Link app accepts up to 20 UTF-16 code units before
+        running out of room in the fixed 40-byte name field. We raise on
+        anything longer so the caller gets a clean error instead of a
+        silently-truncated profile.
+        """
+        encoded = name.encode("utf-16-be")
+        if len(encoded) > BEAN_NAME_MAX_BYTES:
+            raise DeLonghiApiError(
+                f"Bean name too long: {len(encoded)} bytes (max {BEAN_NAME_MAX_BYTES} UTF-16-BE)"
+            )
+        return encoded.ljust(BEAN_NAME_MAX_BYTES, b"\x00")
+
+    @classmethod
+    def _build_bean_write_body(
+        cls,
+        slot: int,
+        name: str,
+        temperature: int,
+        intensity: int,
+        grinder: int,
+        flag1: int = 0,
+        flag2: int = 1,
+    ) -> bytes:
+        """Build Write Bean System (0xBB) body.
+
+        Payload layout (46 bytes, matches MattG-K's capture in issue #7):
+
+            [slot: 1B][name: 40B UTF-16-BE null padded][tail: 5B]
+
+        Tail bytes ``[temperature, intensity, grinder, flag1, flag2]`` use
+        the raw magic values the Coffee Link app sends on the wire — the
+        semantic mapping (e.g. high=0x0A, strong=0x02, grinder level → 0x04
+        for level 5) may differ per model and is what the HA user has to
+        tell us on issue #7 for the next revision.
+        """
+        if not 1 <= slot <= 7:
+            raise DeLonghiApiError(f"Bean slot must be 1-7, got {slot}")
+        if not 0 <= temperature <= 0xFF:
+            raise DeLonghiApiError(f"temperature must be 0-255, got {temperature}")
+        if not 0 <= intensity <= 0xFF:
+            raise DeLonghiApiError(f"intensity must be 0-255, got {intensity}")
+        if not 0 <= grinder <= 0xFF:
+            raise DeLonghiApiError(f"grinder must be 0-255, got {grinder}")
+        if flag1 not in (0, 1):
+            raise DeLonghiApiError(f"flag1 must be 0 or 1, got {flag1}")
+        if flag2 not in (0, 1):
+            raise DeLonghiApiError(f"flag2 must be 0 or 1, got {flag2}")
+
+        name_bytes = cls._encode_bean_name(name)
+        payload = (
+            bytes([slot])
+            + name_bytes
+            + bytes([temperature, intensity, grinder, flag1, flag2])
+        )
+        # total = 1(0x0D) + 1(len) + 1(opcode) + 46(payload) + 2(crc) = 51
+        return bytes([0x0D, len(payload) + 4, OPCODE_WRITE_BEAN_SYSTEM]) + payload
+
+    @_retry
+    def select_bean_system(self, dsn: str, slot: int) -> bool:
+        """Activate a bean profile on the machine (ECAM 0xB9)."""
+        body = self._build_bean_select_body(slot)
+        cmd = body + self._crc16(body)
+        _LOGGER.info("Selecting bean system slot %d on %s", slot, dsn)
+        return self.send_command(dsn, cmd)
+
+    @_retry
+    def read_bean_system(self, dsn: str, slot: int) -> bool:
+        """Ask the machine to publish a bean profile (ECAM 0xBA).
+
+        The machine answers through the normal property push channel
+        (``d250-d256_beansystem_N``), so the caller typically follows up
+        with ``get_bean_systems`` on the next refresh cycle.
+        """
+        body = self._build_bean_read_body(slot)
+        cmd = body + self._crc16(body)
+        _LOGGER.info("Reading bean system slot %d on %s", slot, dsn)
+        return self.send_command(dsn, cmd)
+
+    @_retry
+    def write_bean_system(
+        self,
+        dsn: str,
+        slot: int,
+        name: str,
+        temperature: int,
+        intensity: int,
+        grinder: int,
+        flag1: int = 0,
+        flag2: int = 1,
+    ) -> bool:
+        """Write a Bean Adapt profile (ECAM 0xBB)."""
+        body = self._build_bean_write_body(
+            slot, name, temperature, intensity, grinder, flag1, flag2
+        )
+        cmd = body + self._crc16(body)
+        _LOGGER.info(
+            "Writing bean system slot %d name=%r temperature=%d intensity=%d grinder=%d on %s: %s",
+            slot,
+            name,
+            temperature,
+            intensity,
+            grinder,
+            dsn,
+            cmd.hex(),
+        )
+        return self.send_command(dsn, cmd)
 
     def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str) -> None:
         """Check machine state before brewing. Raises DeLonghiApiError on problems."""

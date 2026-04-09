@@ -139,6 +139,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, "sync_recipes", handle_sync_recipes)
 
+    async def handle_select_bean_profile(call) -> None:  # noqa: ANN001
+        """Handle the select_bean_profile service call (ECAM 0xB9)."""
+        from homeassistant.exceptions import HomeAssistantError as HAError
+
+        slot = int(call.data["slot"])
+        try:
+            await hass.async_add_executor_job(api.select_bean_system, dsn, slot)
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            raise HAError(str(err)) from err
+
+    hass.services.async_register(DOMAIN, "select_bean_profile", handle_select_bean_profile)
+
+    async def handle_write_bean_profile(call) -> None:  # noqa: ANN001
+        """Handle the write_bean_profile service call (ECAM 0xBB)."""
+        from homeassistant.exceptions import HomeAssistantError as HAError
+
+        slot = int(call.data["slot"])
+        name = str(call.data["name"])
+        temperature = int(call.data.get("temperature", 0))
+        intensity = int(call.data.get("intensity", 0))
+        grinder = int(call.data.get("grinder", 0))
+        flag1 = int(call.data.get("flag1", 0))
+        flag2 = int(call.data.get("flag2", 1))
+        try:
+            await hass.async_add_executor_job(
+                api.write_bean_system,
+                dsn,
+                slot,
+                name,
+                temperature,
+                intensity,
+                grinder,
+                flag1,
+                flag2,
+            )
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            raise HAError(str(err)) from err
+
+    hass.services.async_register(DOMAIN, "write_bean_profile", handle_write_bean_profile)
+
     return True
 
 
@@ -151,4 +191,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, "brew_custom")
             hass.services.async_remove(DOMAIN, "cancel_brew")
             hass.services.async_remove(DOMAIN, "sync_recipes")
+            hass.services.async_remove(DOMAIN, "select_bean_profile")
+            hass.services.async_remove(DOMAIN, "write_bean_profile")
     return unload_ok

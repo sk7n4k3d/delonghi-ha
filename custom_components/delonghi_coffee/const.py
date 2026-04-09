@@ -200,6 +200,18 @@ POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")
 # CRC-16/SPI-FUJITSU checksum. Credit: MattG-K (framagit.org/mattgk/dlghiot)
 POWER_OFF_CMD: Final = bytes.fromhex("0d07840f01010041")
 
+# Bean Adapt / Bean System opcodes (ECAM command byte at position 2)
+# Credit: MattG-K shared these request IDs in issue #7.
+#   185 = 0xB9 = Select Bean System  (payload: slot_id)
+#   186 = 0xBA = Read Bean System    (payload: slot_id)
+#   187 = 0xBB = Write Bean System   (payload: slot + 40B UTF-16-BE name + 5B tail)
+OPCODE_SELECT_BEAN_SYSTEM: Final = 0xB9
+OPCODE_READ_BEAN_SYSTEM: Final = 0xBA
+OPCODE_WRITE_BEAN_SYSTEM: Final = 0xBB
+
+# Bean name field: UTF-16-BE, null padded to 40 bytes = max 20 code units
+BEAN_NAME_MAX_BYTES: Final = 40
+
 # Monitor V2 alarm bit definitions (32-bit word from bytes[7], [8], [12], [13])
 ALARMS: Final[dict[int, dict[str, Any]]] = {
     0: {"name": "Water Tank Empty", "icon": "mdi:water-off"},

@@ -102,3 +102,96 @@ sync_recipes:
           min: 1
           max: 4
           step: 1
+
+select_bean_profile:
+  name: Select Bean Profile
+  description: >
+    Activate one of the 7 Bean Adapt profiles on the machine (ECAM 0xB9).
+    Issue #7 — opcode shared by @MattG-K.
+  fields:
+    slot:
+      name: Slot
+      description: "Bean profile slot (1-7)."
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 7
+          step: 1
+
+write_bean_profile:
+  name: Write Bean Profile
+  description: >
+    Write (create/overwrite) a Bean Adapt profile — name plus raw
+    temperature / intensity / grinder tail bytes (ECAM 0xBB). The tail
+    byte mapping is the same one the Coffee Link app sends on the wire.
+    If the field order or ranges turn out to need tweaking per model,
+    please comment on issue #7 with the exact bytes you wrote.
+  fields:
+    slot:
+      name: Slot
+      description: "Bean profile slot (1-7)."
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 7
+          step: 1
+    name:
+      name: Name
+      description: "Profile name (max 20 UTF-16 characters)."
+      required: true
+      selector:
+        text:
+    temperature:
+      name: Temperature raw byte
+      description: >
+        Raw temperature byte on the wire. MattG-K capture for
+        'high' = 10 (0x0A). Confirmed magic values still being
+        catalogued in issue #7.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 255
+          step: 1
+    intensity:
+      name: Intensity raw byte
+      description: >
+        Raw intensity byte on the wire. MattG-K capture for
+        'strong' = 2 (0x02).
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 255
+          step: 1
+    grinder:
+      name: Grinder raw byte
+      description: >
+        Raw grinder byte on the wire. MattG-K capture for grinder
+        level 5 = 4 (0x04) — values appear to be 0-indexed.
+      default: 4
+      selector:
+        number:
+          min: 0
+          max: 255
+          step: 1
+    flag1:
+      name: Flag 1
+      description: "First trailing boolean flag — defaults to 0."
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 1
+    flag2:
+      name: Flag 2
+      description: "Second trailing boolean flag — defaults to 1 (matches Coffee Link capture)."
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 1
