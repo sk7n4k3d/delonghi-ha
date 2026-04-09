@@ -448,6 +448,9 @@
       },
       "sync_recipes": {
         "name": "Synkronisera recept"
+      },
+      "run_lan_diagnostic": {
+        "name": "Kör LAN-diagnostik"
       }
     },
     "switch": {

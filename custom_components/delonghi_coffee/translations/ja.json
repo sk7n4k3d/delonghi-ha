@@ -448,6 +448,9 @@
       },
       "sync_recipes": {
         "name": "レシピを同期"
+      },
+      "run_lan_diagnostic": {
+        "name": "LAN診断を実行"
       }
     },
     "switch": {

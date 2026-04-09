@@ -448,6 +448,9 @@
       },
       "sync_recipes": {
         "name": "Синхронізувати рецепти"
+      },
+      "run_lan_diagnostic": {
+        "name": "Запустити діагностику LAN"
       }
     },
     "switch": {

@@ -448,6 +448,9 @@
       },
       "sync_recipes": {
         "name": "同步配方"
+      },
+      "run_lan_diagnostic": {
+        "name": "运行 LAN 诊断"
       }
     },
     "switch": {

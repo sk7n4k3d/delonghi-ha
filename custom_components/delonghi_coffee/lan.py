@@ -67,7 +67,16 @@ except ImportError:  # pragma: no cover
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+# Dedicated logger namespace so users can enable only LAN debug output:
+#   logger:
+#     default: warning
+#     logs:
+#       custom_components.delonghi_coffee.lan: debug
+#
+# Both names point at the same logger; _LAN_LOGGER exists so the namespace
+# is obvious to readers.
 _LOGGER = logging.getLogger(__name__)
+_LAN_LOGGER = _LOGGER
 
 LAN_SERVER_DEFAULT_PORT: int = 10280
 LAN_HANDSHAKE_PATH: str = "/local_lan/key_exchange.json"
@@ -214,6 +223,19 @@ def derive_session(
     dev_crypto_key = _derive(r2 + r1 + t2 + t1 + b"\x31")
     dev_iv_full = _derive(r2 + r1 + t2 + t1 + b"\x32")
 
+    _LAN_LOGGER.debug(
+        "derive_session: r1=%s r2=%s t1=%d t2=%d "
+        "app_crypto_fp=%s dev_crypto_fp=%s app_iv_fp=%s dev_iv_fp=%s",
+        random_1,
+        random_2,
+        time_1,
+        time_2,
+        app_crypto_key[:4].hex(),
+        dev_crypto_key[:4].hex(),
+        app_iv_full[:4].hex(),
+        dev_iv_full[:4].hex(),
+    )
+
     return LanSession(
         app_sign_key=app_sign_key,
         app_crypto_key=app_crypto_key,
@@ -278,9 +300,16 @@ def encrypt_app_to_device(session: LanSession, payload: str) -> tuple[str, str]:
     Returns ``(enc_b64, sign_b64)`` — the caller puts these in the command
     poll response under the keys ``enc`` and ``sign``.
     """
+    prev_iv_fp = session.app_iv[-4:].hex()
     enc = _aes_encrypt(payload, session.app_crypto_key, session.app_iv)
     session.app_iv = _rotate_iv_from_ciphertext(enc)
     sign = sign_payload(session.app_sign_key, payload)
+    _LAN_LOGGER.debug(
+        "encrypt_app_to_device: payload_len=%d prev_iv_tail=%s next_iv_tail=%s",
+        len(payload),
+        prev_iv_fp,
+        session.app_iv[-4:].hex(),
+    )
     return enc, sign
 
 
@@ -291,8 +320,15 @@ def decrypt_device_to_app(session: LanSession, enc_b64: str) -> bytes:
     decoding — and for swallowing decode errors gracefully, because a
     500 response here makes the device back off and we lose telemetry.
     """
+    prev_iv_fp = session.dev_iv[-4:].hex()
     plaintext = _aes_decrypt(enc_b64, session.dev_crypto_key, session.dev_iv)
     session.dev_iv = _rotate_iv_from_ciphertext(enc_b64)
+    _LAN_LOGGER.debug(
+        "decrypt_device_to_app: plaintext_len=%d prev_iv_tail=%s next_iv_tail=%s",
+        len(plaintext),
+        prev_iv_fp,
+        session.dev_iv[-4:].hex(),
+    )
     return plaintext
 
 
@@ -400,7 +436,10 @@ class DeLonghiLanServer:
         Body shape: ``{"key_exchange": {"random_1": <str>, "time_1": <int>}}``.
         Response: HTTP 202 with ``{"random_2": <str>, "time_2": <int>}``.
         """
+        peer = request.remote or "unknown"
+        _LAN_LOGGER.debug("handshake: inbound from peer=%s", peer)
         if not self._config.lan_key:
+            _LAN_LOGGER.error("handshake: reject (peer=%s) — lan_key not configured", peer)
             return web.json_response({"error": "not_configured"}, status=400)
         try:
             body = await request.json()
@@ -408,8 +447,15 @@ class DeLonghiLanServer:
             random_1 = str(exchange["random_1"])
             time_1 = int(exchange["time_1"])
         except (KeyError, ValueError, TypeError) as err:
-            _LOGGER.warning("LAN handshake: malformed request: %s", err)
+            _LAN_LOGGER.warning("handshake: malformed request from %s: %s", peer, err)
             return web.json_response({"error": "bad_request"}, status=400)
+
+        _LAN_LOGGER.debug(
+            "handshake: received random_1=%s time_1=%d from %s",
+            random_1,
+            time_1,
+            peer,
+        )
 
         # cremalink uses 12 bytes of urandom → base64 without padding.
         random_2 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
@@ -419,15 +465,15 @@ class DeLonghiLanServer:
                 self._config.lan_key, random_1, random_2, time_1, time_2
             )
         except LanCryptoError as err:
-            _LOGGER.error("LAN handshake: derive failed: %s", err)
+            _LAN_LOGGER.error("handshake: derive failed for %s: %s", peer, err)
             return web.json_response({"error": "crypto"}, status=400)
 
         async with self._lock:
             self._seq = 0
 
-        _LOGGER.info(
-            "LAN handshake ok (dsn=%s, time_1=%d, time_2=%d)",
-            self._config.dsn, time_1, time_2,
+        _LAN_LOGGER.info(
+            "handshake ok (dsn=%s peer=%s time_1=%d time_2=%d)",
+            self._config.dsn, peer, time_1, time_2,
         )
         return web.json_response(
             {"random_2": random_2, "time_2": time_2}, status=202
@@ -566,3 +612,256 @@ async def register_with_device(
         raise
     except Exception as err:  # noqa: BLE001
         raise LanError(f"local_reg failed: {err}") from err
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Diagnostic — button-triggered in-process roundtrip. Exercises every
+# stage of the LAN pipeline without requiring real hardware so we can
+# confirm crypto, framing, IV chaining and the embedded server all agree.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+_DIAG_STAGES: tuple[str, ...] = (
+    "cloud_config",
+    "server_start",
+    "handshake",
+    "app_to_device",
+    "device_to_app",
+    "teardown",
+)
+
+
+@dataclass
+class LanDiagnosticResult:
+    """Outcome of a single :func:`run_lan_diagnostic` invocation."""
+
+    success: bool
+    stage: str
+    reason: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def summary(self) -> str:
+        if self.success:
+            return f"success at stage={self.stage}"
+        return f"failed at stage={self.stage}: {self.reason}"
+
+
+async def run_lan_diagnostic(
+    lan_key: str | None,
+    lan_ip: str | None,
+    dsn: str,
+    *,
+    bind_host: str = "127.0.0.1",
+) -> LanDiagnosticResult:
+    """Run an end-to-end LAN pipeline check and log every step.
+
+    This is the hook wired into the ``Run LAN Diagnostic`` button. It
+    never talks to real hardware — instead it spins up the embedded LAN
+    server on an ephemeral loopback port, simulates the device-side
+    handshake + datapoint push + command poll from an in-process
+    aiohttp client, and verifies the full crypto / framing stack.
+
+    The routine is intentionally defensive: **any** failure is caught
+    and returned as a :class:`LanDiagnosticResult` so the Home Assistant
+    button press never raises.
+    """
+    _LAN_LOGGER.info("===== LAN DIAGNOSTIC START (dsn=%s) =====", dsn)
+
+    # -- Stage: cloud_config ---------------------------------------------
+    details: dict[str, Any] = {
+        "dsn": dsn,
+        "lan_ip": lan_ip or "<missing>",
+        "lan_key_present": bool(lan_key),
+    }
+    _LAN_LOGGER.debug(
+        "cloud_config: lan_ip=%s lan_key_present=%s",
+        lan_ip or "<missing>",
+        bool(lan_key),
+    )
+    if not lan_key:
+        result = LanDiagnosticResult(
+            success=False,
+            stage="cloud_config",
+            reason="lan_key missing — Ayla cloud did not return a LAN key",
+            details=details,
+        )
+        _LAN_LOGGER.error("cloud_config: %s", result.reason)
+        _LAN_LOGGER.info("===== LAN DIAGNOSTIC END (%s) =====", result.summary())
+        return result
+
+    if web is None:  # pragma: no cover — HA always ships aiohttp
+        result = LanDiagnosticResult(
+            success=False,
+            stage="cloud_config",
+            reason="aiohttp not installed in this environment",
+            details=details,
+        )
+        _LAN_LOGGER.error("cloud_config: %s", result.reason)
+        _LAN_LOGGER.info("===== LAN DIAGNOSTIC END (%s) =====", result.summary())
+        return result
+
+    # -- Stage: server_start ---------------------------------------------
+    server: DeLonghiLanServer | None = None
+    stage = "server_start"
+    try:
+        config = LanServerConfig(
+            dsn=dsn,
+            lan_key=lan_key,
+            advertised_ip=bind_host,
+            bind_host=bind_host,
+            port=0,  # OS picks a free port on loopback
+        )
+        server = DeLonghiLanServer(config)
+        await server.start()
+        chosen_port = _server_actual_port(server)
+        details["diagnostic_port"] = chosen_port
+        _LAN_LOGGER.debug(
+            "server_start: listening on %s:%s (ephemeral loopback)",
+            bind_host,
+            chosen_port,
+        )
+        base_url = f"http://{bind_host}:{chosen_port}"
+
+        # -- Stage: handshake --------------------------------------------
+        stage = "handshake"
+        random_1 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
+        time_1 = int(time.time())
+        _LAN_LOGGER.debug(
+            "handshake: simulated device random_1=%s time_1=%d", random_1, time_1
+        )
+
+        from aiohttp import ClientSession
+
+        async with ClientSession() as client:
+            async with client.post(
+                base_url + LAN_HANDSHAKE_PATH,
+                json={"key_exchange": {"random_1": random_1, "time_1": time_1}},
+                timeout=5.0,
+            ) as resp:
+                handshake_status = resp.status
+                handshake_body = await resp.json()
+
+            if handshake_status != 202:
+                raise LanHandshakeError(
+                    f"HTTP {handshake_status} body={handshake_body}"
+                )
+            random_2 = str(handshake_body["random_2"])
+            time_2 = int(handshake_body["time_2"])
+            _LAN_LOGGER.debug(
+                "handshake: server responded 202 random_2=%s time_2=%d",
+                random_2,
+                time_2,
+            )
+
+            # The simulated client plays the DEVICE role. Both sides
+            # derive the same session material, but the CONVENTION is:
+            #
+            #   * server encrypts outgoing commands with app_* / app_iv
+            #     → client DECRYPTS incoming commands with app_* / app_iv
+            #   * client encrypts outgoing datapoints with dev_* / dev_iv
+            #     → server DECRYPTS incoming datapoints with dev_* / dev_iv
+            #
+            # Both sides rotate the matching IV in lock-step after each
+            # message in that direction.
+            client_session = derive_session(
+                lan_key, random_1, random_2, time_1, time_2
+            )
+
+            # -- Stage: app_to_device (command poll) ---------------------
+            stage = "app_to_device"
+            async with client.get(
+                base_url + LAN_COMMAND_PATH, timeout=5.0
+            ) as resp:
+                poll_status = resp.status
+                poll_body = await resp.json()
+            if poll_status != 200:
+                raise LanError(f"command poll HTTP {poll_status}")
+            if not poll_body.get("enc"):
+                raise LanError("command poll returned empty enc")
+            _LAN_LOGGER.debug(
+                "app_to_device: poll seq=%s enc_len=%d",
+                poll_body.get("seq"),
+                len(poll_body.get("enc", "")),
+            )
+            try:
+                # Decrypt using our app_* — mirrors the server's encrypt.
+                plaintext = _aes_decrypt(
+                    poll_body["enc"],
+                    client_session.app_crypto_key,
+                    client_session.app_iv,
+                )
+                client_session.app_iv = _rotate_iv_from_ciphertext(
+                    poll_body["enc"]
+                )
+                parsed = json.loads(plaintext.decode("utf-8"))
+                if "seq_no" not in parsed or "data" not in parsed:
+                    raise LanError(f"unexpected poll payload shape: {parsed!r}")
+                _LAN_LOGGER.debug(
+                    "app_to_device: decrypted poll seq_no=%s data_keys=%s",
+                    parsed["seq_no"],
+                    list(parsed["data"].keys()),
+                )
+            except LanError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                raise LanError(f"poll decrypt failed: {err}") from err
+
+            # -- Stage: device_to_app (datapoint push) ------------------
+            stage = "device_to_app"
+            datapoint = {"property": {"name": "diagnostic_ping", "value": 1}}
+            payload = json.dumps(datapoint, separators=(",", ":"))
+            # Encrypt using our dev_* — server decrypts with its dev_*.
+            enc = _aes_encrypt(
+                payload, client_session.dev_crypto_key, client_session.dev_iv
+            )
+            client_session.dev_iv = _rotate_iv_from_ciphertext(enc)
+            async with client.post(
+                base_url + LAN_PROPERTY_PATH,
+                json={"enc": enc},
+                timeout=5.0,
+            ) as resp:
+                push_status = resp.status
+            if push_status != 200:
+                raise LanError(f"datapoint push HTTP {push_status}")
+            _LAN_LOGGER.debug(
+                "device_to_app: datapoint accepted enc_len=%d", len(enc)
+            )
+
+            # -- Stage: teardown -----------------------------------------
+            stage = "teardown"
+
+    except Exception as err:  # noqa: BLE001 — button press must never raise
+        _LAN_LOGGER.exception("diagnostic failed at stage=%s", stage)
+        result = LanDiagnosticResult(
+            success=False,
+            stage=stage,
+            reason=f"{type(err).__name__}: {err}",
+            details=details,
+        )
+    else:
+        result = LanDiagnosticResult(success=True, stage="teardown", details=details)
+    finally:
+        if server is not None:
+            try:
+                await server.stop()
+            except Exception as err:  # noqa: BLE001
+                _LAN_LOGGER.warning("teardown: server.stop raised %s", err)
+
+    _LAN_LOGGER.info("===== LAN DIAGNOSTIC END (%s) =====", result.summary())
+    return result
+
+
+def _server_actual_port(server: DeLonghiLanServer) -> int:
+    """Return the OS-assigned port of a started server, or -1 if unknown."""
+    site = getattr(server, "_site", None)
+    if site is None:
+        return -1
+    # aiohttp TCPSite exposes the bound sockets via ``_server.sockets``;
+    # fall back to the configured port when introspection fails.
+    try:
+        sockets = site._server.sockets  # type: ignore[attr-defined]
+        if sockets:
+            return sockets[0].getsockname()[1]
+    except Exception:  # noqa: BLE001
+        pass
+    return server.port

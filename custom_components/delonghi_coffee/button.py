@@ -9,12 +9,14 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import BEVERAGES, DOMAIN, resolve_beverage_meta
 from .coordinator import DeLonghiCoordinator
+from .lan import run_lan_diagnostic
 from .sensor import _device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         [
             DeLonghiCancelButton(api, coordinator, dsn, model, device_name, sw_version),
             DeLonghiSyncButton(api, coordinator, dsn, model, device_name, sw_version),
+            DeLonghiLanDiagnosticButton(api, coordinator, dsn, model, device_name, sw_version),
         ]
     )
 
@@ -181,3 +184,65 @@ class DeLonghiSyncButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
             await self.hass.async_add_executor_job(self._api.sync_recipes, self._dsn, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to sync recipes: {err}") from err
+
+
+class DeLonghiLanDiagnosticButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
+    """Diagnostic button that runs a full LAN pipeline check.
+
+    Exercises cloud LAN config fetch, embedded server boot, handshake,
+    app->device command poll and device->app datapoint push end-to-end
+    against an in-process loopback instance. Every step is logged under
+    ``custom_components.delonghi_coffee.lan`` so users collecting a
+    transcript only need to enable that namespace.
+
+    Any failure is caught and reported via logs and an info-level
+    HomeAssistantError so the button press never raises into the HA
+    supervisor. See issue #10.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        api: DeLonghiApi,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._api = api
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_run_lan_diagnostic"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "run_lan_diagnostic"
+        self._attr_icon = "mdi:lan-pending"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    async def async_press(self) -> None:
+        """Fetch LAN config, spin up the pipeline, log everything."""
+        _LOGGER.info("LAN diagnostic requested for %s", self._dsn)
+        try:
+            lan_config = await self.hass.async_add_executor_job(
+                self._api.get_lan_config, self._dsn
+            )
+        except Exception as err:  # noqa: BLE001 — never raise to HA
+            _LOGGER.exception("LAN diagnostic: get_lan_config failed")
+            raise HomeAssistantError(f"LAN diagnostic cloud fetch failed: {err}") from err
+
+        result = await run_lan_diagnostic(
+            lan_key=lan_config.get("lanip_key"),
+            lan_ip=lan_config.get("lan_ip"),
+            dsn=self._dsn,
+        )
+        if not result.success:
+            _LOGGER.warning(
+                "LAN diagnostic finished: %s (details=%s)",
+                result.summary(),
+                result.details,
+            )
+            raise HomeAssistantError(
+                f"LAN diagnostic failed: {result.summary()}"
+            )
+        _LOGGER.info("LAN diagnostic finished: %s", result.summary())

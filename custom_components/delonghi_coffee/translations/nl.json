@@ -448,6 +448,9 @@
       },
       "sync_recipes": {
         "name": "Recepten synchroniseren"
+      },
+      "run_lan_diagnostic": {
+        "name": "LAN-diagnose uitvoeren"
       }
     },
     "switch": {

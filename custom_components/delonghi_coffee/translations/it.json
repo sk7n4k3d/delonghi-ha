@@ -448,6 +448,9 @@
       },
       "sync_recipes": {
         "name": "Sincronizza ricette"
+      },
+      "run_lan_diagnostic": {
+        "name": "Esegui diagnostica LAN"
       }
     },
     "switch": {

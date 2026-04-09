@@ -448,6 +448,9 @@
       },
       "sync_recipes": {
         "name": "Synkroniser oppskrifter"
+      },
+      "run_lan_diagnostic": {
+        "name": "Kjør LAN-diagnostikk"
       }
     },
     "switch": {

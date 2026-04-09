@@ -368,3 +368,75 @@ def test_payloads_parse_back_with_stringified_seq() -> None:
     cmd = json.loads(build_command_payload(1, {"x": 1}))
     assert cmd["data"] == {"x": 1}
     assert cmd["seq_no"] == "1"  # stringified on the wire
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# run_lan_diagnostic — in-process end-to-end check. Mocks are not needed
+# because the helper spins its own loopback server.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+import asyncio  # noqa: E402
+
+from custom_components.delonghi_coffee.lan import (  # noqa: E402
+    LanDiagnosticResult,
+    run_lan_diagnostic,
+)
+
+_HAS_AIOHTTP = False
+try:
+    import aiohttp  # noqa: F401
+
+    _HAS_AIOHTTP = True
+except ImportError:
+    pass
+
+
+def test_run_lan_diagnostic_missing_key_fails_gracefully() -> None:
+    """No lan_key → diagnostic stops at cloud_config without raising."""
+    result = asyncio.run(
+        run_lan_diagnostic(lan_key=None, lan_ip="10.0.0.1", dsn="DSN-NOKEY")
+    )
+    assert isinstance(result, LanDiagnosticResult)
+    assert result.success is False
+    assert result.stage == "cloud_config"
+    assert "lan_key" in result.reason
+    assert result.details["dsn"] == "DSN-NOKEY"
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_run_lan_diagnostic_full_pipeline_success() -> None:
+    """Crypto + handshake + encrypt + decrypt all the way through."""
+    result = asyncio.run(
+        run_lan_diagnostic(
+            lan_key="0123456789abcdef0123456789abcdef",
+            lan_ip="127.0.0.1",
+            dsn="DSN-OK",
+        )
+    )
+    assert result.success is True, result.summary()
+    assert result.stage == "teardown"
+    assert result.details["lan_key_present"] is True
+    assert result.details["diagnostic_port"] > 0
+
+
+def test_run_lan_diagnostic_never_raises_on_unexpected_error(monkeypatch) -> None:
+    """Every error path should be caught and returned as a result."""
+    from custom_components.delonghi_coffee import lan as lan_module
+
+    def _boom(*_args, **_kwargs):  # noqa: ANN202
+        raise RuntimeError("simulated server boot failure")
+
+    # Force server startup to explode — the helper must still return.
+    monkeypatch.setattr(lan_module, "DeLonghiLanServer", _boom)
+    result = asyncio.run(
+        run_lan_diagnostic(
+            lan_key="0123456789abcdef0123456789abcdef",
+            lan_ip="127.0.0.1",
+            dsn="DSN-BOOM",
+        )
+    )
+    assert isinstance(result, LanDiagnosticResult)
+    assert result.success is False
+    assert result.stage == "server_start"
+    assert "simulated server boot failure" in result.reason
