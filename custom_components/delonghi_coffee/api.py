@@ -1463,32 +1463,80 @@ class DeLonghiApi:
         return self.parse_bean_systems(self.get_properties(dsn))
 
     def parse_bean_systems(self, props: dict[str, Any]) -> list[dict[str, Any]]:
-        """Parse bean systems from pre-fetched properties."""
+        """Parse bean systems from pre-fetched properties.
+
+        Each ``d250-d256_beansystem_N`` property wraps an ECAM bean profile.
+        After the 5-byte ECAM header and before the trailing 2-byte CRC, the
+        payload contains two 20-byte UTF-16-BE strings (local + English name)
+        followed by a handful of Bean Adapt parameter bytes. We surface those
+        trailing bytes as ``raw_params_hex`` so users with a configured bean
+        profile can share the exact layout for issue #7 without us inventing
+        a decoder.
+        """
         beans: list[dict[str, Any]] = []
 
         for i in range(7):
             prop_name = f"d{250 + i}_beansystem_{i}"
-            if prop_name in props:
-                val = props[prop_name].get("value")
-                if val:
-                    try:
-                        raw = base64.b64decode(val)
-                        data = raw[5:-2]
-                        text = _decode_utf16(data)
-                        parts = [p for p in text.split("\x00") if p.strip()]
-                        local_name = parts[0] if parts else f"Bean {i}"
-                        english_name = parts[1] if len(parts) > 1 else local_name
-                        beans.append(
-                            {
-                                "id": i,
-                                "name": local_name,
-                                "english_name": english_name,
-                            }
-                        )
-                    except (ValueError, UnicodeDecodeError):
-                        beans.append({"id": i, "name": f"Bean {i}", "english_name": f"Bean {i}"})
+            if prop_name not in props:
+                continue
+            val = props[prop_name].get("value")
+            if not val:
+                continue
+            try:
+                raw = base64.b64decode(val)
+                data = raw[5:-2]
+                text = _decode_utf16(data)
+                parts = [p for p in text.split("\x00") if p.strip()]
+                local_name = parts[0] if parts else f"Bean {i}"
+                english_name = parts[1] if len(parts) > 1 else local_name
+                # The first 40 bytes of ``data`` are the two UTF-16-BE names
+                # (20 bytes each). Everything after that belongs to the Bean
+                # Adapt parameter block — temperature, intensity, grinder,
+                # etc. — but the exact layout differs per model and the
+                # write format MattG-K captured in issue #7 cannot be
+                # assumed to match 1:1. Expose it verbatim for now.
+                raw_params_hex = data[40:].hex() if len(data) > 40 else ""
+                beans.append(
+                    {
+                        "id": i,
+                        "name": local_name,
+                        "english_name": english_name,
+                        "raw_bytes": len(raw),
+                        "raw_params_hex": raw_params_hex,
+                    }
+                )
+            except (ValueError, UnicodeDecodeError):
+                beans.append(
+                    {
+                        "id": i,
+                        "name": f"Bean {i}",
+                        "english_name": f"Bean {i}",
+                        "raw_bytes": 0,
+                        "raw_params_hex": "",
+                    }
+                )
 
         return beans
+
+    def parse_bean_system_par(self, props: dict[str, Any]) -> dict[str, Any]:
+        """Return raw Bean Adapt parameter block (``d260_beansystem_par``).
+
+        This property is documented in MattG-K's issue #7 capture as the
+        global parameter table that the machine uses for grinder/flow/temp
+        calibration. We expose the raw bytes verbatim until a diff across
+        before/after Bean Adapt runs gives us a confirmed field layout.
+        """
+        prop = props.get("d260_beansystem_par")
+        if not isinstance(prop, dict):
+            return {}
+        val = prop.get("value")
+        if not val:
+            return {}
+        try:
+            raw = base64.b64decode(val)
+        except (ValueError, TypeError, base64.binascii.Error):
+            return {"raw_hex": "", "raw_bytes": 0, "error": "decode_failed"}
+        return {"raw_hex": raw.hex(), "raw_bytes": len(raw)}
 
     def get_available_beverages(self, dsn: str) -> list[str]:
         """Get beverages (fetches properties)."""  # noqa: D401
