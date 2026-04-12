@@ -184,6 +184,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    # Stop LAN server before cleaning up
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    coordinator = entry_data.get("coordinator")
+    if coordinator is not None:
+        await coordinator.async_stop_lan()
+
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
         # Remove service if no more entries

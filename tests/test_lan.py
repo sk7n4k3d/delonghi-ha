@@ -440,3 +440,149 @@ def test_run_lan_diagnostic_never_raises_on_unexpected_error(monkeypatch) -> Non
     assert result.success is False
     assert result.stage == "server_start"
     assert "simulated server boot failure" in result.reason
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Coordinator LAN integration — verify startup logic and property callback.
+# ─────────────────────────────────────────────────────────────────────────
+
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: E402
+
+from custom_components.delonghi_coffee.coordinator import DeLonghiCoordinator  # noqa: E402
+
+
+def _make_coordinator(lan_config: dict | None = None) -> DeLonghiCoordinator:
+    """Build a coordinator with mocked HA and API, injecting lan_config."""
+    hass = MagicMock()
+    api = MagicMock()
+    coord = DeLonghiCoordinator(hass, api, dsn="DSN-TEST")
+    # Stub HA's async_set_updated_data (not present in test mock base)
+    coord.async_set_updated_data = MagicMock()
+    if lan_config is not None:
+        coord._lan_config = lan_config
+    return coord
+
+
+class TestCoordinatorLanStartup:
+    """Verify _try_start_lan conditions."""
+
+    @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+    def test_lan_starts_when_enabled_with_key_and_ip(self) -> None:
+        coord = _make_coordinator({"enabled": True, "key": "abcdef1234567890abcdef1234567890", "ip": "192.168.1.100"})
+
+        with (
+            patch.object(DeLonghiCoordinator, "_get_local_ip", return_value="192.168.1.50"),
+            patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_server_cls,
+            patch("custom_components.delonghi_coffee.coordinator.register_with_device", new_callable=AsyncMock),
+        ):
+            mock_server = MagicMock()
+            mock_server.start = AsyncMock()
+            mock_server.port = 10280
+            mock_server_cls.return_value = mock_server
+
+            asyncio.run(coord._try_start_lan())
+
+            mock_server_cls.assert_called_once()
+            mock_server.start.assert_awaited_once()
+            assert coord._lan_server is mock_server
+            assert coord._lan_active is True
+            assert coord._lan_start_attempted is True
+
+    def test_lan_does_not_start_when_disabled(self) -> None:
+        coord = _make_coordinator({"enabled": False, "key": "abcdef1234567890abcdef1234567890", "ip": "192.168.1.100"})
+
+        with patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls:
+            asyncio.run(coord._try_start_lan())
+            mock_cls.assert_not_called()
+            assert coord._lan_server is None
+            assert coord._lan_active is False
+            assert coord._lan_start_attempted is True
+
+    def test_lan_does_not_start_when_key_missing(self) -> None:
+        coord = _make_coordinator({"enabled": True, "key": "", "ip": "192.168.1.100"})
+
+        with patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls:
+            asyncio.run(coord._try_start_lan())
+            mock_cls.assert_not_called()
+            assert coord._lan_server is None
+
+    def test_lan_does_not_start_when_ip_missing(self) -> None:
+        coord = _make_coordinator({"enabled": True, "key": "abcdef1234567890abcdef1234567890", "ip": ""})
+
+        with patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls:
+            asyncio.run(coord._try_start_lan())
+            mock_cls.assert_not_called()
+
+    def test_lan_does_not_start_when_no_local_ip(self) -> None:
+        coord = _make_coordinator({"enabled": True, "key": "abcdef1234567890abcdef1234567890", "ip": "192.168.1.100"})
+
+        with (
+            patch.object(DeLonghiCoordinator, "_get_local_ip", return_value=None),
+            patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls,
+        ):
+            asyncio.run(coord._try_start_lan())
+            mock_cls.assert_not_called()
+
+
+class TestCoordinatorLanPropertyCallback:
+    """Verify _on_lan_property caching."""
+
+    def test_property_cached_with_name_and_value(self) -> None:
+        coord = _make_coordinator()
+        coord.data = {"status": "RUN"}
+        data = {"property": {"name": "d302_monitor", "value": "0d1784cafebabe"}}
+
+        asyncio.run(coord._on_lan_property(data))
+
+        assert coord._lan_properties["d302_monitor"] == "0d1784cafebabe"
+
+    def test_property_callback_handles_missing_property_key(self) -> None:
+        coord = _make_coordinator()
+        coord.data = {"status": "RUN"}
+        data = {"seq_no": "1", "data": {}}
+
+        asyncio.run(coord._on_lan_property(data))
+        assert coord._lan_properties == {}
+
+    def test_property_callback_handles_empty_data(self) -> None:
+        coord = _make_coordinator()
+        coord.data = {}
+
+        asyncio.run(coord._on_lan_property({}))
+        assert coord._lan_properties == {}
+
+
+class TestCoordinatorGetLocalIp:
+    """Verify _get_local_ip helper."""
+
+    def test_returns_string_for_reachable_ip(self) -> None:
+        # 127.0.0.1 is always reachable
+        result = DeLonghiCoordinator._get_local_ip("127.0.0.1")
+        assert result is not None
+        assert isinstance(result, str)
+
+    def test_returns_none_for_invalid_ip(self) -> None:
+        result = DeLonghiCoordinator._get_local_ip("not_an_ip_address")
+        assert result is None
+
+
+class TestCoordinatorStopLan:
+    """Verify async_stop_lan cleanup."""
+
+    def test_stop_lan_calls_server_stop(self) -> None:
+        coord = _make_coordinator()
+        mock_server = MagicMock()
+        mock_server.stop = AsyncMock()
+        coord._lan_server = mock_server
+        coord._lan_active = True
+
+        asyncio.run(coord.async_stop_lan())
+
+        mock_server.stop.assert_awaited_once()
+        assert coord._lan_server is None
+        assert coord._lan_active is False
+
+    def test_stop_lan_noop_when_no_server(self) -> None:
+        coord = _make_coordinator()
+        # Should not raise
+        asyncio.run(coord.async_stop_lan())

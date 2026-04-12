@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import socket
 from datetime import timedelta
 from time import monotonic
 from typing import Any
@@ -13,6 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import DOMAIN, FULL_REFRESH_INTERVAL, MQTT_KEEPALIVE_INTERVAL, SCAN_INTERVAL_SECONDS
 from .contentstack import fetch_bean_adapt, fetch_coffee_beans, fetch_drink_catalog
+from .lan import _LAN_LOGGER, DeLonghiLanServer, LanError, LanServerConfig, register_with_device
 from .logger import get_diagnostic_dump
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +61,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.diagnostic_mode: bool = False
         self._last_diagnostic: dict[str, Any] = {}
         self._last_all_props: dict[str, Any] = {}
+        # LAN server (Phase 1 — observe mode)
+        self._lan_server: DeLonghiLanServer | None = None
+        self._lan_active: bool = False
+        self._lan_start_attempted: bool = False
+        self._lan_properties: dict[str, Any] = {}
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -127,6 +134,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Fetch LAN config once (first full refresh only)
                 if self._lan_config is None:
                     self._lan_config = await self.hass.async_add_executor_job(self.api.get_lan_config, self.dsn)
+
+                # Start LAN server once if the machine supports it
+                if not self._lan_start_attempted and self._lan_config:
+                    await self._try_start_lan()
 
                 # ContentStack: fetch drink catalog + bean adapt once
                 if not self._contentstack_loaded:
@@ -217,6 +228,112 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Error fetching data: {err}") from err
         except Exception as err:
             raise UpdateFailed(f"Unexpected error: {err}") from err
+
+    # ── LAN server lifecycle ─────────────────────────────────────────────
+
+    async def _try_start_lan(self) -> None:
+        """Attempt to start the embedded LAN server (once).
+
+        LAN failures MUST NEVER crash the integration — cloud mode remains
+        the fallback. All errors are caught and logged.
+        """
+        self._lan_start_attempted = True
+        lan = self._lan_config or {}
+        if not lan.get("enabled"):
+            _LAN_LOGGER.debug("LAN not enabled in cloud config, skipping")
+            return
+        lan_key = lan.get("key")
+        lan_ip = lan.get("ip")
+        if not lan_key or not lan_ip:
+            _LAN_LOGGER.debug("LAN key or IP missing in cloud config, skipping")
+            return
+
+        local_ip = self._get_local_ip(lan_ip)
+        if not local_ip:
+            _LAN_LOGGER.warning("Cannot determine local IP to reach device %s, LAN server not started", lan_ip)
+            return
+
+        try:
+            config = LanServerConfig(
+                dsn=self.dsn,
+                lan_key=lan_key,
+                advertised_ip=local_ip,
+            )
+            server = DeLonghiLanServer(config, on_property=self._on_lan_property)
+            await server.start()
+            self._lan_server = server
+            _LAN_LOGGER.info(
+                "LAN server started on port %d, local_ip=%s, device_ip=%s",
+                server.port,
+                local_ip,
+                lan_ip,
+            )
+        except Exception:  # noqa: BLE001
+            _LAN_LOGGER.exception("LAN server start failed, falling back to cloud")
+            return
+
+        # Tell the device to push to our server
+        try:
+            import aiohttp
+
+            await register_with_device(
+                aiohttp.ClientSession,
+                device_ip=lan_ip,
+                advertised_ip=local_ip,
+                advertised_port=server.port,
+            )
+            self._lan_active = True
+            _LAN_LOGGER.info("Registered with device %s — LAN observe mode active", lan_ip)
+        except LanError:
+            _LAN_LOGGER.exception("LAN registration failed, server running but device won't push to us")
+        except Exception:  # noqa: BLE001
+            _LAN_LOGGER.exception("Unexpected error during LAN registration")
+
+    async def _on_lan_property(self, data: dict[str, Any]) -> None:
+        """Callback invoked when the machine pushes a decrypted datapoint.
+
+        Phase 1 (observe): log everything, cache property values, trigger
+        entity updates so sensors reflect LAN data alongside cloud data.
+        """
+        _LAN_LOGGER.debug("LAN property received: %s", data)
+
+        # Cache individual properties if the payload has the expected shape
+        prop = data.get("property")
+        if isinstance(prop, dict):
+            name = prop.get("name")
+            value = prop.get("value")
+            if name is not None:
+                self._lan_properties[name] = value
+                _LAN_LOGGER.debug("LAN property cached: %s = %s", name, value)
+
+        # Trigger entity update so sensors can pick up LAN data
+        self.async_set_updated_data(self.data if self.data else {})
+
+    @staticmethod
+    def _get_local_ip(device_ip: str) -> str | None:
+        """Determine the local IP that can reach *device_ip*.
+
+        Opens a UDP socket toward the device (never actually sends) and
+        reads back the source address the OS chose — this is the correct
+        interface on multi-homed hosts.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect((device_ip, 80))
+                return sock.getsockname()[0]
+        except OSError:
+            return None
+
+    async def async_stop_lan(self) -> None:
+        """Cleanly stop the LAN server (called from async_unload_entry)."""
+        if self._lan_server is not None:
+            try:
+                await self._lan_server.stop()
+            except Exception:  # noqa: BLE001
+                _LAN_LOGGER.exception("Error stopping LAN server")
+            self._lan_server = None
+            self._lan_active = False
+            _LAN_LOGGER.info("LAN server stopped")
 
     async def _load_contentstack(self) -> None:
         """Load drink catalog and bean adapt from ContentStack CMS (once).
