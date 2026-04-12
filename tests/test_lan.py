@@ -468,7 +468,7 @@ class TestCoordinatorLanStartup:
 
     @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
     def test_lan_starts_when_enabled_with_key_and_ip(self) -> None:
-        coord = _make_coordinator({"enabled": True, "key": "abcdef1234567890abcdef1234567890", "ip": "192.168.1.100"})
+        coord = _make_coordinator({"lan_enabled": True, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"})
 
         with (
             patch.object(DeLonghiCoordinator, "_get_local_ip", return_value="192.168.1.50"),
@@ -489,7 +489,7 @@ class TestCoordinatorLanStartup:
             assert coord._lan_start_attempted is True
 
     def test_lan_does_not_start_when_disabled(self) -> None:
-        coord = _make_coordinator({"enabled": False, "key": "abcdef1234567890abcdef1234567890", "ip": "192.168.1.100"})
+        coord = _make_coordinator({"lan_enabled": False, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"})
 
         with patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls:
             asyncio.run(coord._try_start_lan())
@@ -499,7 +499,7 @@ class TestCoordinatorLanStartup:
             assert coord._lan_start_attempted is True
 
     def test_lan_does_not_start_when_key_missing(self) -> None:
-        coord = _make_coordinator({"enabled": True, "key": "", "ip": "192.168.1.100"})
+        coord = _make_coordinator({"lan_enabled": True, "lanip_key": "", "lan_ip": "192.168.1.100"})
 
         with patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls:
             asyncio.run(coord._try_start_lan())
@@ -507,14 +507,14 @@ class TestCoordinatorLanStartup:
             assert coord._lan_server is None
 
     def test_lan_does_not_start_when_ip_missing(self) -> None:
-        coord = _make_coordinator({"enabled": True, "key": "abcdef1234567890abcdef1234567890", "ip": ""})
+        coord = _make_coordinator({"lan_enabled": True, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": ""})
 
         with patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls:
             asyncio.run(coord._try_start_lan())
             mock_cls.assert_not_called()
 
     def test_lan_does_not_start_when_no_local_ip(self) -> None:
-        coord = _make_coordinator({"enabled": True, "key": "abcdef1234567890abcdef1234567890", "ip": "192.168.1.100"})
+        coord = _make_coordinator({"lan_enabled": True, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"})
 
         with (
             patch.object(DeLonghiCoordinator, "_get_local_ip", return_value=None),

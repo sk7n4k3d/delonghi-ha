@@ -239,11 +239,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         self._lan_start_attempted = True
         lan = self._lan_config or {}
-        if not lan.get("enabled"):
+        if not lan.get("lan_enabled"):
             _LAN_LOGGER.debug("LAN not enabled in cloud config, skipping")
             return
-        lan_key = lan.get("key")
-        lan_ip = lan.get("ip")
+        lan_key = lan.get("lanip_key")
+        lan_ip = lan.get("lan_ip")
         if not lan_key or not lan_ip:
             _LAN_LOGGER.debug("LAN key or IP missing in cloud config, skipping")
             return
