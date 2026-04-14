@@ -502,5 +502,15 @@
         "name": "Profil"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options De'Longhi Coffee",
+        "data": {
+          "diagnostic_mode": "Mode diagnostic (expose les propriétés brutes pour le débogage)"
+        }
+      }
+    }
   }
 }

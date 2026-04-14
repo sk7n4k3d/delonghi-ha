@@ -79,11 +79,11 @@ brew_custom:
           step: 1
     profile:
       name: Profile
-      description: "User profile (1-4). Defaults to currently selected profile."
+      description: "User profile (1-5). Defaults to currently selected profile."
       selector:
         number:
           min: 1
-          max: 4
+          max: 5
           step: 1
 
 cancel_brew:
@@ -96,11 +96,11 @@ sync_recipes:
   fields:
     profile:
       name: Profile
-      description: "User profile to sync (1-4). Defaults to currently selected profile."
+      description: "User profile to sync (1-5). Defaults to currently selected profile."
       selector:
         number:
           min: 1
-          max: 4
+          max: 5
           step: 1
 
 select_bean_profile:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
@@ -75,11 +76,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     if not coordinator.beverages:
         _LOGGER.warning("No beverages discovered yet — will retry on next refresh")
 
+        unsub: Callable[[], None] | None = None
+
         def _on_update() -> None:
+            nonlocal unsub
             if coordinator.beverages:
                 _add_buttons(coordinator.beverages)
+                # Self-unregister once we've added the buttons
+                if unsub is not None:
+                    unsub()
+                    unsub = None
 
-        coordinator.async_add_listener(_on_update)
+        unsub = coordinator.async_add_listener(_on_update)
+        # Ensure listener is removed on entry unload to avoid leak across reloads
+        entry.async_on_unload(lambda: unsub() if unsub is not None else None)
 
 
 class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
