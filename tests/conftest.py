@@ -53,6 +53,10 @@ class _GenericBase:
     def available(self) -> bool:
         return True
 
+    async def async_will_remove_from_hass(self) -> None:
+        """No-op stub — real HA provides cleanup hooks here."""
+        return None
+
 
 class _StubEntity:
     """Minimal stub for platform entity mixins (SensorEntity, …)."""

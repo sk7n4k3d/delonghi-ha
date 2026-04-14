@@ -266,8 +266,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 bool(self.bean_adapt),
                 len(self.coffee_beans),
             )
-        except Exception:
-            _LOGGER.warning("ContentStack load failed, will retry next refresh")
+        except Exception:  # noqa: BLE001 — CMS failures must not block refresh
+            _LOGGER.exception("ContentStack load failed, will retry next refresh")
 
     def _detect_contentstack_pattern(self) -> str:
         """Return the best ECAM pattern for ContentStack title lookups.

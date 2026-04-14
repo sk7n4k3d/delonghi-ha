@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -61,6 +62,9 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         self._monitor_stale_count: int = 0
         self._last_monitor_state: str | None = None
         self._cmd_lock = asyncio.Lock()
+        # Track the background retry coroutine so it can be cancelled on
+        # entity removal — otherwise it survives reloads as an orphan task.
+        self._retry_task: asyncio.Task | None = None
         self._attr_unique_id = f"{dsn}_power"
         self._attr_has_entity_name = True
         self._attr_translation_key = "power"
@@ -154,8 +158,12 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
                 raise HomeAssistantError(f"Failed to power on: {err}") from err
             self.async_write_ha_state()
 
-            # Phase 4: Background retry after 3 min if monitor doesn't confirm
-            self.hass.async_create_task(self._retry_power_on())
+            # Phase 4: Background retry after 3 min if monitor doesn't confirm.
+            # Cancel any previous retry still pending from a prior command so
+            # we never have two retries racing against the machine.
+            if self._retry_task is not None and not self._retry_task.done():
+                self._retry_task.cancel()
+            self._retry_task = self.hass.async_create_task(self._retry_power_on())
 
     async def _retry_power_on(self) -> None:
         """Retry power on if monitor hasn't confirmed within 3 minutes."""
@@ -206,3 +214,13 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             except (DeLonghiApiError, DeLonghiAuthError) as err:
                 raise HomeAssistantError(f"Failed to power off: {err}") from err
             self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel the pending power-on retry task, if any, before teardown."""
+        if self._retry_task is not None and not self._retry_task.done():
+            self._retry_task.cancel()
+            # Retry body already swallows API errors; swallow cancel too.
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._retry_task
+        self._retry_task = None
+        await super().async_will_remove_from_hass()
