@@ -109,3 +109,14 @@ sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock()
 sys.modules["homeassistant.exceptions"].HomeAssistantError = type(
     "HomeAssistantError", (Exception,), {}
 )
+
+# Same treatment for ConfigEntry* exceptions raised by the integration entry
+# points (__init__.async_setup_entry). They must be real Exception subclasses
+# so `raise ConfigEntryAuthFailed(...)` and `raise ConfigEntryNotReady(...)`
+# don't blow up with "exceptions must derive from BaseException" during tests.
+sys.modules["homeassistant.exceptions"].ConfigEntryAuthFailed = type(
+    "ConfigEntryAuthFailed", (Exception,), {}
+)
+sys.modules["homeassistant.exceptions"].ConfigEntryNotReady = type(
+    "ConfigEntryNotReady", (Exception,), {}
+)

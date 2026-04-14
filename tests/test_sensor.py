@@ -10,8 +10,10 @@ word for the relevant bit.
 import asyncio
 from unittest.mock import MagicMock
 
+from custom_components.delonghi_coffee import binary_sensor as binary_sensor_mod
 from custom_components.delonghi_coffee import sensor as sensor_mod
 from custom_components.delonghi_coffee.binary_sensor import DeLonghiAlarmSensor
+from custom_components.delonghi_coffee.const import ALARMS
 from custom_components.delonghi_coffee.sensor import (
     COUNTER_SENSORS,
     DeLonghiBeanSensor,
@@ -417,3 +419,36 @@ class TestDeviceInfo:
     def test_omits_sw_version_when_none(self):
         info = sensor_mod._device_info("DSN-A", "ECAM", "Coffee", None)
         assert "sw_version" not in info
+
+
+class TestBinarySensorSetup:
+    def test_setup_creates_one_sensor_per_known_alarm(self):
+        hass = MagicMock()
+        entry = MagicMock()
+        entry.entry_id = "eid"
+        coord = MagicMock()
+        hass.data = {
+            "delonghi_coffee": {
+                entry.entry_id: {
+                    "coordinator": coord,
+                    "dsn": "DSN-B",
+                    "model": "ECAM",
+                    "device_name": "Coffee",
+                    "sw_version": "1.0",
+                }
+            }
+        }
+        added: list = []
+        async_add = MagicMock(side_effect=lambda ents: added.extend(ents))
+        asyncio.run(binary_sensor_mod.async_setup_entry(hass, entry, async_add))
+        assert len(added) == len(ALARMS)
+        assert all(isinstance(e, DeLonghiAlarmSensor) for e in added)
+
+
+class TestAlarmSensorIsOn:
+    def test_is_on_returns_none_when_alarm_word_missing(self):
+        coord = MagicMock()
+        coord.data = {"alarm_word": None}
+        coord.seen_alarm_bits = set()
+        sensor = _make_alarm_sensor(coord, bit=0)
+        assert sensor.is_on is None
