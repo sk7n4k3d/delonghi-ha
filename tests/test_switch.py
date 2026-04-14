@@ -337,3 +337,184 @@ class TestAsyncSetupEntry:
 
 async def _noop_sleep(*_args, **_kwargs):
     return None
+
+
+class TestRetryPowerOn:
+    """Cover _retry_power_on background task — both confirmed and retry paths."""
+
+    def test_retry_skipped_when_machine_confirms_on(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+        sw.coordinator.data = {"machine_state": "Ready"}
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw._retry_power_on()
+
+        asyncio.run(_go())
+        # No retry sent because monitor confirmed ON
+        sw._api.send_command.assert_not_called()
+
+    def test_retry_sent_when_machine_still_off(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+        sw.coordinator.data = {"machine_state": "Off"}
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw._retry_power_on()
+
+        asyncio.run(_go())
+        sw._api.send_command.assert_called_once()
+        # ping called twice (pre + post)
+        assert sw._api.ping_connected.call_count == 2
+
+    def test_retry_falls_back_to_request_monitor(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw._api.ping_connected = MagicMock(return_value=False)
+        sw._api.request_monitor = MagicMock()
+        sw._api.send_command = MagicMock()
+        sw.coordinator.data = {"machine_state": "Going to sleep"}
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw._retry_power_on()
+
+        asyncio.run(_go())
+        assert sw._api.request_monitor.call_count >= 1
+
+    def test_retry_swallows_api_error(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw._api.ping_connected = MagicMock(side_effect=DeLonghiApiError("boom"))
+        sw._api.send_command = MagicMock()
+        sw.coordinator.data = {"machine_state": "Off"}
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                # Must NOT raise — error is logged + swallowed
+                await sw._retry_power_on()
+
+        asyncio.run(_go())
+
+
+class TestPowerOnExceptionPaths:
+    def test_wake_failure_continues_to_send_command(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(side_effect=DeLonghiApiError("wake fail"))
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw.async_turn_on()
+            if sw._retry_task is not None:
+                sw._retry_task.cancel()
+                try:
+                    await sw._retry_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        asyncio.run(_go())
+        sw._api.send_command.assert_called_once()
+
+    def test_post_command_ping_failure_is_swallowed(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        # Wake ping OK, but post-command ping fails
+        sw._api.ping_connected = MagicMock(side_effect=[True, DeLonghiApiError("post")])
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw.async_turn_on()
+            if sw._retry_task is not None:
+                sw._retry_task.cancel()
+                try:
+                    await sw._retry_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        asyncio.run(_go())
+        # Still completes successfully — _assumed_on flips
+        assert sw._assumed_on is True
+
+    def test_existing_retry_task_cancelled_before_new_one(self):
+        """Phase 4: a pending retry from a previous power-on is cancelled."""
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            # Pre-load a long-running retry task that should be cancelled
+            async def _slow():
+                await asyncio.sleep(3600)
+
+            sw._retry_task = asyncio.create_task(_slow())
+            await asyncio.sleep(0)  # let it schedule
+            assert not sw._retry_task.done()
+
+            old_task = sw._retry_task
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw.async_turn_on()
+
+            # Yield so the cancellation finishes propagating before we check.
+            try:
+                await old_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            assert old_task.cancelled() or old_task.done()
+            # New retry task installed and different from the old one
+            assert sw._retry_task is not None
+            assert sw._retry_task is not old_task
+            # Cleanup
+            sw._retry_task.cancel()
+            try:
+                await sw._retry_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        asyncio.run(_go())
+
+
+class TestPowerOffPostCommandFailure:
+    def test_off_post_command_ping_swallowed(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.send_command = MagicMock()
+        sw._api.ping_connected = MagicMock(side_effect=DeLonghiApiError("post off"))
+
+        asyncio.run(sw.async_turn_off())
+        # Still completes, assumed_on = False
+        assert sw._assumed_on is False
+        sw._api.send_command.assert_called_once()
+
+    def test_off_post_command_ping_unsupported_falls_back(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.send_command = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=False)
+        sw._api.request_monitor = MagicMock()
+
+        asyncio.run(sw.async_turn_off())
+        sw._api.request_monitor.assert_called_once()
