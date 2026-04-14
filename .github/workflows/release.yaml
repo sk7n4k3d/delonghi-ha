@@ -26,12 +26,21 @@ jobs:
 
       - name: Detect prerelease from tag
         id: prerelease
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME}"
-          if [[ "$tag" =~ -(beta|rc|alpha|dev)\. ]]; then
+          # SemVer 2.0: anything after `MAJOR.MINOR.PATCH-` is a prerelease
+          # Matches: vX.Y.Z-beta.N, vX.Y.Z-beta5, vX.Y.Z-rc1, vX.Y.Z-alpha, vX.Y.Z-dev, vX.Y.Z-pre, vX.Y.Z-snapshot
+          # Does NOT match: vX.Y.Z (stable)
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-          else
+            echo "Detected PRERELEASE tag: $TAG"
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "Detected STABLE tag: $TAG"
+          else
+            echo "::error::Tag '$TAG' does not match SemVer pattern vX.Y.Z[-suffix]" >&2
+            exit 1
           fi
 
       - name: Create GitHub Release
