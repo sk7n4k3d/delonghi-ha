@@ -256,15 +256,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     model_name = m.group(0)
 
         try:
-            self.drink_catalog = await self.hass.async_add_executor_job(
-                fetch_drink_catalog, model_pattern, model_name
-            )
-            self.bean_adapt = await self.hass.async_add_executor_job(
-                fetch_bean_adapt, model_pattern, model_name
-            )
-            self.coffee_beans = await self.hass.async_add_executor_job(
-                fetch_coffee_beans
-            )
+            self.drink_catalog = await self.hass.async_add_executor_job(fetch_drink_catalog, model_pattern, model_name)
+            self.bean_adapt = await self.hass.async_add_executor_job(fetch_bean_adapt, model_pattern, model_name)
+            self.coffee_beans = await self.hass.async_add_executor_job(fetch_coffee_beans)
             self._contentstack_loaded = True
             _LOGGER.info(
                 "ContentStack loaded: %d drinks, bean_adapt=%s, %d coffee beans",

@@ -67,7 +67,9 @@ def is_family_supported(pattern: str) -> bool:
     return any(upper.startswith(family) for family in _SUPPORTED_FAMILIES)
 
 
-def _cs_get(content_type: str, query: dict[str, Any] | None = None, limit: int = 100, skip: int = 0) -> list[dict[str, Any]]:
+def _cs_get(
+    content_type: str, query: dict[str, Any] | None = None, limit: int = 100, skip: int = 0
+) -> list[dict[str, Any]]:
     """Fetch entries from ContentStack."""
     import json
 
@@ -152,12 +154,14 @@ def fetch_drink_catalog(sku: str, model_name: str = "") -> dict[int, dict[str, A
             if not name:
                 continue
             try:
-                ingredients.append({
-                    "name": name,
-                    "min": int(ing.get("minval", "0")),
-                    "max": int(ing.get("maxval", "0")),
-                    "default": int(ing.get("defval", "0")),
-                })
+                ingredients.append(
+                    {
+                        "name": name,
+                        "min": int(ing.get("minval", "0")),
+                        "max": int(ing.get("maxval", "0")),
+                        "default": int(ing.get("defval", "0")),
+                    }
+                )
             except (ValueError, TypeError):
                 continue
 
@@ -245,21 +249,23 @@ def fetch_coffee_beans(locale: str = "en-gb", limit: int = 100) -> list[dict[str
         if not entries:
             break
         for entry in entries:
-            all_beans.append({
-                "name": entry.get("name", entry.get("title", "")),
-                "roaster": entry.get("roaster", ""),
-                "roaster_id": entry.get("roaster_id", ""),
-                "roasting_level": entry.get("roasting_level", ""),
-                "coffee_type": entry.get("coffee_type", ""),
-                "botany": entry.get("botany", ""),
-                "acidity": _int(entry.get("acidity")),
-                "bitterness": _int(entry.get("bitterness")),
-                "body_level": _int(entry.get("body_level")),
-                "taste_hint": entry.get("taste_hint", ""),
-                "description": entry.get("description", ""),
-                "image": entry.get("image", ""),
-                "buy_from": entry.get("buy_from", ""),
-            })
+            all_beans.append(
+                {
+                    "name": entry.get("name", entry.get("title", "")),
+                    "roaster": entry.get("roaster", ""),
+                    "roaster_id": entry.get("roaster_id", ""),
+                    "roasting_level": entry.get("roasting_level", ""),
+                    "coffee_type": entry.get("coffee_type", ""),
+                    "botany": entry.get("botany", ""),
+                    "acidity": _int(entry.get("acidity")),
+                    "bitterness": _int(entry.get("bitterness")),
+                    "body_level": _int(entry.get("body_level")),
+                    "taste_hint": entry.get("taste_hint", ""),
+                    "description": entry.get("description", ""),
+                    "image": entry.get("image", ""),
+                    "buy_from": entry.get("buy_from", ""),
+                }
+            )
         if len(entries) < limit:
             break
         skip += limit

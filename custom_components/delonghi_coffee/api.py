@@ -1266,9 +1266,7 @@ class DeLonghiApi:
         """
         encoded = name.encode("utf-16-be")
         if len(encoded) > BEAN_NAME_MAX_BYTES:
-            raise DeLonghiApiError(
-                f"Bean name too long: {len(encoded)} bytes (max {BEAN_NAME_MAX_BYTES} UTF-16-BE)"
-            )
+            raise DeLonghiApiError(f"Bean name too long: {len(encoded)} bytes (max {BEAN_NAME_MAX_BYTES} UTF-16-BE)")
         return encoded.ljust(BEAN_NAME_MAX_BYTES, b"\x00")
 
     @classmethod
@@ -1308,11 +1306,7 @@ class DeLonghiApi:
             raise DeLonghiApiError(f"flag2 must be 0 or 1, got {flag2}")
 
         name_bytes = cls._encode_bean_name(name)
-        payload = (
-            bytes([slot])
-            + name_bytes
-            + bytes([temperature, intensity, grinder, flag1, flag2])
-        )
+        payload = bytes([slot]) + name_bytes + bytes([temperature, intensity, grinder, flag1, flag2])
         # total = 1(0x0D) + 1(len) + 1(opcode) + 46(payload) + 2(crc) = 51
         return bytes([0x0D, len(payload) + 4, OPCODE_WRITE_BEAN_SYSTEM]) + payload
 
@@ -1350,9 +1344,7 @@ class DeLonghiApi:
         flag2: int = 1,
     ) -> bool:
         """Write a Bean Adapt profile (ECAM 0xBB)."""
-        body = self._build_bean_write_body(
-            slot, name, temperature, intensity, grinder, flag1, flag2
-        )
+        body = self._build_bean_write_body(slot, name, temperature, intensity, grinder, flag1, flag2)
         cmd = body + self._crc16(body)
         _LOGGER.info(
             "Writing bean system slot %d name=%r temperature=%d intensity=%d grinder=%d on %s: %s",
