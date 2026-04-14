@@ -565,6 +565,43 @@ class TestRetryDecorator:
             props = api.get_properties("DSN")
             assert "test" in props
 
+    def test_401_during_reauth_does_not_recurse(self):
+        """Regression: a 401 raised while we are already re-authenticating
+        must not trigger another re-auth attempt — the _retry decorator
+        should abort with DeLonghiAuthError instead of looping back into
+        authenticate().
+
+        Scenario: user-level call enters the retry loop, gets 401, flips
+        the _reauthenticating flag, calls authenticate() — and during
+        that window a nested 401 is observed. The flag must short-circuit
+        the reauth path so we bail cleanly.
+        """
+        api = DeLonghiApi("test@example.com", "password", region="EU")
+        api._ayla_token = "fake"
+        api._token_expires = time.time() + 86400
+        api._session = MagicMock()
+
+        resp401 = MagicMock(spec=requests.Response)
+        resp401.status_code = 401
+        resp401.raise_for_status.side_effect = requests.HTTPError(response=resp401)
+
+        # Simulate persistent 401s on every GET.
+        api._session.get.side_effect = requests.HTTPError(response=resp401)
+
+        # Pre-set the flag — mimics a re-entry during in-flight auth.
+        api._reauthenticating = True
+
+        reauth_spy = MagicMock()
+        with (
+            patch.object(api, "authenticate", side_effect=reauth_spy),
+            pytest.raises(DeLonghiAuthError, match="re-authentication itself"),
+        ):
+            api.get_properties("DSN")
+
+        # Key assertion: authenticate() must NOT have been called while
+        # the flag was already set — we short-circuited instead.
+        reauth_spy.assert_not_called()
+
 
 class TestRegionConfig:
     """Test multi-region configuration."""

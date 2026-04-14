@@ -44,8 +44,13 @@ def _decode_utf16(data: bytes) -> str:
     """
     if len(data) < 2:
         return ""
-    nulls_even = sum(1 for i in range(0, min(len(data), 20), 2) if data[i] == 0)
-    nulls_odd = sum(1 for i in range(1, min(len(data), 20), 2) if data[i] == 0)
+    # Sample the first 20 bytes at most. Trim to an even length so the
+    # even/odd split is symmetric and safe even when ``data`` has an odd
+    # size (would otherwise let the BE counter peek past the LE counter).
+    sample_len = min(len(data), 20)
+    sample_len -= sample_len % 2
+    nulls_even = sum(1 for i in range(0, sample_len, 2) if data[i] == 0)
+    nulls_odd = sum(1 for i in range(1, sample_len, 2) if data[i] == 0)
     encoding = "utf-16-be" if nulls_even >= nulls_odd else "utf-16-le"
     return data.decode(encoding, errors="replace").replace("\x00", "").strip()
 
@@ -79,11 +84,22 @@ def _retry(func):  # noqa: ANN001, ANN202
                 # Don't retry 404s — property doesn't exist, retrying won't help
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 404:
                     raise
-                # Re-authenticate on 401 (token revoked server-side)
+                # Re-authenticate on 401 (token revoked server-side).
+                # Guard against recursion: if we are already re-authenticating
+                # and still hit 401, propagate instead of re-entering the
+                # auth path (which would just fail the same way).
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 401:
+                    self_obj = args[0]
+                    if getattr(self_obj, "_reauthenticating", False):
+                        _LOGGER.error("Got 401 during re-authentication, aborting retry loop")
+                        raise DeLonghiAuthError("re-authentication itself returned 401") from err
                     _LOGGER.warning("Got 401, re-authenticating")
-                    with contextlib.suppress(DeLonghiAuthError, DeLonghiApiError):
-                        args[0].authenticate()  # args[0] is self
+                    self_obj._reauthenticating = True
+                    try:
+                        with contextlib.suppress(DeLonghiAuthError, DeLonghiApiError):
+                            self_obj.authenticate()
+                    finally:
+                        self_obj._reauthenticating = False
                 # Rate limited — longer backoff
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 429:
                     delay = RETRY_DELAY * (2**attempt)  # 4, 8, 16s for 429
@@ -151,6 +167,10 @@ class DeLonghiApi:
 
         # Cache whether ping_connected is supported (None = unknown, False = not supported)
         self._ping_supported: bool | None = None
+
+        # Guard flag used by the _retry decorator to prevent recursive
+        # re-authentication when the auth endpoint itself returns 401.
+        self._reauthenticating: bool = False
 
         # Rate limiting tracker
         self._rate_tracker = RateLimitTracker()
@@ -247,8 +267,11 @@ class DeLonghiApi:
                 _LOGGER.info("TranscodeTable loaded: %d machines", len(self._transcode_table))
             else:
                 _LOGGER.warning("TranscodeTable fetch failed: HTTP %d", resp.status_code)
-        except Exception as err:
-            _LOGGER.warning("TranscodeTable fetch failed: %s", err)
+        except requests.RequestException as err:
+            _LOGGER.warning("TranscodeTable fetch network error: %s", err)
+        except ValueError as err:
+            # JSON decode failure — backend returned non-JSON.
+            _LOGGER.warning("TranscodeTable fetch: invalid JSON payload (%s)", err)
 
     def identify_model(self, props: dict[str, Any]) -> dict[str, Any]:
         """Identify the machine model from properties and TranscodeTable.

@@ -38,3 +38,24 @@ class TestDecodeUTF16:
         """All null bytes (empty name)."""
         result = _decode_utf16(b"\x00\x00\x00\x00")
         assert result == ""
+
+    def test_odd_length_does_not_raise(self):
+        """Regression: odd-length buffers must not trigger an IndexError.
+
+        The endianness detector samples even and odd byte positions
+        independently; when the buffer length is odd it must clamp the
+        sample to a symmetric even length instead of peeking past the
+        last valid index of either stream.
+        """
+        # 21 bytes: 20 bytes of valid UTF-16-LE "Mocha12345" + trailing garbage byte.
+        payload = "Mocha12345".encode("utf-16-le") + b"\xff"
+        assert len(payload) == 21
+        # Must not raise; decoded text should contain the prefix.
+        result = _decode_utf16(payload)
+        assert result.startswith("Mocha12345")
+
+    def test_very_short_odd_length(self):
+        """Regression: 3-byte odd buffer is handled gracefully."""
+        # 3 bytes is below the 4-byte threshold where both detectors see
+        # equal counts; the function must still return without crashing.
+        _decode_utf16(b"\x41\x00\x42")  # Must not raise.

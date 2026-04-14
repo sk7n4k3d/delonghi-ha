@@ -189,7 +189,18 @@ class TestFetchTranscodeTable:
 
     def test_fetch_failure_leaves_none(self):
         """Failed fetch leaves table as None (graceful degradation)."""
-        self.api._session.post.side_effect = Exception("Network error")
+        import requests
+
+        self.api._session.post.side_effect = requests.ConnectionError("Network error")
+        self.api.fetch_transcode_table()
+        assert self.api._transcode_table is None
+
+    def test_fetch_invalid_json_leaves_none(self):
+        """Non-JSON payload still degrades gracefully."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.side_effect = ValueError("not json")
+        self.api._session.post.return_value = mock_resp
         self.api.fetch_transcode_table()
         assert self.api._transcode_table is None
 
