@@ -102,3 +102,10 @@ sys.modules["homeassistant.const"].CONF_PASSWORD = "password"
 sys.modules["homeassistant.const"].Platform = MagicMock()
 sys.modules["homeassistant.helpers.entity"] = MagicMock()
 sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock()
+
+# Real exception class so production code can raise/catch it cleanly.
+# Kept as a single shared class across all test modules to avoid identity
+# drift when multiple test files import or reference HomeAssistantError.
+sys.modules["homeassistant.exceptions"].HomeAssistantError = type(
+    "HomeAssistantError", (Exception,), {}
+)

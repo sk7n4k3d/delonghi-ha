@@ -1,15 +1,9 @@
 """Test button.py — entity classes + async_setup_entry flow."""
 
 import asyncio
-import sys
 from unittest.mock import MagicMock
 
 import pytest
-
-# Real exception for HA error path tests (the conftest mock returns a MagicMock)
-sys.modules["homeassistant.exceptions"].HomeAssistantError = type(
-    "HomeAssistantError", (Exception,), {}
-)
 
 from custom_components.delonghi_coffee import button as button_mod  # noqa: E402
 from custom_components.delonghi_coffee.api import DeLonghiApiError  # noqa: E402

@@ -1,11 +1,15 @@
-"""Test DeLonghiPowerSwitch — retry task lifecycle."""
+"""Test DeLonghiPowerSwitch — retry task lifecycle + power flow + state inference."""
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from custom_components.delonghi_coffee.switch import DeLonghiPowerSwitch
+import pytest
+
+from custom_components.delonghi_coffee import switch as switch_mod  # noqa: E402
+from custom_components.delonghi_coffee.api import DeLonghiApiError  # noqa: E402
+from custom_components.delonghi_coffee.switch import DeLonghiPowerSwitch  # noqa: E402
 
 
 def _make_switch() -> DeLonghiPowerSwitch:
@@ -77,3 +81,259 @@ class TestRetryTaskLifecycle:
             assert sw._retry_task is None
 
         asyncio.run(_scenario())
+
+
+def _make_hass():
+    """Hass with awaitable executor + sync task scheduler."""
+    hass = MagicMock()
+
+    async def _run_executor(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    hass.async_add_executor_job = _run_executor
+
+    def _create_task(coro):
+        loop = asyncio.get_event_loop()
+        return loop.create_task(coro)
+
+    hass.async_create_task = _create_task
+    return hass
+
+
+class TestAssumedAndIsOn:
+    def test_assumed_state_always_true(self):
+        sw = _make_switch()
+        assert sw.assumed_state is True
+
+    def test_is_on_unknown_state_uses_assumed(self):
+        sw = _make_switch()
+        sw.coordinator.data = {"machine_state": "Unknown"}
+        sw._assumed_on = True
+        assert sw.is_on is True
+        sw._assumed_on = False
+        assert sw.is_on is False
+
+    def test_is_on_off_state_returns_false(self):
+        sw = _make_switch()
+        sw.coordinator.data = {"machine_state": "Off"}
+        assert sw.is_on is False
+
+    def test_is_on_going_to_sleep_returns_false(self):
+        sw = _make_switch()
+        sw.coordinator.data = {"machine_state": "Going to sleep"}
+        assert sw.is_on is False
+
+    def test_is_on_brewing_returns_true(self):
+        sw = _make_switch()
+        sw.coordinator.data = {"machine_state": "Brewing"}
+        assert sw.is_on is True
+
+    def test_is_on_ready_returns_true(self):
+        sw = _make_switch()
+        sw.coordinator.data = {"machine_state": "Ready"}
+        assert sw.is_on is True
+
+    def test_monitor_confirms_command_clears_assumed(self):
+        sw = _make_switch()
+        sw._last_commanded_on = True
+        sw.coordinator.data = {"machine_state": "Ready"}
+        assert sw.is_on is True
+        # Once the monitor confirms, _last_commanded_on is cleared
+        assert sw._last_commanded_on is None
+        assert sw._monitor_stale_count == 0
+
+    def test_stale_monitor_falls_back_to_assumed(self):
+        """3+ consecutive contradictions from monitor → trust assumed state."""
+        sw = _make_switch()
+        sw._assumed_on = True
+        sw._last_commanded_on = True
+        # Monitor keeps saying Off — contradicts our command
+        sw.coordinator.data = {"machine_state": "Off"}
+        # Tick 1: contradiction starts
+        sw.is_on
+        assert sw._monitor_stale_count == 1
+        # Tick 2
+        sw.is_on
+        assert sw._monitor_stale_count == 2
+        # Tick 3: stale threshold reached, assumed state takes over
+        result = sw.is_on
+        assert sw._monitor_stale_count == 3
+        assert result is True  # assumed_on=True wins
+
+    def test_monitor_state_change_resets_stale_count(self):
+        """If monitor state changes, the stale counter resets."""
+        sw = _make_switch()
+        sw._last_commanded_on = True
+        sw.coordinator.data = {"machine_state": "Off"}
+        sw.is_on  # count=1
+        sw.coordinator.data = {"machine_state": "Going to sleep"}
+        sw.is_on  # state changed, count resets to 1
+        assert sw._monitor_stale_count == 1
+
+    def test_no_command_pending_assumed_tracks_monitor(self):
+        sw = _make_switch()
+        sw._last_commanded_on = None
+        sw.coordinator.data = {"machine_state": "Ready"}
+        assert sw.is_on is True
+        assert sw._assumed_on is True
+
+
+class TestAsyncTurnOnFlow:
+    """Power on flow with sleep patched to no-op."""
+
+    def test_full_sequence_on_success(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw.async_turn_on()
+            # Cancel the bg retry to avoid leak
+            if sw._retry_task is not None:
+                sw._retry_task.cancel()
+                try:
+                    await sw._retry_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        asyncio.run(_go())
+        sw._api.send_command.assert_called_once()
+        assert sw._assumed_on is True
+        assert sw._last_commanded_on is True
+
+    def test_concurrent_call_skipped_when_locked(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            await sw._cmd_lock.acquire()
+            try:
+                await sw.async_turn_on()
+            finally:
+                sw._cmd_lock.release()
+
+        asyncio.run(_go())
+        sw._api.send_command.assert_not_called()
+
+    def test_send_command_failure_raises(self):
+        from homeassistant.exceptions import HomeAssistantError
+
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock(side_effect=DeLonghiApiError("boom"))
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw.async_turn_on()
+
+        with pytest.raises(HomeAssistantError, match="Failed to power on"):
+            asyncio.run(_go())
+
+    def test_ping_failure_falls_back_to_request_monitor(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=False)
+        sw._api.request_monitor = MagicMock()
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw.async_turn_on()
+            if sw._retry_task is not None:
+                sw._retry_task.cancel()
+                try:
+                    await sw._retry_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        asyncio.run(_go())
+        # Wake phase + post-command phase both fall back to request_monitor
+        assert sw._api.request_monitor.call_count >= 1
+        sw._api.send_command.assert_called_once()
+
+
+class TestAsyncTurnOffFlow:
+    def test_off_command_succeeds(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+
+        asyncio.run(sw.async_turn_off())
+
+        sw._api.send_command.assert_called_once()
+        assert sw._assumed_on is False
+        assert sw._last_commanded_on is False
+
+    def test_off_concurrent_call_skipped(self):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            await sw._cmd_lock.acquire()
+            try:
+                await sw.async_turn_off()
+            finally:
+                sw._cmd_lock.release()
+
+        asyncio.run(_go())
+        sw._api.send_command.assert_not_called()
+
+    def test_off_send_command_failure_raises(self):
+        from homeassistant.exceptions import HomeAssistantError
+
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.send_command = MagicMock(side_effect=DeLonghiApiError("boom"))
+
+        with pytest.raises(HomeAssistantError, match="Failed to power off"):
+            asyncio.run(sw.async_turn_off())
+
+
+class TestAsyncSetupEntry:
+    def test_adds_one_switch_entity(self):
+        hass = MagicMock()
+        entry = MagicMock()
+        entry.entry_id = "eid"
+        coord = MagicMock()
+        coord.data = {"machine_state": "Off"}
+        hass.data = {
+            "delonghi_coffee": {
+                entry.entry_id: {
+                    "api": MagicMock(),
+                    "coordinator": coord,
+                    "dsn": "DSN",
+                    "model": "ECAM",
+                    "device_name": "Test",
+                    "sw_version": "1.0",
+                }
+            }
+        }
+        added: list = []
+        async_add = MagicMock(side_effect=lambda ents: added.extend(ents))
+        asyncio.run(switch_mod.async_setup_entry(hass, entry, async_add))
+        assert len(added) == 1
+        assert isinstance(added[0], DeLonghiPowerSwitch)
+
+
+async def _noop_sleep(*_args, **_kwargs):
+    return None
