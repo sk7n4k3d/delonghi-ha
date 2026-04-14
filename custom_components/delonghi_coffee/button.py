@@ -224,9 +224,7 @@ class DeLonghiLanDiagnosticButton(CoordinatorEntity[DeLonghiCoordinator], Button
         """Fetch LAN config, spin up the pipeline, log everything."""
         _LOGGER.info("LAN diagnostic requested for %s", self._dsn)
         try:
-            lan_config = await self.hass.async_add_executor_job(
-                self._api.get_lan_config, self._dsn
-            )
+            lan_config = await self.hass.async_add_executor_job(self._api.get_lan_config, self._dsn)
         except Exception as err:  # noqa: BLE001 — never raise to HA
             _LOGGER.exception("LAN diagnostic: get_lan_config failed")
             raise HomeAssistantError(f"LAN diagnostic cloud fetch failed: {err}") from err
@@ -242,7 +240,5 @@ class DeLonghiLanDiagnosticButton(CoordinatorEntity[DeLonghiCoordinator], Button
                 result.summary(),
                 result.details,
             )
-            raise HomeAssistantError(
-                f"LAN diagnostic failed: {result.summary()}"
-            )
+            raise HomeAssistantError(f"LAN diagnostic failed: {result.summary()}")
         _LOGGER.info("LAN diagnostic finished: %s", result.summary())

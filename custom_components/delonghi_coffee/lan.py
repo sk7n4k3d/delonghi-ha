@@ -171,11 +171,11 @@ class LanSession:
     to :func:`decrypt_device_to_app`.
     """
 
-    app_sign_key: bytes      # 32 bytes (HMAC-SHA256 digest)
-    app_crypto_key: bytes    # 32 bytes (→ AES-256)
-    app_iv: bytes            # 16 bytes — current IV, mutates
-    dev_crypto_key: bytes    # 32 bytes
-    dev_iv: bytes            # 16 bytes — current IV, mutates
+    app_sign_key: bytes  # 32 bytes (HMAC-SHA256 digest)
+    app_crypto_key: bytes  # 32 bytes (→ AES-256)
+    app_iv: bytes  # 16 bytes — current IV, mutates
+    dev_crypto_key: bytes  # 32 bytes
+    dev_iv: bytes  # 16 bytes — current IV, mutates
     random_1: str
     random_2: str
     time_1: int
@@ -224,8 +224,7 @@ def derive_session(
     dev_iv_full = _derive(r2 + r1 + t2 + t1 + b"\x32")
 
     _LAN_LOGGER.debug(
-        "derive_session: r1=%s r2=%s t1=%d t2=%d "
-        "app_crypto_fp=%s dev_crypto_fp=%s app_iv_fp=%s dev_iv_fp=%s",
+        "derive_session: r1=%s r2=%s t1=%d t2=%d app_crypto_fp=%s dev_crypto_fp=%s app_iv_fp=%s dev_iv_fp=%s",
         random_1,
         random_2,
         time_1,
@@ -260,9 +259,7 @@ def sign_payload(sign_key: bytes, payload: str) -> str:
     The machine signs the plaintext (not the ciphertext). Do not swap the
     order — wire compatibility breaks silently if you do.
     """
-    return base64.b64encode(
-        _hmac_sha256(sign_key, payload.encode("utf-8"))
-    ).decode("utf-8")
+    return base64.b64encode(_hmac_sha256(sign_key, payload.encode("utf-8"))).decode("utf-8")
 
 
 def verify_signature(sign_key: bytes, payload: str, signature_b64: str) -> bool:
@@ -282,16 +279,12 @@ def verify_signature(sign_key: bytes, payload: str, signature_b64: str) -> bool:
 
 def build_command_payload(seq: int, data: dict[str, Any]) -> str:
     """Wrap an ECAM command body as ``{"seq_no": "<seq>", "data": {...}}``."""
-    return json.dumps(
-        {"seq_no": str(seq), "data": data}, separators=(",", ":")
-    )
+    return json.dumps({"seq_no": str(seq), "data": data}, separators=(",", ":"))
 
 
 def build_heartbeat_payload(seq: int) -> str:
     """Empty payload used when the command queue is drained."""
-    return json.dumps(
-        {"seq_no": str(seq), "data": {}}, separators=(",", ":")
-    )
+    return json.dumps({"seq_no": str(seq), "data": {}}, separators=(",", ":"))
 
 
 def encrypt_app_to_device(session: LanSession, payload: str) -> tuple[str, str]:
@@ -406,9 +399,7 @@ class DeLonghiLanServer:
 
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
-        self._site = web.TCPSite(
-            self._runner, self._config.bind_host, self._config.port
-        )
+        self._site = web.TCPSite(self._runner, self._config.bind_host, self._config.port)
         await self._site.start()
         _LOGGER.info(
             "LAN server listening on %s:%d for dsn=%s",
@@ -461,9 +452,7 @@ class DeLonghiLanServer:
         random_2 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
         time_2 = int(time.time())
         try:
-            self._session = derive_session(
-                self._config.lan_key, random_1, random_2, time_1, time_2
-            )
+            self._session = derive_session(self._config.lan_key, random_1, random_2, time_1, time_2)
         except LanCryptoError as err:
             _LAN_LOGGER.error("handshake: derive failed for %s: %s", peer, err)
             return web.json_response({"error": "crypto"}, status=400)
@@ -473,11 +462,12 @@ class DeLonghiLanServer:
 
         _LAN_LOGGER.info(
             "handshake ok (dsn=%s peer=%s time_1=%d time_2=%d)",
-            self._config.dsn, peer, time_1, time_2,
+            self._config.dsn,
+            peer,
+            time_1,
+            time_2,
         )
-        return web.json_response(
-            {"random_2": random_2, "time_2": time_2}, status=202
-        )
+        return web.json_response({"random_2": random_2, "time_2": time_2}, status=202)
 
     async def _handle_command_poll(self, request: web.Request) -> web.Response:
         """GET/POST /local_lan/commands.json — machine polls for work.
@@ -488,9 +478,7 @@ class DeLonghiLanServer:
         would desync with the device's dev_iv.
         """
         if self._session is None:
-            return web.json_response(
-                {"enc": "", "sign": "", "seq": self._seq}
-            )
+            return web.json_response({"enc": "", "sign": "", "seq": self._seq})
 
         try:
             data = self._pending.get_nowait()
@@ -509,13 +497,9 @@ class DeLonghiLanServer:
             enc, sign = encrypt_app_to_device(self._session, payload)
         except Exception as err:  # noqa: BLE001 — never 500 the device
             _LOGGER.error("LAN command poll: encrypt failed: %s", err)
-            return web.json_response(
-                {"enc": "", "sign": "", "seq": current_seq}
-            )
+            return web.json_response({"enc": "", "sign": "", "seq": current_seq})
 
-        return web.json_response(
-            {"enc": enc, "sign": sign, "seq": current_seq}
-        )
+        return web.json_response({"enc": enc, "sign": sign, "seq": current_seq})
 
     async def _handle_property_push(self, request: web.Request) -> web.Response:
         """POST /local_lan/property/datapoint.json — encrypted device → app.
@@ -542,9 +526,7 @@ class DeLonghiLanServer:
         try:
             data = json.loads(plaintext.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as err:
-            _LOGGER.debug(
-                "LAN datapoint: decode failed (%s); returning 200", err
-            )
+            _LOGGER.debug("LAN datapoint: decode failed (%s); returning 200", err)
             return web.json_response({}, status=200)
 
         if self._on_property is not None:
@@ -726,9 +708,7 @@ async def run_lan_diagnostic(
         stage = "handshake"
         random_1 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
         time_1 = int(time.time())
-        _LAN_LOGGER.debug(
-            "handshake: simulated device random_1=%s time_1=%d", random_1, time_1
-        )
+        _LAN_LOGGER.debug("handshake: simulated device random_1=%s time_1=%d", random_1, time_1)
 
         from aiohttp import ClientSession
 
@@ -742,9 +722,7 @@ async def run_lan_diagnostic(
                 handshake_body = await resp.json()
 
             if handshake_status != 202:
-                raise LanHandshakeError(
-                    f"HTTP {handshake_status} body={handshake_body}"
-                )
+                raise LanHandshakeError(f"HTTP {handshake_status} body={handshake_body}")
             random_2 = str(handshake_body["random_2"])
             time_2 = int(handshake_body["time_2"])
             _LAN_LOGGER.debug(
@@ -763,15 +741,11 @@ async def run_lan_diagnostic(
             #
             # Both sides rotate the matching IV in lock-step after each
             # message in that direction.
-            client_session = derive_session(
-                lan_key, random_1, random_2, time_1, time_2
-            )
+            client_session = derive_session(lan_key, random_1, random_2, time_1, time_2)
 
             # -- Stage: app_to_device (command poll) ---------------------
             stage = "app_to_device"
-            async with client.get(
-                base_url + LAN_COMMAND_PATH, timeout=5.0
-            ) as resp:
+            async with client.get(base_url + LAN_COMMAND_PATH, timeout=5.0) as resp:
                 poll_status = resp.status
                 poll_body = await resp.json()
             if poll_status != 200:
@@ -790,9 +764,7 @@ async def run_lan_diagnostic(
                     client_session.app_crypto_key,
                     client_session.app_iv,
                 )
-                client_session.app_iv = _rotate_iv_from_ciphertext(
-                    poll_body["enc"]
-                )
+                client_session.app_iv = _rotate_iv_from_ciphertext(poll_body["enc"])
                 parsed = json.loads(plaintext.decode("utf-8"))
                 if "seq_no" not in parsed or "data" not in parsed:
                     raise LanError(f"unexpected poll payload shape: {parsed!r}")
@@ -811,9 +783,7 @@ async def run_lan_diagnostic(
             datapoint = {"property": {"name": "diagnostic_ping", "value": 1}}
             payload = json.dumps(datapoint, separators=(",", ":"))
             # Encrypt using our dev_* — server decrypts with its dev_*.
-            enc = _aes_encrypt(
-                payload, client_session.dev_crypto_key, client_session.dev_iv
-            )
+            enc = _aes_encrypt(payload, client_session.dev_crypto_key, client_session.dev_iv)
             client_session.dev_iv = _rotate_iv_from_ciphertext(enc)
             async with client.post(
                 base_url + LAN_PROPERTY_PATH,
@@ -823,9 +793,7 @@ async def run_lan_diagnostic(
                 push_status = resp.status
             if push_status != 200:
                 raise LanError(f"datapoint push HTTP {push_status}")
-            _LAN_LOGGER.debug(
-                "device_to_app: datapoint accepted enc_len=%d", len(enc)
-            )
+            _LAN_LOGGER.debug("device_to_app: datapoint accepted enc_len=%d", len(enc))
 
             # -- Stage: teardown -----------------------------------------
             stage = "teardown"

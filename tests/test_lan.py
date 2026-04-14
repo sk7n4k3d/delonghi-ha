@@ -122,13 +122,7 @@ def test_derive_session_matches_nested_hmac_spec_app_branch() -> None:
     """app_crypto_key must equal H(k, H(k, r1+r2+t1+t2+0x31) || ...)."""
     s = _make_session()
     key = _LAN_KEY.encode("utf-8")
-    parts = (
-        _R1.encode("utf-8")
-        + _R2.encode("utf-8")
-        + str(_T1).encode("utf-8")
-        + str(_T2).encode("utf-8")
-        + b"\x31"
-    )
+    parts = _R1.encode("utf-8") + _R2.encode("utf-8") + str(_T1).encode("utf-8") + str(_T2).encode("utf-8") + b"\x31"
     assert s.app_crypto_key == _nested_hmac(key, parts)
 
 
@@ -136,13 +130,7 @@ def test_derive_session_matches_nested_hmac_spec_sign_tag() -> None:
     """Sign key uses tag 0x30 (not 0x31 or 0x32)."""
     s = _make_session()
     key = _LAN_KEY.encode("utf-8")
-    parts = (
-        _R1.encode("utf-8")
-        + _R2.encode("utf-8")
-        + str(_T1).encode("utf-8")
-        + str(_T2).encode("utf-8")
-        + b"\x30"
-    )
+    parts = _R1.encode("utf-8") + _R2.encode("utf-8") + str(_T1).encode("utf-8") + str(_T2).encode("utf-8") + b"\x30"
     assert s.app_sign_key == _nested_hmac(key, parts)
 
 
@@ -150,13 +138,7 @@ def test_derive_session_matches_nested_hmac_spec_iv_seed() -> None:
     """IV seed is the nested HMAC with tag 0x32, truncated to 16 bytes."""
     s = _make_session()
     key = _LAN_KEY.encode("utf-8")
-    parts = (
-        _R1.encode("utf-8")
-        + _R2.encode("utf-8")
-        + str(_T1).encode("utf-8")
-        + str(_T2).encode("utf-8")
-        + b"\x32"
-    )
+    parts = _R1.encode("utf-8") + _R2.encode("utf-8") + str(_T1).encode("utf-8") + str(_T2).encode("utf-8") + b"\x32"
     expected = _nested_hmac(key, parts)[:16]
     assert s.app_iv == expected
 
@@ -165,13 +147,7 @@ def test_derive_session_device_branch_reverses_inputs() -> None:
     """dev_* derivation uses r2+r1+t2+t1 (reversed) per cremalink spec."""
     s = _make_session()
     key = _LAN_KEY.encode("utf-8")
-    parts = (
-        _R2.encode("utf-8")
-        + _R1.encode("utf-8")
-        + str(_T2).encode("utf-8")
-        + str(_T1).encode("utf-8")
-        + b"\x31"
-    )
+    parts = _R2.encode("utf-8") + _R1.encode("utf-8") + str(_T2).encode("utf-8") + str(_T1).encode("utf-8") + b"\x31"
     assert s.dev_crypto_key == _nested_hmac(key, parts)
 
 
@@ -394,9 +370,7 @@ except ImportError:
 
 def test_run_lan_diagnostic_missing_key_fails_gracefully() -> None:
     """No lan_key → diagnostic stops at cloud_config without raising."""
-    result = asyncio.run(
-        run_lan_diagnostic(lan_key=None, lan_ip="10.0.0.1", dsn="DSN-NOKEY")
-    )
+    result = asyncio.run(run_lan_diagnostic(lan_key=None, lan_ip="10.0.0.1", dsn="DSN-NOKEY"))
     assert isinstance(result, LanDiagnosticResult)
     assert result.success is False
     assert result.stage == "cloud_config"
@@ -468,7 +442,9 @@ class TestCoordinatorLanStartup:
 
     @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
     def test_lan_starts_when_enabled_with_key_and_ip(self) -> None:
-        coord = _make_coordinator({"lan_enabled": True, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"})
+        coord = _make_coordinator(
+            {"lan_enabled": True, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"}
+        )
 
         with (
             patch.object(DeLonghiCoordinator, "_get_local_ip", return_value="192.168.1.50"),
@@ -489,7 +465,9 @@ class TestCoordinatorLanStartup:
             assert coord._lan_start_attempted is True
 
     def test_lan_does_not_start_when_disabled(self) -> None:
-        coord = _make_coordinator({"lan_enabled": False, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"})
+        coord = _make_coordinator(
+            {"lan_enabled": False, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"}
+        )
 
         with patch("custom_components.delonghi_coffee.coordinator.DeLonghiLanServer") as mock_cls:
             asyncio.run(coord._try_start_lan())
@@ -514,7 +492,9 @@ class TestCoordinatorLanStartup:
             mock_cls.assert_not_called()
 
     def test_lan_does_not_start_when_no_local_ip(self) -> None:
-        coord = _make_coordinator({"lan_enabled": True, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"})
+        coord = _make_coordinator(
+            {"lan_enabled": True, "lanip_key": "abcdef1234567890abcdef1234567890", "lan_ip": "192.168.1.100"}
+        )
 
         with (
             patch.object(DeLonghiCoordinator, "_get_local_ip", return_value=None),
