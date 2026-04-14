@@ -2,6 +2,7 @@
 
 import base64
 import struct
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -265,9 +266,50 @@ class TestTokenRefresh:
         api._ping_supported = None
         api._rate_tracker = MagicMock()
         api._devices = []
+        api._token_lock = threading.Lock()
         with patch.object(api, "authenticate") as mock_auth:
             api._ensure_token()
             mock_auth.assert_called_once()
+
+    def test_concurrent_refresh_only_calls_authenticate_once(self):
+        """Multiple threads racing on _ensure_token must call authenticate only once."""
+        import time as time_mod
+        from concurrent.futures import ThreadPoolExecutor
+
+        api = DeLonghiApi.__new__(DeLonghiApi)
+        api._token_expires = time_mod.time() - 100  # expired
+        api._ayla_refresh = None
+        api._ayla_token = "expired_token"
+        api._ayla_user = "https://user.test.com"
+        api._ayla_app_id = "test"
+        api._ayla_app_secret = "test"
+        api._gigya_url = "https://gigya.test.com"
+        api._email = "test@example.com"
+        api._password = "password"
+        api._session = MagicMock()
+        api._ayla_ads = "https://ads.test.com"
+        api._oem_model = ""
+        api._cmd_property = None
+        api._ping_supported = None
+        api._rate_tracker = MagicMock()
+        api._devices = []
+        api._token_lock = threading.Lock()
+
+        call_count = [0]
+
+        def fake_auth():
+            call_count[0] += 1
+            time_mod.sleep(0.05)
+            api._token_expires = time_mod.time() + 3600
+
+        with patch.object(api, "authenticate", side_effect=fake_auth), ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(api._ensure_token) for _ in range(8)]
+            for f in futures:
+                f.result()
+
+        # Without the lock, multiple threads would each see the expired token
+        # and each call authenticate(). The double-checked lock guarantees one.
+        assert call_count[0] == 1, f"authenticate called {call_count[0]}x, expected 1"
 
 
 class TestRateTrackerIntegration:

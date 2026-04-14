@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import struct
+import threading
 import time
 from typing import Any
 
@@ -140,6 +141,10 @@ class DeLonghiApi:
         self._ayla_token: str | None = None
         self._ayla_refresh: str | None = None
         self._token_expires: float = 0
+        # Serialize concurrent token refresh from executor threads (coordinator
+        # poll + button press + select change can all race past the expiry
+        # check and trigger duplicate refresh_token POSTs).
+        self._token_lock = threading.Lock()
         self._devices: list[dict[str, Any]] = []
         self._device_name: str | None = None
         self._sw_version: str | None = None
@@ -415,8 +420,14 @@ class DeLonghiApi:
             raise DeLonghiApiError(f"Network error: {err}") from err
 
     def _ensure_token(self) -> None:
-        """Refresh token if expired."""
-        if time.time() >= self._token_expires - 300:
+        """Refresh token if expired (thread-safe via double-checked lock)."""
+        # Fast path: token still valid, no lock needed
+        if time.time() < self._token_expires - 300:
+            return
+        with self._token_lock:
+            # Re-check after acquiring lock (another thread may have refreshed)
+            if time.time() < self._token_expires - 300:
+                return
             if self._ayla_refresh:
                 try:
                     resp = self._session.post(
