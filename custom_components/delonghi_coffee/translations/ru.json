@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "Всего всех напитков"
+      },
+      "bean_system_1_uses": {
+        "name": "Использования профиля зёрен 1"
+      },
+      "bean_system_2_uses": {
+        "name": "Использования профиля зёрен 2"
+      },
+      "bean_system_3_uses": {
+        "name": "Использования профиля зёрен 3"
+      },
+      "bean_system_4_uses": {
+        "name": "Использования профиля зёрен 4"
+      },
+      "bean_system_5_uses": {
+        "name": "Использования профиля зёрен 5"
+      },
+      "bean_system_6_uses": {
+        "name": "Использования профиля зёрен 6"
+      },
+      "beverages_modified": {
+        "name": "Изменённые напитки"
+      },
+      "beverages_aborted": {
+        "name": "Отменённые приготовления"
+      },
+      "beverages_doubled": {
+        "name": "Двойные шоты"
+      },
+      "cortado": {
+        "name": "Кортадо"
+      },
+      "long_black": {
+        "name": "Лонг блэк"
+      },
+      "preground_brews": {
+        "name": "Молотый кофе"
+      },
+      "travel_mug": {
+        "name": "Дорожные кружки"
       }
     },
     "binary_sensor": {
@@ -458,6 +497,16 @@
     "select": {
       "profile_select": {
         "name": "Профиль"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Параметры De'Longhi Coffee",
+        "data": {
+          "diagnostic_mode": "Режим диагностики (показывает сырые свойства для отладки)"
+        }
       }
     }
   }

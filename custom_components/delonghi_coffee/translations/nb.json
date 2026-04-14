@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "Alle drikker totalt"
+      },
+      "bean_system_1_uses": {
+        "name": "Bønneprofil 1 bruk"
+      },
+      "bean_system_2_uses": {
+        "name": "Bønneprofil 2 bruk"
+      },
+      "bean_system_3_uses": {
+        "name": "Bønneprofil 3 bruk"
+      },
+      "bean_system_4_uses": {
+        "name": "Bønneprofil 4 bruk"
+      },
+      "bean_system_5_uses": {
+        "name": "Bønneprofil 5 bruk"
+      },
+      "bean_system_6_uses": {
+        "name": "Bønneprofil 6 bruk"
+      },
+      "beverages_modified": {
+        "name": "Modifiserte drikker"
+      },
+      "beverages_aborted": {
+        "name": "Avbrutte tilberedninger"
+      },
+      "beverages_doubled": {
+        "name": "Doble shots"
+      },
+      "cortado": {
+        "name": "Cortados"
+      },
+      "long_black": {
+        "name": "Long Blacks"
+      },
+      "preground_brews": {
+        "name": "Formalt brygg"
+      },
+      "travel_mug": {
+        "name": "Reisekopper"
       }
     },
     "binary_sensor": {
@@ -458,6 +497,16 @@
     "select": {
       "profile_select": {
         "name": "Profil"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De'Longhi Coffee alternativer",
+        "data": {
+          "diagnostic_mode": "Diagnosemodus (viser rå egenskaper for feilsøking)"
+        }
       }
     }
   }

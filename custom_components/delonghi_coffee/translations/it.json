@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "Totale di tutte le bevande"
+      },
+      "bean_system_1_uses": {
+        "name": "Utilizzi profilo chicchi 1"
+      },
+      "bean_system_2_uses": {
+        "name": "Utilizzi profilo chicchi 2"
+      },
+      "bean_system_3_uses": {
+        "name": "Utilizzi profilo chicchi 3"
+      },
+      "bean_system_4_uses": {
+        "name": "Utilizzi profilo chicchi 4"
+      },
+      "bean_system_5_uses": {
+        "name": "Utilizzi profilo chicchi 5"
+      },
+      "bean_system_6_uses": {
+        "name": "Utilizzi profilo chicchi 6"
+      },
+      "beverages_modified": {
+        "name": "Bevande modificate"
+      },
+      "beverages_aborted": {
+        "name": "Preparazioni annullate"
+      },
+      "beverages_doubled": {
+        "name": "Doppi shot"
+      },
+      "cortado": {
+        "name": "Cortados"
+      },
+      "long_black": {
+        "name": "Long Blacks"
+      },
+      "preground_brews": {
+        "name": "Preparazioni premacinate"
+      },
+      "travel_mug": {
+        "name": "Tazze da viaggio"
       }
     },
     "binary_sensor": {
@@ -458,6 +497,16 @@
     "select": {
       "profile_select": {
         "name": "Profilo"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opzioni De'Longhi Coffee",
+        "data": {
+          "diagnostic_mode": "Modalità diagnostica (espone proprietà grezze per il debug)"
+        }
       }
     }
   }

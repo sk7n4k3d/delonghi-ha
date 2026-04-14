@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "Alla drycker totalt"
+      },
+      "bean_system_1_uses": {
+        "name": "Bönprofil 1 användning"
+      },
+      "bean_system_2_uses": {
+        "name": "Bönprofil 2 användning"
+      },
+      "bean_system_3_uses": {
+        "name": "Bönprofil 3 användning"
+      },
+      "bean_system_4_uses": {
+        "name": "Bönprofil 4 användning"
+      },
+      "bean_system_5_uses": {
+        "name": "Bönprofil 5 användning"
+      },
+      "bean_system_6_uses": {
+        "name": "Bönprofil 6 användning"
+      },
+      "beverages_modified": {
+        "name": "Modifierade drycker"
+      },
+      "beverages_aborted": {
+        "name": "Avbrutna bryggningar"
+      },
+      "beverages_doubled": {
+        "name": "Dubbla shots"
+      },
+      "cortado": {
+        "name": "Cortados"
+      },
+      "long_black": {
+        "name": "Long Blacks"
+      },
+      "preground_brews": {
+        "name": "Förmalda bryggningar"
+      },
+      "travel_mug": {
+        "name": "Resemuggar"
       }
     },
     "binary_sensor": {
@@ -458,6 +497,16 @@
     "select": {
       "profile_select": {
         "name": "Profil"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De'Longhi Coffee inställningar",
+        "data": {
+          "diagnostic_mode": "Diagnosläge (visar råa egenskaper för felsökning)"
+        }
       }
     }
   }
