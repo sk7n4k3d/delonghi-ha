@@ -159,9 +159,7 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
 
 # ContentStack drink_id → recipe key reverse mapping (for beverage discovery)
 DRINK_ID_TO_KEY: Final[dict[int, str]] = {
-    int(meta["drink_id"]): key
-    for key, meta in BEVERAGES.items()
-    if "drink_id" in meta
+    int(meta["drink_id"]): key for key, meta in BEVERAGES.items() if "drink_id" in meta
 }
 
 
@@ -192,6 +190,7 @@ def resolve_beverage_meta(
         "name": bev_key.replace("_", " ").title(),
         "icon": "mdi:coffee",
     }, False
+
 
 # Power on / wake up command (Request ID 132, contents 0x02 0x01)
 POWER_ON_CMD: Final = bytes.fromhex("0d07840f02015512")

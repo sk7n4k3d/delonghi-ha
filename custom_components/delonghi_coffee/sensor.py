@@ -320,7 +320,9 @@ class DeLonghiBeanSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
             attrs["bean_types"] = ba.get("bean_types", [])
             attrs["roasting_levels"] = ba.get("roasting_levels", [])
             attrs["taste_feedback"] = ba.get("taste_feedback", [])
-            attrs["grinder_range"] = f"{ba.get('grinder_min', 0)}-{ba.get('grinder_max', 0)} step={ba.get('grinder_step', 0)}"
+            attrs["grinder_range"] = (
+                f"{ba.get('grinder_min', 0)}-{ba.get('grinder_max', 0)} step={ba.get('grinder_step', 0)}"
+            )
             attrs["flow_range"] = f"{ba.get('flow_min', 0)}-{ba.get('flow_max', 0)} delta={ba.get('flow_delta', 0)}"
             attrs["preinfusion_water"] = f"{ba.get('preinfusion_water_min', 0)}-{ba.get('preinfusion_water_max', 0)} mL"
             for bt in ba.get("bean_table", []):

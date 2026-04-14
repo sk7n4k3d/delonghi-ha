@@ -33,9 +33,7 @@ from custom_components.delonghi_coffee.const import (
 # temperature=high, intensity=strong, grinder setting=5. 46 bytes total:
 # [1B slot][40B UTF-16-BE name][5B tail].
 MATTGK_PAYLOAD = (
-    bytes([0x01])
-    + "Grains 1".encode("utf-16-be").ljust(40, b"\x00")
-    + bytes([0x0A, 0x02, 0x04, 0x00, 0x01])
+    bytes([0x01]) + "Grains 1".encode("utf-16-be").ljust(40, b"\x00") + bytes([0x0A, 0x02, 0x04, 0x00, 0x01])
 )
 
 
@@ -214,8 +212,7 @@ class TestWriteBeanSystemFrame:
         assert body[3:] == MATTGK_PAYLOAD
         # Full expected body hex (header + payload, no CRC)
         expected_hex = (
-            "0d32bb01"
-            "0047007200610069006e0073002000310000000000000000000000000000000000000000000000000a02040001"
+            "0d32bb010047007200610069006e0073002000310000000000000000000000000000000000000000000000000a02040001"
         )
         assert body.hex() == expected_hex
 
@@ -236,13 +233,9 @@ class TestWriteBeanSystemFrame:
 
     def test_write_invalid_slot(self):
         with pytest.raises(DeLonghiApiError, match="slot"):
-            DeLonghiApi._build_bean_write_body(
-                slot=0, name="X", temperature=0, intensity=0, grinder=0
-            )
+            DeLonghiApi._build_bean_write_body(slot=0, name="X", temperature=0, intensity=0, grinder=0)
         with pytest.raises(DeLonghiApiError, match="slot"):
-            DeLonghiApi._build_bean_write_body(
-                slot=8, name="X", temperature=0, intensity=0, grinder=0
-            )
+            DeLonghiApi._build_bean_write_body(slot=8, name="X", temperature=0, intensity=0, grinder=0)
 
     def test_write_invalid_flag(self):
         with pytest.raises(DeLonghiApiError, match="flag1"):
@@ -266,13 +259,9 @@ class TestWriteBeanSystemFrame:
 
     def test_write_invalid_byte_range(self):
         with pytest.raises(DeLonghiApiError):
-            DeLonghiApi._build_bean_write_body(
-                slot=1, name="X", temperature=300, intensity=0, grinder=0
-            )
+            DeLonghiApi._build_bean_write_body(slot=1, name="X", temperature=300, intensity=0, grinder=0)
         with pytest.raises(DeLonghiApiError):
-            DeLonghiApi._build_bean_write_body(
-                slot=1, name="X", temperature=0, intensity=-1, grinder=0
-            )
+            DeLonghiApi._build_bean_write_body(slot=1, name="X", temperature=0, intensity=-1, grinder=0)
 
     def test_write_bean_system_sends_command(self):
         api = _make_api()
