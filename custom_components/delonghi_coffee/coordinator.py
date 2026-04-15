@@ -292,22 +292,71 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _on_lan_property(self, data: dict[str, Any]) -> None:
         """Callback invoked when the machine pushes a decrypted datapoint.
 
-        Phase 1 (observe): log everything, cache property values, trigger
-        entity updates so sensors reflect LAN data alongside cloud data.
+        Accepts both shapes seen in the wild:
+          - ``{"property": {"name": ..., "value": ...}}``
+          - ``{"properties": [{"property": {...}}, ...]}``
         """
         _LAN_LOGGER.debug("LAN property received: %s", data)
 
-        # Cache individual properties if the payload has the expected shape
+        cached: list[tuple[str, Any]] = []
+
         prop = data.get("property")
-        if isinstance(prop, dict):
-            name = prop.get("name")
-            value = prop.get("value")
-            if name is not None:
-                self._lan_properties[name] = value
-                _LAN_LOGGER.debug("LAN property cached: %s = %s", name, value)
+        if isinstance(prop, dict) and prop.get("name"):
+            cached.append((prop["name"], prop.get("value")))
+
+        for entry in data.get("properties") or []:
+            if not isinstance(entry, dict):
+                continue
+            p = entry.get("property") if isinstance(entry.get("property"), dict) else entry
+            if isinstance(p, dict) and p.get("name"):
+                cached.append((p["name"], p.get("value")))
+
+        for name, value in cached:
+            self._lan_properties[name] = value
+            _LAN_LOGGER.info("LAN property: %s = %s", name, value)
 
         # Trigger entity update so sensors can pick up LAN data
         self.async_set_updated_data(self.data if self.data else {})
+
+    async def send_command_lan(self, ecam_bytes: bytes) -> bool:
+        """Enqueue an ECAM command for delivery on the next device LAN poll.
+
+        Returns True when the LAN session is active and the command was
+        queued. Returns False when the LAN path is unavailable — the caller
+        is expected to fall back to the cloud ``send_command``.
+
+        Packet shape matches what the device already receives over Ayla:
+        a base64-encoded ECAM command + timestamp (± app_id), wrapped in
+        the Ayla ``properties[].property`` envelope.
+        """
+        server = self._lan_server
+        if server is None or server.session is None:
+            return False
+
+        include_app_id = self.api._cmd_property != "data_request"  # noqa: SLF001
+        b64 = self.api._build_packet(ecam_bytes, include_app_id=include_app_id)  # noqa: SLF001
+        property_name = self.api._cmd_property or "app_data_request"  # noqa: SLF001
+
+        payload = {
+            "properties": [
+                {
+                    "property": {
+                        "base_type": "string",
+                        "dsn": self.dsn,
+                        "name": property_name,
+                        "value": b64,
+                    }
+                }
+            ]
+        }
+        await server.enqueue_command(payload)
+        _LAN_LOGGER.info(
+            "LAN command queued: property=%s ecam=%s (app_id=%s)",
+            property_name,
+            ecam_bytes.hex(),
+            include_app_id,
+        )
+        return True
 
     @staticmethod
     def _get_local_ip(device_ip: str) -> str | None:

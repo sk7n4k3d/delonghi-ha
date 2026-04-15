@@ -531,6 +531,75 @@ class TestCoordinatorLanPropertyCallback:
         asyncio.run(coord._on_lan_property({}))
         assert coord._lan_properties == {}
 
+    def test_property_array_shape_is_cached(self) -> None:
+        coord = _make_coordinator()
+        coord.data = {"status": "RUN"}
+        data = {
+            "seq_no": "17",
+            "data": {},
+            "properties": [
+                {"property": {"name": "d302_monitor", "value": "AAA="}},
+                {"property": {"name": "d701_tot_bev_b", "value": 42}},
+            ],
+        }
+
+        asyncio.run(coord._on_lan_property(data))
+
+        assert coord._lan_properties["d302_monitor"] == "AAA="
+        assert coord._lan_properties["d701_tot_bev_b"] == 42
+
+
+class TestCoordinatorSendCommandLan:
+    """Verify send_command_lan enqueues via LAN when session active."""
+
+    def test_returns_false_when_no_server(self) -> None:
+        coord = _make_coordinator()
+        assert asyncio.run(coord.send_command_lan(b"\x0d\x07\x84")) is False
+
+    def test_returns_false_when_no_session(self) -> None:
+        coord = _make_coordinator()
+        coord._lan_server = MagicMock()
+        coord._lan_server.session = None
+        assert asyncio.run(coord.send_command_lan(b"\x0d\x07\x84")) is False
+
+    def test_enqueues_when_session_active(self) -> None:
+        coord = _make_coordinator()
+        coord.api._cmd_property = "data_request"
+        coord.api._build_packet = MagicMock(return_value="b64packet==")
+        server = MagicMock()
+        server.session = MagicMock()
+        server.enqueue_command = AsyncMock()
+        coord._lan_server = server
+
+        ok = asyncio.run(coord.send_command_lan(b"\x0d\x07\x84\x0f\x02\x01\x55\x12"))
+
+        assert ok is True
+        coord.api._build_packet.assert_called_once()
+        # include_app_id should be False for data_request (legacy PrimaDonna)
+        assert coord.api._build_packet.call_args.kwargs == {"include_app_id": False}
+        server.enqueue_command.assert_awaited_once()
+        payload = server.enqueue_command.call_args.args[0]
+        prop = payload["properties"][0]["property"]
+        assert prop["name"] == "data_request"
+        assert prop["dsn"] == "DSN-TEST"
+        assert prop["value"] == "b64packet=="
+        assert prop["base_type"] == "string"
+
+    def test_uses_app_data_request_for_striker(self) -> None:
+        coord = _make_coordinator()
+        coord.api._cmd_property = "app_data_request"
+        coord.api._build_packet = MagicMock(return_value="b64==")
+        server = MagicMock()
+        server.session = MagicMock()
+        server.enqueue_command = AsyncMock()
+        coord._lan_server = server
+
+        asyncio.run(coord.send_command_lan(b"\x0d\x07\x84"))
+
+        assert coord.api._build_packet.call_args.kwargs == {"include_app_id": True}
+        payload = server.enqueue_command.call_args.args[0]
+        assert payload["properties"][0]["property"]["name"] == "app_data_request"
+
 
 class TestCoordinatorGetLocalIp:
     """Verify _get_local_ip helper."""

@@ -140,7 +140,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
                     _LOGGER.debug("Wake failed, sending power ON anyway")
 
                 # Phase 2: Power ON command
-                await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
+                if not await self.coordinator.send_command_lan(POWER_ON_CMD):
+                    await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
                 _LOGGER.info("Power ON command sent")
 
                 # Phase 3: Post-command refresh (force the machine to push its new state)
@@ -177,7 +178,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
                 if not ping_ok:
                     await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
                 await asyncio.sleep(_WAKE_DELAY)
-                await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
+                if not await self.coordinator.send_command_lan(POWER_ON_CMD):
+                    await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_ON_CMD)
                 ping_ok = await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
                 if not ping_ok:
                     await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
@@ -196,7 +198,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         async with self._cmd_lock:
             _LOGGER.info("Powering off %s", self._dsn)
             try:
-                await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
+                if not await self.coordinator.send_command_lan(POWER_OFF_CMD):
+                    await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
 
                 # Post-command refresh — force the machine to push its new state
                 # so the HA monitor reflects Off immediately instead of relying on
