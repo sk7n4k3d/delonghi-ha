@@ -121,6 +121,20 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         self._attr_icon = meta["icon"]
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
+    @property
+    def available(self) -> bool:
+        """Hide the button when the coordinator is unhealthy or the machine can't brew.
+
+        Pressing while offline / off produces silent command drops on the cloud
+        side and leaves the user wondering why nothing happens. Reading
+        coordinator.data defensively: early in setup it can be None.
+        """
+        if not super().available:
+            return False
+        data = self.coordinator.data or {}
+        state = data.get("machine_state", "Unknown")
+        return state not in ("Off", "Sleep")
+
     async def async_press(self) -> None:
         """Brew the beverage using the selected profile's recipe."""
         profile = self.coordinator.selected_profile or 1
@@ -186,6 +200,15 @@ class DeLonghiSyncButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         self._attr_translation_key = "sync_recipes"
         self._attr_icon = "mdi:cloud-sync-outline"
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def available(self) -> bool:
+        """Only allow a sync when the coordinator has fresh data from the cloud."""
+        if not super().available:
+            return False
+        data = self.coordinator.data or {}
+        state = data.get("machine_state", "Unknown")
+        return state not in ("Off", "Sleep")
 
     async def async_press(self) -> None:
         """Force sync recipes for the selected profile."""

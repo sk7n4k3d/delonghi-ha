@@ -84,11 +84,55 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register custom brew service
-    async def handle_brew_custom(call) -> None:  # noqa: ANN001
-        """Handle the brew_custom service call."""
-        from homeassistant.exceptions import HomeAssistantError as HAError
+    _register_services(hass)
 
+    return True
+
+
+def _resolve_target(hass: HomeAssistant, call) -> tuple[DeLonghiApi, DeLonghiCoordinator, str]:  # noqa: ANN001
+    """Pick the (api, coordinator, dsn) tuple for a service call.
+
+    Honors ``config_entry_id`` in call data when present, otherwise falls back
+    to the first registered entry. Multi-entry users without the field get a
+    warning so the ambiguity doesn't go silent.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    entries: dict = hass.data.get(DOMAIN, {})
+    if not entries:
+        raise HomeAssistantError("No De'Longhi machine configured")
+
+    entry_id = None
+    if hasattr(call, "data") and isinstance(call.data, dict):
+        entry_id = call.data.get("config_entry_id")
+
+    if entry_id and entry_id in entries:
+        bundle = entries[entry_id]
+    else:
+        if len(entries) > 1 and not entry_id:
+            _LOGGER.warning(
+                "Multiple De'Longhi entries configured; service call defaulted to the first one. "
+                "Pass config_entry_id in service data to target a specific machine."
+            )
+        bundle = next(iter(entries.values()))
+
+    return bundle["api"], bundle["coordinator"], bundle["dsn"]
+
+
+def _register_services(hass: HomeAssistant) -> None:
+    """Register domain-wide services exactly once across all entries.
+
+    Handlers look up the target entry at call time via ``_resolve_target``,
+    so reload / multi-entry setups behave correctly without re-registering
+    (which would keep stale closures from a previous ``async_setup_entry``).
+    """
+    if hass.services.has_service(DOMAIN, "brew_custom"):
+        return
+
+    from homeassistant.exceptions import HomeAssistantError as HAError
+
+    async def handle_brew_custom(call) -> None:  # noqa: ANN001
+        api, coord, dsn = _resolve_target(hass, call)
         beverage = call.data["beverage"]
         coffee_qty = call.data.get("coffee_qty")
         milk_qty = call.data.get("milk_qty")
@@ -96,7 +140,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         taste = call.data.get("taste", 3)
         milk_froth = call.data.get("milk_froth", 2)
         temperature = call.data.get("temperature", 1)
-        profile = call.data.get("profile", coordinator.selected_profile or 1)
+        profile = call.data.get("profile", coord.selected_profile or 1)
 
         try:
             await hass.async_add_executor_job(
@@ -114,47 +158,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
-    hass.services.async_register(DOMAIN, "brew_custom", handle_brew_custom)
-
     async def handle_cancel_brew(call) -> None:  # noqa: ANN001
-        """Handle the cancel_brew service call."""
-        from homeassistant.exceptions import HomeAssistantError as HAError
-
+        api, _coord, dsn = _resolve_target(hass, call)
         try:
             await hass.async_add_executor_job(api.cancel_brew, dsn)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
-    hass.services.async_register(DOMAIN, "cancel_brew", handle_cancel_brew)
-
     async def handle_sync_recipes(call) -> None:  # noqa: ANN001
-        """Handle the sync_recipes service call."""
-        from homeassistant.exceptions import HomeAssistantError as HAError
-
-        profile = call.data.get("profile", coordinator.selected_profile or 1)
+        api, coord, dsn = _resolve_target(hass, call)
+        profile = call.data.get("profile", coord.selected_profile or 1)
         try:
             await hass.async_add_executor_job(api.sync_recipes, dsn, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
-    hass.services.async_register(DOMAIN, "sync_recipes", handle_sync_recipes)
-
     async def handle_select_bean_profile(call) -> None:  # noqa: ANN001
-        """Handle the select_bean_profile service call (ECAM 0xB9)."""
-        from homeassistant.exceptions import HomeAssistantError as HAError
-
+        api, _coord, dsn = _resolve_target(hass, call)
         slot = int(call.data["slot"])
         try:
             await hass.async_add_executor_job(api.select_bean_system, dsn, slot)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
-    hass.services.async_register(DOMAIN, "select_bean_profile", handle_select_bean_profile)
-
     async def handle_write_bean_profile(call) -> None:  # noqa: ANN001
-        """Handle the write_bean_profile service call (ECAM 0xBB)."""
-        from homeassistant.exceptions import HomeAssistantError as HAError
-
+        api, _coord, dsn = _resolve_target(hass, call)
         slot = int(call.data["slot"])
         name = str(call.data["name"])
         temperature = int(call.data.get("temperature", 0))
@@ -177,9 +205,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
+    hass.services.async_register(DOMAIN, "brew_custom", handle_brew_custom)
+    hass.services.async_register(DOMAIN, "cancel_brew", handle_cancel_brew)
+    hass.services.async_register(DOMAIN, "sync_recipes", handle_sync_recipes)
+    hass.services.async_register(DOMAIN, "select_bean_profile", handle_select_bean_profile)
     hass.services.async_register(DOMAIN, "write_bean_profile", handle_write_bean_profile)
-
-    return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
