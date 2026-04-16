@@ -635,3 +635,109 @@ class TestCoordinatorStopLan:
         coord = _make_coordinator()
         # Should not raise
         asyncio.run(coord.async_stop_lan())
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Concurrency — handshake vs poll races. If these start flaking, somebody
+# dropped the lock in _handle_handshake or _handle_command_poll.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _MockRequest:
+    """Minimal stand-in for aiohttp.web.Request."""
+
+    def __init__(self, body: dict | None = None, remote: str = "192.168.1.42") -> None:
+        self._body = body or {}
+        self.remote = remote
+
+    async def json(self):
+        return self._body
+
+
+def _make_handshake_body() -> dict:
+    random_1 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
+    return {"key_exchange": {"random_1": random_1, "time_1": 1700000000}}
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_concurrent_handshakes_leave_server_consistent() -> None:
+    """50 parallel handshakes → session set, seq == 0, no partial state."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-RACE",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        reqs = [_MockRequest(_make_handshake_body()) for _ in range(50)]
+        responses = await asyncio.gather(*(server._handle_handshake(r) for r in reqs))
+        for resp in responses:
+            assert resp.status == 202, f"handshake failed: {resp.status}"
+        assert server.session is not None, "session never set under concurrency"
+        assert server.seq == 0, f"seq corrupted by concurrent handshakes: {server.seq}"
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_concurrent_polls_produce_strictly_monotonic_seq() -> None:
+    """N parallel polls must all get distinct seq values — no duplicates, no skips."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-POLL",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        # Prime with a handshake so session is set.
+        await server._handle_handshake(_MockRequest(_make_handshake_body()))
+        assert server.session is not None
+        assert server.seq == 0
+
+        n = 40
+        reqs = [_MockRequest({}) for _ in range(n)]
+        responses = await asyncio.gather(*(server._handle_command_poll(r) for r in reqs))
+        seqs = [json.loads(r.body.decode("utf-8"))["seq"] for r in responses]
+        assert sorted(seqs) == list(range(1, n + 1)), (
+            f"seq not strictly monotonic under concurrency: sorted={sorted(seqs)}"
+        )
+        assert server.seq == n, f"final seq should equal number of polls: {server.seq} vs {n}"
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_during_polls_does_not_skip_seqs() -> None:
+    """Handshake mid-flight resets seq to 0; subsequent polls resume monotonically."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-MIXED",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        # Prime + run polls, then re-handshake mid-flight.
+        await server._handle_handshake(_MockRequest(_make_handshake_body()))
+        polls_a = [server._handle_command_poll(_MockRequest({})) for _ in range(20)]
+        handshake_b = server._handle_handshake(_MockRequest(_make_handshake_body()))
+        polls_c = [server._handle_command_poll(_MockRequest({})) for _ in range(20)]
+
+        results = await asyncio.gather(*polls_a, handshake_b, *polls_c)
+        # Every individual call must have succeeded — no 500s, no exceptions.
+        for r in results:
+            assert r.status in (200, 202), f"unexpected status {r.status}"
+        assert server.session is not None
+
+    asyncio.run(run())

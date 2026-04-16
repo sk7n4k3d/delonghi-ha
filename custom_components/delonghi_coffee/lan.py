@@ -452,12 +452,13 @@ class DeLonghiLanServer:
         random_2 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
         time_2 = int(time.time())
         try:
-            self._session = derive_session(self._config.lan_key, random_1, random_2, time_1, time_2)
+            session = derive_session(self._config.lan_key, random_1, random_2, time_1, time_2)
         except LanCryptoError as err:
             _LAN_LOGGER.error("handshake: derive failed for %s: %s", peer, err)
             return web.json_response({"error": "crypto"}, status=400)
 
         async with self._lock:
+            self._session = session
             self._seq = 0
 
         _LAN_LOGGER.info(
@@ -477,24 +478,24 @@ class DeLonghiLanServer:
         advancing — otherwise the first real command after a quiet period
         would desync with the device's dev_iv.
         """
-        if self._session is None:
-            return web.json_response({"enc": "", "sign": "", "seq": self._seq})
+        async with self._lock:
+            session = self._session
+            if session is None:
+                return web.json_response({"enc": "", "sign": "", "seq": self._seq})
+            try:
+                data = self._pending.get_nowait()
+            except asyncio.QueueEmpty:
+                data = None
+            self._seq += 1
+            current_seq = self._seq
 
-        try:
-            data = self._pending.get_nowait()
-        except asyncio.QueueEmpty:
-            async with self._lock:
-                self._seq += 1
-                current_seq = self._seq
+        if data is None:
             payload = build_heartbeat_payload(current_seq)
         else:
-            async with self._lock:
-                self._seq += 1
-                current_seq = self._seq
             payload = build_command_payload(current_seq, data)
 
         try:
-            enc, sign = encrypt_app_to_device(self._session, payload)
+            enc, sign = encrypt_app_to_device(session, payload)
         except Exception as err:  # noqa: BLE001 — never 500 the device
             _LOGGER.error("LAN command poll: encrypt failed: %s", err)
             return web.json_response({"enc": "", "sign": "", "seq": current_seq})
@@ -508,7 +509,8 @@ class DeLonghiLanServer:
         response makes the device back off its push schedule and we lose
         live telemetry — the cure is worse than the disease.
         """
-        if self._session is None:
+        session = self._session
+        if session is None:
             return web.json_response({}, status=200)
 
         try:
@@ -518,7 +520,7 @@ class DeLonghiLanServer:
             return web.json_response({}, status=200)
 
         try:
-            plaintext = decrypt_device_to_app(self._session, enc)
+            plaintext = decrypt_device_to_app(session, enc)
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("LAN datapoint: decrypt failed: %s", err)
             return web.json_response({}, status=200)
