@@ -416,6 +416,59 @@ def test_run_lan_diagnostic_never_raises_on_unexpected_error(monkeypatch) -> Non
     assert "simulated server boot failure" in result.reason
 
 
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_run_lan_diagnostic_hard_timeout() -> None:
+    """A wedged stage must not hang the button — timeout returns cleanly."""
+    from custom_components.delonghi_coffee import lan as lan_module
+
+    original_start = lan_module.DeLonghiLanServer.start
+
+    async def _slow_start(self):
+        await original_start(self)
+        # Simulate something catastrophic mid-pipeline. The outer
+        # asyncio.timeout should abort us.
+        await asyncio.sleep(30)
+
+    with patch.object(lan_module.DeLonghiLanServer, "start", _slow_start):
+        result = asyncio.run(
+            run_lan_diagnostic(
+                lan_key="0123456789abcdef0123456789abcdef",
+                lan_ip="127.0.0.1",
+                dsn="DSN-HANG",
+                total_timeout=0.2,
+            )
+        )
+    assert result.success is False
+    assert "timeout" in result.reason.lower()
+    # Teardown must still fire even on timeout so the port is released.
+    assert result.details.get("teardown_ok") is True
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_run_lan_diagnostic_reports_teardown_failure(monkeypatch) -> None:
+    """A broken server.stop surfaces in result.details instead of being silent."""
+    from custom_components.delonghi_coffee import lan as lan_module
+
+    original_stop = lan_module.DeLonghiLanServer.stop
+
+    async def _bad_stop(self):
+        await original_stop(self)
+        raise RuntimeError("simulated teardown failure")
+
+    with patch.object(lan_module.DeLonghiLanServer, "stop", _bad_stop):
+        result = asyncio.run(
+            run_lan_diagnostic(
+                lan_key="0123456789abcdef0123456789abcdef",
+                lan_ip="127.0.0.1",
+                dsn="DSN-TDOWN",
+            )
+        )
+    # Happy path completes; only the teardown fails.
+    assert result.success is True
+    assert result.details.get("teardown_ok") is False
+    assert "simulated teardown failure" in result.details.get("teardown_error", "")
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Coordinator LAN integration — verify startup logic and property callback.
 # ─────────────────────────────────────────────────────────────────────────

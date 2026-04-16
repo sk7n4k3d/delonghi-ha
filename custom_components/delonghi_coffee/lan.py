@@ -717,12 +717,16 @@ class LanDiagnosticResult:
         return f"failed at stage={self.stage}: {self.reason}"
 
 
+DIAG_TOTAL_TIMEOUT: float = 30.0
+
+
 async def run_lan_diagnostic(
     lan_key: str | None,
     lan_ip: str | None,
     dsn: str,
     *,
     bind_host: str = "127.0.0.1",
+    total_timeout: float = DIAG_TOTAL_TIMEOUT,
 ) -> LanDiagnosticResult:
     """Run an end-to-end LAN pipeline check and log every step.
 
@@ -734,7 +738,10 @@ async def run_lan_diagnostic(
 
     The routine is intentionally defensive: **any** failure is caught
     and returned as a :class:`LanDiagnosticResult` so the Home Assistant
-    button press never raises.
+    button press never raises. ``total_timeout`` hard-caps the whole
+    pipeline so a stuck aiohttp client (or a teardown bug) can't hang
+    the button indefinitely — per-stage timeouts already exist on each
+    client call, this is belt-and-suspenders.
     """
     _LAN_LOGGER.info("===== LAN DIAGNOSTIC START (dsn=%s) =====", dsn)
 
@@ -775,118 +782,127 @@ async def run_lan_diagnostic(
     server: DeLonghiLanServer | None = None
     stage = "server_start"
     try:
-        config = LanServerConfig(
-            dsn=dsn,
-            lan_key=lan_key,
-            advertised_ip=bind_host,
-            bind_host=bind_host,
-            port=0,  # OS picks a free port on loopback
-        )
-        server = DeLonghiLanServer(config)
-        await server.start()
-        chosen_port = _server_actual_port(server)
-        details["diagnostic_port"] = chosen_port
-        _LAN_LOGGER.debug(
-            "server_start: listening on %s:%s (ephemeral loopback)",
-            bind_host,
-            chosen_port,
-        )
-        base_url = f"http://{bind_host}:{chosen_port}"
-
-        # -- Stage: handshake --------------------------------------------
-        stage = "handshake"
-        random_1 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
-        time_1 = int(time.time())
-        _LAN_LOGGER.debug("handshake: simulated device random_1=%s time_1=%d", random_1, time_1)
-
-        from aiohttp import ClientSession
-
-        async with ClientSession() as client:
-            async with client.post(
-                base_url + LAN_HANDSHAKE_PATH,
-                json={"key_exchange": {"random_1": random_1, "time_1": time_1}},
-                timeout=5.0,
-            ) as resp:
-                handshake_status = resp.status
-                handshake_body = await resp.json()
-
-            if handshake_status != 202:
-                raise LanHandshakeError(f"HTTP {handshake_status} body={handshake_body}")
-            random_2 = str(handshake_body["random_2"])
-            time_2 = int(handshake_body["time_2"])
-            _LAN_LOGGER.debug(
-                "handshake: server responded 202 random_2=%s time_2=%d",
-                random_2,
-                time_2,
+        async with asyncio.timeout(total_timeout):
+            config = LanServerConfig(
+                dsn=dsn,
+                lan_key=lan_key,
+                advertised_ip=bind_host,
+                bind_host=bind_host,
+                port=0,  # OS picks a free port on loopback
             )
-
-            # The simulated client plays the DEVICE role. Both sides
-            # derive the same session material, but the CONVENTION is:
-            #
-            #   * server encrypts outgoing commands with app_* / app_iv
-            #     → client DECRYPTS incoming commands with app_* / app_iv
-            #   * client encrypts outgoing datapoints with dev_* / dev_iv
-            #     → server DECRYPTS incoming datapoints with dev_* / dev_iv
-            #
-            # Both sides rotate the matching IV in lock-step after each
-            # message in that direction.
-            client_session = derive_session(lan_key, random_1, random_2, time_1, time_2)
-
-            # -- Stage: app_to_device (command poll) ---------------------
-            stage = "app_to_device"
-            async with client.get(base_url + LAN_COMMAND_PATH, timeout=5.0) as resp:
-                poll_status = resp.status
-                poll_body = await resp.json()
-            if poll_status != 200:
-                raise LanError(f"command poll HTTP {poll_status}")
-            if not poll_body.get("enc"):
-                raise LanError("command poll returned empty enc")
+            server = DeLonghiLanServer(config)
+            await server.start()
+            chosen_port = _server_actual_port(server)
+            details["diagnostic_port"] = chosen_port
             _LAN_LOGGER.debug(
-                "app_to_device: poll seq=%s enc_len=%d",
-                poll_body.get("seq"),
-                len(poll_body.get("enc", "")),
+                "server_start: listening on %s:%s (ephemeral loopback)",
+                bind_host,
+                chosen_port,
             )
-            try:
-                # Decrypt using our app_* — mirrors the server's encrypt.
-                plaintext = _aes_decrypt(
-                    poll_body["enc"],
-                    client_session.app_crypto_key,
-                    client_session.app_iv,
-                )
-                client_session.app_iv = _rotate_iv_from_ciphertext(poll_body["enc"])
-                parsed = json.loads(plaintext.decode("utf-8"))
-                if "seq_no" not in parsed or "data" not in parsed:
-                    raise LanError(f"unexpected poll payload shape: {parsed!r}")
+            base_url = f"http://{bind_host}:{chosen_port}"
+
+            # -- Stage: handshake --------------------------------------------
+            stage = "handshake"
+            random_1 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
+            time_1 = int(time.time())
+            _LAN_LOGGER.debug("handshake: simulated device random_1=%s time_1=%d", random_1, time_1)
+
+            from aiohttp import ClientSession
+
+            async with ClientSession() as client:
+                async with client.post(
+                    base_url + LAN_HANDSHAKE_PATH,
+                    json={"key_exchange": {"random_1": random_1, "time_1": time_1}},
+                    timeout=5.0,
+                ) as resp:
+                    handshake_status = resp.status
+                    handshake_body = await resp.json()
+
+                if handshake_status != 202:
+                    raise LanHandshakeError(f"HTTP {handshake_status} body={handshake_body}")
+                random_2 = str(handshake_body["random_2"])
+                time_2 = int(handshake_body["time_2"])
                 _LAN_LOGGER.debug(
-                    "app_to_device: decrypted poll seq_no=%s data_keys=%s",
-                    parsed["seq_no"],
-                    list(parsed["data"].keys()),
+                    "handshake: server responded 202 random_2=%s time_2=%d",
+                    random_2,
+                    time_2,
                 )
-            except LanError:
-                raise
-            except Exception as err:  # noqa: BLE001
-                raise LanError(f"poll decrypt failed: {err}") from err
 
-            # -- Stage: device_to_app (datapoint push) ------------------
-            stage = "device_to_app"
-            datapoint = {"property": {"name": "diagnostic_ping", "value": 1}}
-            payload = json.dumps(datapoint, separators=(",", ":"))
-            # Encrypt using our dev_* — server decrypts with its dev_*.
-            enc = _aes_encrypt(payload, client_session.dev_crypto_key, client_session.dev_iv)
-            client_session.dev_iv = _rotate_iv_from_ciphertext(enc)
-            async with client.post(
-                base_url + LAN_PROPERTY_PATH,
-                json={"enc": enc},
-                timeout=5.0,
-            ) as resp:
-                push_status = resp.status
-            if push_status != 200:
-                raise LanError(f"datapoint push HTTP {push_status}")
-            _LAN_LOGGER.debug("device_to_app: datapoint accepted enc_len=%d", len(enc))
+                # The simulated client plays the DEVICE role. Both sides
+                # derive the same session material, but the CONVENTION is:
+                #
+                #   * server encrypts outgoing commands with app_* / app_iv
+                #     → client DECRYPTS incoming commands with app_* / app_iv
+                #   * client encrypts outgoing datapoints with dev_* / dev_iv
+                #     → server DECRYPTS incoming datapoints with dev_* / dev_iv
+                #
+                # Both sides rotate the matching IV in lock-step after each
+                # message in that direction.
+                client_session = derive_session(lan_key, random_1, random_2, time_1, time_2)
 
-            # -- Stage: teardown -----------------------------------------
-            stage = "teardown"
+                # -- Stage: app_to_device (command poll) ---------------------
+                stage = "app_to_device"
+                async with client.get(base_url + LAN_COMMAND_PATH, timeout=5.0) as resp:
+                    poll_status = resp.status
+                    poll_body = await resp.json()
+                if poll_status != 200:
+                    raise LanError(f"command poll HTTP {poll_status}")
+                if not poll_body.get("enc"):
+                    raise LanError("command poll returned empty enc")
+                _LAN_LOGGER.debug(
+                    "app_to_device: poll seq=%s enc_len=%d",
+                    poll_body.get("seq"),
+                    len(poll_body.get("enc", "")),
+                )
+                try:
+                    # Decrypt using our app_* — mirrors the server's encrypt.
+                    plaintext = _aes_decrypt(
+                        poll_body["enc"],
+                        client_session.app_crypto_key,
+                        client_session.app_iv,
+                    )
+                    client_session.app_iv = _rotate_iv_from_ciphertext(poll_body["enc"])
+                    parsed = json.loads(plaintext.decode("utf-8"))
+                    if "seq_no" not in parsed or "data" not in parsed:
+                        raise LanError(f"unexpected poll payload shape: {parsed!r}")
+                    _LAN_LOGGER.debug(
+                        "app_to_device: decrypted poll seq_no=%s data_keys=%s",
+                        parsed["seq_no"],
+                        list(parsed["data"].keys()),
+                    )
+                except LanError:
+                    raise
+                except Exception as err:  # noqa: BLE001
+                    raise LanError(f"poll decrypt failed: {err}") from err
 
+                # -- Stage: device_to_app (datapoint push) ------------------
+                stage = "device_to_app"
+                datapoint = {"property": {"name": "diagnostic_ping", "value": 1}}
+                payload = json.dumps(datapoint, separators=(",", ":"))
+                # Encrypt using our dev_* — server decrypts with its dev_*.
+                enc = _aes_encrypt(payload, client_session.dev_crypto_key, client_session.dev_iv)
+                client_session.dev_iv = _rotate_iv_from_ciphertext(enc)
+                async with client.post(
+                    base_url + LAN_PROPERTY_PATH,
+                    json={"enc": enc},
+                    timeout=5.0,
+                ) as resp:
+                    push_status = resp.status
+                if push_status != 200:
+                    raise LanError(f"datapoint push HTTP {push_status}")
+                _LAN_LOGGER.debug("device_to_app: datapoint accepted enc_len=%d", len(enc))
+
+                # -- Stage: teardown -----------------------------------------
+                stage = "teardown"
+
+    except TimeoutError as err:
+        _LAN_LOGGER.error("diagnostic timed out after %.1fs at stage=%s", total_timeout, stage)
+        result = LanDiagnosticResult(
+            success=False,
+            stage=stage,
+            reason=f"timeout after {total_timeout:.1f}s",
+            details={**details, "timeout_s": total_timeout},
+        )
     except Exception as err:  # noqa: BLE001 — button press must never raise
         _LAN_LOGGER.exception("diagnostic failed at stage=%s", stage)
         result = LanDiagnosticResult(
@@ -898,11 +914,21 @@ async def run_lan_diagnostic(
     else:
         result = LanDiagnosticResult(success=True, stage="teardown", details=details)
     finally:
+        # Teardown status is tracked separately so a stop() failure doesn't
+        # silently drop the port reservation — users who re-press the
+        # button would otherwise get "address in use" on the next run.
         if server is not None:
             try:
-                await server.stop()
+                # shield() protects teardown from the outer timeout scope
+                # being in a cancelled state on TimeoutError — without it
+                # ``await server.stop()`` would immediately raise
+                # CancelledError and leave the socket lingering until GC.
+                await asyncio.shield(server.stop())
+                result.details["teardown_ok"] = True
             except Exception as err:  # noqa: BLE001
                 _LAN_LOGGER.warning("teardown: server.stop raised %s", err)
+                result.details["teardown_ok"] = False
+                result.details["teardown_error"] = f"{type(err).__name__}: {err}"
 
     _LAN_LOGGER.info("===== LAN DIAGNOSTIC END (%s) =====", result.summary())
     return result
