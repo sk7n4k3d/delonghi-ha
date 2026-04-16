@@ -32,6 +32,23 @@ for mod_name in _HA_MODULES:
         sys.modules[mod_name] = MagicMock()
 
 
+def _wire_submodule(parent: str, child: str) -> None:
+    """Expose ``sys.modules['parent.child']`` as ``sys.modules['parent'].child``.
+
+    Without this, ``from parent import child`` returns the parent MagicMock's
+    auto-generated ``.child`` attribute instead of the submodule we carefully
+    stubbed — which silently breaks subclassing of stub base classes.
+    """
+    parent_mod = sys.modules[parent]
+    child_short = child.rsplit(".", 1)[-1]
+    setattr(parent_mod, child_short, sys.modules[f"{parent}.{child_short}"])
+
+
+for _mod in _HA_MODULES[1:]:
+    if _mod.count(".") >= 1:
+        _wire_submodule(_mod.rsplit(".", 1)[0], _mod)
+
+
 class _GenericBase:
     """Stand-in for HA's generic entity base classes.
 
@@ -57,6 +74,15 @@ class _GenericBase:
         """No-op stub — real HA provides cleanup hooks here."""
         return None
 
+    def async_write_ha_state(self) -> None:
+        """No-op stub — real HA persists state to the bus here."""
+        return None
+
+    @property
+    def name(self) -> str | None:
+        """Default name stub."""
+        return getattr(self, "_attr_name", None)
+
 
 class _StubEntity:
     """Minimal stub for platform entity mixins (SensorEntity, …)."""
@@ -78,6 +104,13 @@ _coord_mod = sys.modules["homeassistant.helpers.update_coordinator"]
 _coord_mod.CoordinatorEntity = _GenericBase
 _coord_mod.DataUpdateCoordinator = _GenericBase
 _coord_mod.UpdateFailed = type("UpdateFailed", (Exception,), {})
+
+# HomeAssistantError needs to be a real exception class — entities raise it,
+# and MagicMock subclasses of Exception don't satisfy `raise <cls>(...)`.
+_exc_mod = sys.modules["homeassistant.exceptions"]
+_exc_mod.HomeAssistantError = type("HomeAssistantError", (Exception,), {})
+_exc_mod.ConfigEntryAuthFailed = type("ConfigEntryAuthFailed", (Exception,), {})
+_exc_mod.ConfigEntryNotReady = type("ConfigEntryNotReady", (Exception,), {})
 
 _sensor_mod = sys.modules["homeassistant.components.sensor"]
 _sensor_mod.SensorEntity = _StubEntity
@@ -102,3 +135,53 @@ sys.modules["homeassistant.const"].CONF_PASSWORD = "password"
 sys.modules["homeassistant.const"].Platform = MagicMock()
 sys.modules["homeassistant.helpers.entity"] = MagicMock()
 sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock()
+
+
+# config_flow.py subclasses ``config_entries.ConfigFlow`` with a
+# ``domain=`` kwargs metaclass call — can't inherit from MagicMock. Provide
+# a real stub metaclass-compatible base class, along with a stub for
+# data_entry_flow.FlowResult.
+class _ConfigFlowBase:
+    def __init_subclass__(cls, **kwargs) -> None:  # absorb ``domain=``
+        super().__init_subclass__()
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.hass = kwargs.get("hass")
+        self.context = {}
+
+    async def async_set_unique_id(self, _uid: str) -> None:
+        return None
+
+    def _abort_if_unique_id_configured(self) -> None:
+        return None
+
+    def async_show_form(self, **kwargs) -> dict:
+        return {"type": "form", **kwargs}
+
+    def async_create_entry(self, **kwargs) -> dict:
+        return {"type": "create_entry", **kwargs}
+
+    def async_abort(self, **kwargs) -> dict:
+        return {"type": "abort", **kwargs}
+
+
+class _OptionsFlowBase:
+    def __init__(self, *args, **kwargs) -> None:
+        self.hass = None
+
+    def async_create_entry(self, **kwargs) -> dict:
+        return {"type": "create_entry", **kwargs}
+
+    def async_show_form(self, **kwargs) -> dict:
+        return {"type": "form", **kwargs}
+
+
+_ce_mod = sys.modules["homeassistant.config_entries"]
+_ce_mod.ConfigFlow = _ConfigFlowBase
+_ce_mod.OptionsFlow = _OptionsFlowBase
+_ce_mod.ConfigEntry = MagicMock  # referenced but only as a type hint
+
+if "homeassistant.data_entry_flow" not in sys.modules:
+    _def_mod = MagicMock()
+    _def_mod.FlowResult = dict
+    sys.modules["homeassistant.data_entry_flow"] = _def_mod
