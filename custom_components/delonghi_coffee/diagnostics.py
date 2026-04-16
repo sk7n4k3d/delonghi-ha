@@ -48,6 +48,8 @@ async def async_get_config_entry_diagnostics(
             "diagnostic_mode": bool(getattr(coordinator, "diagnostic_mode", False)),
             "selected_profile": getattr(coordinator, "selected_profile", None),
             "beverages_count": len(getattr(coordinator, "beverages", []) or []),
+            "keepalive_failures": getattr(coordinator, "_keepalive_failures", 0),
+            "lan_active": bool(getattr(coordinator, "_lan_active", False)),
             "custom_recipe_names": getattr(coordinator, "custom_recipe_names", {}),
             "raw_properties_keys": sorted(list((coordinator.data or {}).keys())) if getattr(coordinator, "data", None) else [],
         }

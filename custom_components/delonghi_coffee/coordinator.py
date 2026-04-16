@@ -42,6 +42,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.beverages: list[str] = []
         self._last_full_refresh: float = 0
         self._last_keepalive: float = 0
+        self._keepalive_failures: int = 0
         self._cached_counters: dict[str, Any] = {}
         self._cached_profiles: dict[str, Any] = {}
         self._cached_beans: list[dict[str, Any]] = []
@@ -98,9 +99,30 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         _LOGGER.debug("ping_connected unsupported, falling back to request_monitor")
                         await self.hass.async_add_executor_job(self.api.request_monitor, self.dsn)
                     self._last_keepalive = now
+                    if self._keepalive_failures:
+                        _LOGGER.info("MQTT keepalive recovered after %d failures", self._keepalive_failures)
+                    self._keepalive_failures = 0
                     _LOGGER.debug("MQTT keepalive sent")
-                except (DeLonghiApiError, DeLonghiAuthError):
-                    _LOGGER.debug("MQTT keepalive failed, will retry next cycle")
+                except (DeLonghiApiError, DeLonghiAuthError) as err:
+                    self._keepalive_failures += 1
+                    # Ramp the log level once the cloud has stopped answering for a while.
+                    # Single miss = debug (cloud wobbles happen); 3 in a row = warning
+                    # (user-visible in HA logs); ≥5 = error, hints at expired token or
+                    # Ayla outage. The full refresh path still runs independently so
+                    # we do not raise UpdateFailed — sensors stay populated from cache.
+                    if self._keepalive_failures == 3:
+                        _LOGGER.warning(
+                            "MQTT keepalive failing (3 consecutive) — cloud session may be dead: %s",
+                            err,
+                        )
+                    elif self._keepalive_failures >= 5 and self._keepalive_failures % 5 == 0:
+                        _LOGGER.error(
+                            "MQTT keepalive still failing after %d attempts — commands will likely stall; check token/cloud status: %s",
+                            self._keepalive_failures,
+                            err,
+                        )
+                    else:
+                        _LOGGER.debug("MQTT keepalive failed (%d), will retry next cycle", self._keepalive_failures)
 
             # Full refresh: ping + properties fetch for everything
             if need_full:
@@ -145,6 +167,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 self._last_full_refresh = now
                 self._last_keepalive = now  # full refresh counts as keepalive
+                if self._keepalive_failures:
+                    _LOGGER.info(
+                        "MQTT keepalive recovered via full refresh after %d failures",
+                        self._keepalive_failures,
+                    )
+                self._keepalive_failures = 0
 
             # Track monitor staleness — if raw data never changes,
             # alarms from this data are unreliable
