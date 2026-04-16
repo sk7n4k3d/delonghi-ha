@@ -286,14 +286,22 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 dsn=self.dsn,
                 lan_key=lan_key,
                 advertised_ip=local_ip,
+                # Narrow the bind to the interface that reaches the device
+                # rather than 0.0.0.0 — keeps the LAN server off unrelated
+                # interfaces (VPN, docker bridges, public WAN on weird HA
+                # setups).
+                bind_host=local_ip,
+                # Only accept inbound requests from the device itself.
+                # 127.0.0.1 / ::1 stays allowed automatically for diag.
+                allowed_peers=frozenset({lan_ip}),
             )
             server = DeLonghiLanServer(config, on_property=self._on_lan_property)
             await server.start()
             self._lan_server = server
             _LAN_LOGGER.info(
-                "LAN server started on port %d, local_ip=%s, device_ip=%s",
-                server.port,
+                "LAN server started on %s:%d, device=%s (peer allowlist enforced)",
                 local_ip,
+                server.port,
                 lan_ip,
             )
         except Exception:  # noqa: BLE001

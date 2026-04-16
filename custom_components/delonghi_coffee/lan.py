@@ -336,13 +336,34 @@ PropertyHandler = Callable[[dict[str, Any]], Awaitable[None]]
 
 @dataclass
 class LanServerConfig:
-    """Configuration for the embedded LAN server."""
+    """Configuration for the embedded LAN server.
+
+    ``bind_host`` defaults to loopback so unit tests and accidental
+    instantiations don't silently bind on every interface. Production
+    code (coordinator.DeLonghiCoordinator._try_start_lan) overrides this
+    with the local interface IP — narrow enough to reach the device, wide
+    enough that the OS actually accepts the device's packets.
+
+    ``allowed_peers`` is an optional ingress allowlist. When set, inbound
+    requests whose remote address is not in the set are rejected with a
+    403 so a hostile LAN neighbour can't clobber the active session by
+    firing an unsolicited key_exchange. Always includes ``127.0.0.1`` /
+    ``::1`` for diagnostic loopback — the :func:`run_lan_diagnostic`
+    helper spins up a full pipeline locally.
+
+    ``handshake_max_skew`` caps how far ``time_1`` (the device clock) may
+    drift from our own ``time.time()``. cremalink picks its own time_1 so
+    any huge delta is either a badly reset clock or a stale replay. 30
+    minutes is conservative; real devices are within a few seconds.
+    """
 
     dsn: str
     lan_key: str
     advertised_ip: str
-    bind_host: str = "0.0.0.0"  # noqa: S104 — HA local network, not public
+    bind_host: str = "127.0.0.1"
     port: int = LAN_SERVER_DEFAULT_PORT
+    allowed_peers: frozenset[str] = field(default_factory=frozenset)
+    handshake_max_skew: int = 30 * 60  # seconds
 
 
 class DeLonghiLanServer:
@@ -371,6 +392,29 @@ class DeLonghiLanServer:
         self._runner: Any | None = None
         self._site: Any | None = None
         self._lock = asyncio.Lock()
+        # Anti-replay / anti-clobber state: track the highest handshake
+        # time_1 we've accepted so a stale re-play of an earlier key
+        # exchange can't roll the session back to its nonces.
+        self._last_handshake_time1: int = 0
+        # Loopback is always trusted so the in-process diagnostic works
+        # regardless of what the caller passed in ``allowed_peers``.
+        peers = set(config.allowed_peers)
+        peers.update({"127.0.0.1", "::1"})
+        self._trusted_peers: frozenset[str] = frozenset(peers) if config.allowed_peers else frozenset()
+
+    def _is_peer_allowed(self, peer: str | None) -> bool:
+        """Return True when peer may access privileged LAN endpoints.
+
+        Empty allowlist = legacy behaviour (allow everyone). Once an
+        allowlist is configured, unknown peers are rejected.
+        """
+        if not self._trusted_peers:
+            return True
+        if peer is None:
+            return False
+        # Strip IPv6 zone identifier (``fe80::1%eth0``) — rare on HA hosts
+        # but aiohttp's ``request.remote`` can carry them through.
+        return peer.split("%", 1)[0] in self._trusted_peers
 
     @property
     def session(self) -> LanSession | None:
@@ -426,9 +470,17 @@ class DeLonghiLanServer:
 
         Body shape: ``{"key_exchange": {"random_1": <str>, "time_1": <int>}}``.
         Response: HTTP 202 with ``{"random_2": <str>, "time_2": <int>}``.
+
+        Rejects requests from peers outside the allowlist (when set) and
+        handshakes whose ``time_1`` is older than the last accepted one —
+        an attacker re-playing a captured key_exchange would otherwise
+        reset our session state and orphan the real device.
         """
         peer = request.remote or "unknown"
         _LAN_LOGGER.debug("handshake: inbound from peer=%s", peer)
+        if not self._is_peer_allowed(peer):
+            _LAN_LOGGER.warning("handshake: reject peer=%s (not in allowlist)", peer)
+            return web.json_response({"error": "forbidden"}, status=403)
         if not self._config.lan_key:
             _LAN_LOGGER.error("handshake: reject (peer=%s) — lan_key not configured", peer)
             return web.json_response({"error": "not_configured"}, status=400)
@@ -441,6 +493,28 @@ class DeLonghiLanServer:
             _LAN_LOGGER.warning("handshake: malformed request from %s: %s", peer, err)
             return web.json_response({"error": "bad_request"}, status=400)
 
+        # Anti-replay: the device always advances time_1 on a fresh boot.
+        # A captured handshake from yesterday is either a clock regression
+        # or an adversary rolling us back — reject it.
+        now = int(time.time())
+        if self._last_handshake_time1 and time_1 < self._last_handshake_time1:
+            _LAN_LOGGER.warning(
+                "handshake: reject peer=%s time_1=%d older than last accepted %d",
+                peer,
+                time_1,
+                self._last_handshake_time1,
+            )
+            return web.json_response({"error": "stale"}, status=400)
+        if abs(now - time_1) > self._config.handshake_max_skew:
+            _LAN_LOGGER.warning(
+                "handshake: reject peer=%s time_1=%d vs local now=%d (max skew %ds)",
+                peer,
+                time_1,
+                now,
+                self._config.handshake_max_skew,
+            )
+            return web.json_response({"error": "clock_skew"}, status=400)
+
         _LAN_LOGGER.debug(
             "handshake: received random_1=%s time_1=%d from %s",
             random_1,
@@ -450,7 +524,7 @@ class DeLonghiLanServer:
 
         # cremalink uses 12 bytes of urandom → base64 without padding.
         random_2 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
-        time_2 = int(time.time())
+        time_2 = now
         try:
             session = derive_session(self._config.lan_key, random_1, random_2, time_1, time_2)
         except LanCryptoError as err:
@@ -460,6 +534,7 @@ class DeLonghiLanServer:
         async with self._lock:
             self._session = session
             self._seq = 0
+            self._last_handshake_time1 = time_1
 
         _LAN_LOGGER.info(
             "handshake ok (dsn=%s peer=%s time_1=%d time_2=%d)",
@@ -478,6 +553,10 @@ class DeLonghiLanServer:
         advancing — otherwise the first real command after a quiet period
         would desync with the device's dev_iv.
         """
+        peer = request.remote or "unknown"
+        if not self._is_peer_allowed(peer):
+            _LAN_LOGGER.debug("command_poll: reject peer=%s (not in allowlist)", peer)
+            return web.json_response({"error": "forbidden"}, status=403)
         async with self._lock:
             session = self._session
             if session is None:
@@ -509,6 +588,10 @@ class DeLonghiLanServer:
         response makes the device back off its push schedule and we lose
         live telemetry — the cure is worse than the disease.
         """
+        peer = request.remote or "unknown"
+        if not self._is_peer_allowed(peer):
+            _LAN_LOGGER.debug("property_push: reject peer=%s (not in allowlist)", peer)
+            return web.json_response({"error": "forbidden"}, status=403)
         session = self._session
         if session is None:
             return web.json_response({}, status=200)
@@ -541,6 +624,10 @@ class DeLonghiLanServer:
 
     async def _handle_status(self, request: web.Request) -> web.Response:
         """Health endpoint for debugging. Never exposes the lan_key."""
+        peer = request.remote or "unknown"
+        if not self._is_peer_allowed(peer):
+            _LAN_LOGGER.debug("status: reject peer=%s (not in allowlist)", peer)
+            return web.json_response({"error": "forbidden"}, status=403)
         return web.json_response(
             {
                 "session": self._session is not None,

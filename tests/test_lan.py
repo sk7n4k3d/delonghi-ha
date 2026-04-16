@@ -654,9 +654,14 @@ class _MockRequest:
         return self._body
 
 
-def _make_handshake_body() -> dict:
+def _make_handshake_body(time_1: int | None = None) -> dict:
     random_1 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
-    return {"key_exchange": {"random_1": random_1, "time_1": 1700000000}}
+    # Use wall-clock for time_1 so anti-replay skew checks don't reject.
+    if time_1 is None:
+        import time as _time
+
+        time_1 = int(_time.time())
+    return {"key_exchange": {"random_1": random_1, "time_1": time_1}}
 
 
 @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
@@ -739,5 +744,120 @@ def test_handshake_during_polls_does_not_skip_seqs() -> None:
         for r in results:
             assert r.status in (200, 202), f"unexpected status {r.status}"
         assert server.session is not None
+
+    asyncio.run(run())
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Peer allowlist + anti-replay — LAN hardening (phase 6a/6b).
+# Exercises the ingress filter and the handshake skew/rollback guards so
+# a hostile LAN peer can't reset the session or leak metadata.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_peer_allowlist_blocks_unknown_peer() -> None:
+    """Requests from peers outside the allowlist get a 403 on every endpoint."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-ALLOW",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+        allowed_peers=frozenset({"192.168.1.10"}),
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        bad = _MockRequest(_make_handshake_body(), remote="10.0.0.99")
+        resp = await server._handle_handshake(bad)
+        assert resp.status == 403, "handshake from unknown peer must be 403"
+
+        poll_resp = await server._handle_command_poll(_MockRequest({}, remote="10.0.0.99"))
+        assert poll_resp.status == 403
+
+        push_resp = await server._handle_property_push(_MockRequest({}, remote="10.0.0.99"))
+        assert push_resp.status == 403
+
+        status_resp = await server._handle_status(_MockRequest({}, remote="10.0.0.99"))
+        assert status_resp.status == 403
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_peer_allowlist_admits_loopback_by_default() -> None:
+    """Loopback peers are always trusted so run_lan_diagnostic still works."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-LOOP",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+        allowed_peers=frozenset({"192.168.1.10"}),
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        resp = await server._handle_handshake(_MockRequest(_make_handshake_body(), remote="127.0.0.1"))
+        assert resp.status == 202, "loopback must be admitted implicitly"
+        resp6 = await server._handle_status(_MockRequest({}, remote="::1"))
+        assert resp6.status == 200
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_rejects_clock_skew_replay() -> None:
+    """time_1 wildly far from wall-clock is treated as replay → 400."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-SKEW",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        # Years in the past — the old test fixture value.
+        stale = _make_handshake_body(time_1=1_000_000_000)
+        resp = await server._handle_handshake(_MockRequest(stale))
+        assert resp.status == 400
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_rejects_rollback_after_accept() -> None:
+    """Once time_1 is accepted, any earlier time_1 must be rejected."""
+    import time as _time
+
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-ROLLBACK",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        now = int(_time.time())
+        # First accepts.
+        first = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=now)))
+        assert first.status == 202
+
+        # Earlier time_1 (still inside the skew window but below last accepted) → rejected.
+        replay = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=now - 60)))
+        assert replay.status == 400
+
+        # Later time_1 is accepted (cremalink uses int(time.time()) on device).
+        progress = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=now + 2)))
+        assert progress.status == 202
 
     asyncio.run(run())
