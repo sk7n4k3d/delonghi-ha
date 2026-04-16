@@ -1,6 +1,36 @@
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+dist/
+build/
 
-# Debug/test files
+# Virtual envs
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug/test artefacts
 test_api.py
 docs/mitm_*
-.coverage
+*.log

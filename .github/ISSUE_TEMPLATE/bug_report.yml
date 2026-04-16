@@ -1,0 +1,83 @@
+name: Bug report
+description: Something is broken or behaves wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in as much as you can — vague reports
+        get stalled and die. Silent integrations are hard to debug from logs
+        alone.
+
+  - type: input
+    id: machine
+    attributes:
+      label: Coffee machine model
+      description: Exact product code printed on the machine (e.g. `ECAM610.75.MB`, `ECAM450.86.T`)
+      placeholder: ECAM______
+    validations:
+      required: true
+
+  - type: input
+    id: app
+    attributes:
+      label: De'Longhi app you use
+      description: Coffee Link, My Coffee Lounge, or something else? Include version if you know it.
+      placeholder: Coffee Link 4.9.6
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: 2026.4.0
+    validations:
+      required: true
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: Found in HACS → De'Longhi Coffee, or in `custom_components/delonghi_coffee/manifest.json`.
+      placeholder: 1.6.0-beta.7
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: Describe the actual vs expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open HA
+        2. Click …
+        3. Error appears
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug logs
+      description: |
+        Enable debug logging (`logger: custom_components.delonghi_coffee: debug`),
+        reproduce the issue, and paste the relevant lines. Redact credentials.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics download
+      description: From HA → Settings → Devices → De'Longhi → Download diagnostics. Attach or paste. Redact DSN if desired.
+    validations:
+      required: false
