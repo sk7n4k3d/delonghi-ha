@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "所有饮品总计"
+      },
+      "bean_system_1_uses": {
+        "name": "豆系统 1 使用次数"
+      },
+      "bean_system_2_uses": {
+        "name": "豆系统 2 使用次数"
+      },
+      "bean_system_3_uses": {
+        "name": "豆系统 3 使用次数"
+      },
+      "bean_system_4_uses": {
+        "name": "豆系统 4 使用次数"
+      },
+      "bean_system_5_uses": {
+        "name": "豆系统 5 使用次数"
+      },
+      "bean_system_6_uses": {
+        "name": "豆系统 6 使用次数"
+      },
+      "beverages_modified": {
+        "name": "已修改的饮品"
+      },
+      "beverages_aborted": {
+        "name": "已中止的冲泡"
+      },
+      "beverages_doubled": {
+        "name": "双份咖啡"
+      },
+      "cortado": {
+        "name": "考塔多"
+      },
+      "long_black": {
+        "name": "澳式黑咖啡"
+      },
+      "preground_brews": {
+        "name": "预磨咖啡冲泡"
+      },
+      "travel_mug": {
+        "name": "旅行杯"
       }
     },
     "binary_sensor": {
@@ -461,6 +500,16 @@
     "select": {
       "profile_select": {
         "name": "配置文件"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De'Longhi Coffee 选项",
+        "data": {
+          "diagnostic_mode": "诊断模式 (公开原始属性以供调试)"
+        }
       }
     }
   }

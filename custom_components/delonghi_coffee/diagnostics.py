@@ -27,9 +27,7 @@ REDACT_KEYS: set[str] = {
 }
 
 
-async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> dict[str, Any]:
+async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Return diagnostics for a config entry.
 
     Includes redacted entry data + options, coordinator state, last raw
@@ -51,7 +49,9 @@ async def async_get_config_entry_diagnostics(
             "keepalive_failures": getattr(coordinator, "_keepalive_failures", 0),
             "lan_active": bool(getattr(coordinator, "_lan_active", False)),
             "custom_recipe_names": getattr(coordinator, "custom_recipe_names", {}),
-            "raw_properties_keys": sorted(list((coordinator.data or {}).keys())) if getattr(coordinator, "data", None) else [],
+            "raw_properties_keys": sorted(list((coordinator.data or {}).keys()))
+            if getattr(coordinator, "data", None)
+            else [],
         }
 
     api_state: dict[str, Any] = {}

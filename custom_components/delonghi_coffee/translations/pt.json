@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "Total de todas as bebidas"
+      },
+      "bean_system_1_uses": {
+        "name": "Usos perfil grão 1"
+      },
+      "bean_system_2_uses": {
+        "name": "Usos perfil grão 2"
+      },
+      "bean_system_3_uses": {
+        "name": "Usos perfil grão 3"
+      },
+      "bean_system_4_uses": {
+        "name": "Usos perfil grão 4"
+      },
+      "bean_system_5_uses": {
+        "name": "Usos perfil grão 5"
+      },
+      "bean_system_6_uses": {
+        "name": "Usos perfil grão 6"
+      },
+      "beverages_modified": {
+        "name": "Bebidas modificadas"
+      },
+      "beverages_aborted": {
+        "name": "Preparações canceladas"
+      },
+      "beverages_doubled": {
+        "name": "Doses duplas"
+      },
+      "cortado": {
+        "name": "Cortados"
+      },
+      "long_black": {
+        "name": "Long Blacks"
+      },
+      "preground_brews": {
+        "name": "Preparações pré-moídas"
+      },
+      "travel_mug": {
+        "name": "Canecas de viagem"
       }
     },
     "binary_sensor": {
@@ -461,6 +500,16 @@
     "select": {
       "profile_select": {
         "name": "Perfil"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções De'Longhi Coffee",
+        "data": {
+          "diagnostic_mode": "Modo diagnóstico (expõe propriedades brutas para depuração)"
+        }
       }
     }
   }

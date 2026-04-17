@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "全飲料合計"
+      },
+      "bean_system_1_uses": {
+        "name": "豆プロファイル 1 使用回数"
+      },
+      "bean_system_2_uses": {
+        "name": "豆プロファイル 2 使用回数"
+      },
+      "bean_system_3_uses": {
+        "name": "豆プロファイル 3 使用回数"
+      },
+      "bean_system_4_uses": {
+        "name": "豆プロファイル 4 使用回数"
+      },
+      "bean_system_5_uses": {
+        "name": "豆プロファイル 5 使用回数"
+      },
+      "bean_system_6_uses": {
+        "name": "豆プロファイル 6 使用回数"
+      },
+      "beverages_modified": {
+        "name": "カスタマイズした飲み物"
+      },
+      "beverages_aborted": {
+        "name": "中止された抽出"
+      },
+      "beverages_doubled": {
+        "name": "ダブルショット"
+      },
+      "cortado": {
+        "name": "コルタード"
+      },
+      "long_black": {
+        "name": "ロングブラック"
+      },
+      "preground_brews": {
+        "name": "挽き済み豆抽出"
+      },
+      "travel_mug": {
+        "name": "トラベルマグ"
       }
     },
     "binary_sensor": {
@@ -461,6 +500,16 @@
     "select": {
       "profile_select": {
         "name": "プロフィール"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De'Longhi Coffee オプション",
+        "data": {
+          "diagnostic_mode": "診断モード (デバッグ用の生プロパティを表示)"
+        }
       }
     }
   }

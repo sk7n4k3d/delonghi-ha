@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "Łącznie wszystkich napojów"
+      },
+      "bean_system_1_uses": {
+        "name": "Użycia profilu ziaren 1"
+      },
+      "bean_system_2_uses": {
+        "name": "Użycia profilu ziaren 2"
+      },
+      "bean_system_3_uses": {
+        "name": "Użycia profilu ziaren 3"
+      },
+      "bean_system_4_uses": {
+        "name": "Użycia profilu ziaren 4"
+      },
+      "bean_system_5_uses": {
+        "name": "Użycia profilu ziaren 5"
+      },
+      "bean_system_6_uses": {
+        "name": "Użycia profilu ziaren 6"
+      },
+      "beverages_modified": {
+        "name": "Zmodyfikowane napoje"
+      },
+      "beverages_aborted": {
+        "name": "Anulowane parzenia"
+      },
+      "beverages_doubled": {
+        "name": "Podwójne shoty"
+      },
+      "cortado": {
+        "name": "Cortado"
+      },
+      "long_black": {
+        "name": "Long Black"
+      },
+      "preground_brews": {
+        "name": "Parzenia z mielonej kawy"
+      },
+      "travel_mug": {
+        "name": "Kubki podróżne"
       }
     },
     "binary_sensor": {
@@ -461,6 +500,16 @@
     "select": {
       "profile_select": {
         "name": "Profil"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje De'Longhi Coffee",
+        "data": {
+          "diagnostic_mode": "Tryb diagnostyczny (wyświetla surowe właściwości do debugowania)"
+        }
       }
     }
   }

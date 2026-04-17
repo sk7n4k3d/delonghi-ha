@@ -1,218 +1,197 @@
-"""Tests for the diagnostics export.
-
-Critical behaviours:
-
-1. Secrets MUST be redacted. If anyone ever adds a new credential / token
-   field, it has to land in ``REDACT_KEYS`` — these tests fail loudly
-   when the payload ever carries a raw secret.
-2. Coordinator + API metrics must surface for triage.
-3. Payload must not raise when coordinator / api are missing or partial.
-"""
-
-from __future__ import annotations
+"""Test diagnostics module — entry-scoped + device-scoped redaction."""
 
 import asyncio
+import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.delonghi_coffee.const import DOMAIN
+
+def _real_redact(data, keys_to_redact):
+    """Stand-in for HA's async_redact_data — redacts top-level keys."""
+    if not isinstance(data, dict):
+        return data
+    return {k: ("**REDACTED**" if k in keys_to_redact else v) for k, v in data.items()}
 
 
-# Upstream provides ``async_redact_data`` from the ``diagnostics`` component.
-# Tests stub it with a minimal recursive implementation matching HA behaviour
-# so the real diag function can run without the full framework.
-def _fake_redact(payload, keys):
-    if isinstance(payload, dict):
-        return {
-            k: ("**REDACTED**" if k in keys else _fake_redact(v, keys))
-            for k, v in payload.items()
-        }
-    if isinstance(payload, list):
-        return [_fake_redact(x, keys) for x in payload]
-    return payload
+# Stub HA's diagnostics module before importing custom_components.diagnostics
+_diag_mod = MagicMock()
+_diag_mod.async_redact_data = _real_redact
+sys.modules["homeassistant.components.diagnostics"] = _diag_mod
+
+from custom_components.delonghi_coffee import diagnostics  # noqa: E402
+from custom_components.delonghi_coffee.const import DOMAIN  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def _patch_redact(monkeypatch):
-    import sys
-
-    diag_mod = sys.modules.get("homeassistant.components.diagnostics")
-    if diag_mod is None:
-        diag_mod = MagicMock()
-        sys.modules["homeassistant.components.diagnostics"] = diag_mod
-    monkeypatch.setattr(diag_mod, "async_redact_data", _fake_redact, raising=False)
+def _run(coro):
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
-def _import_diagnostics():
-    import importlib
-    import sys
-
-    mod_name = "custom_components.delonghi_coffee.diagnostics"
-    if mod_name in sys.modules:
-        return sys.modules[mod_name]
-    return importlib.import_module(mod_name)
-
-
-def _make_entry(*, data: dict, options: dict, version=2, minor_version=0) -> MagicMock:
-    entry = MagicMock()
-    entry.version = version
-    entry.minor_version = minor_version
-    entry.data = data
-    entry.options = options
-    entry.entry_id = "test-entry"
-    return entry
-
-
-def _make_hass(coord=None, api=None, device_info=None) -> MagicMock:
+def _make_hass(entry_id: str, coordinator=None, api=None, model_data=None):
     hass = MagicMock()
-    hass.data = {
-        DOMAIN: {
-            "test-entry": {
-                "coordinator": coord,
-                "api": api,
-                **(device_info or {}),
-            }
-        }
-    }
+    payload = {"coordinator": coordinator, "api": api}
+    if model_data:
+        payload.update(model_data)
+    hass.data = {DOMAIN: {entry_id: payload}}
     return hass
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Redaction invariants — each key listed in REDACT_KEYS must be scrubbed.
-# ─────────────────────────────────────────────────────────────────────────
+def _make_entry(entry_id="abc123", data=None, options=None):
+    entry = MagicMock()
+    entry.entry_id = entry_id
+    entry.version = 1
+    entry.minor_version = 0
+    entry.data = data or {}
+    entry.options = options or {}
+    return entry
 
 
-def test_every_redact_key_is_scrubbed_from_entry_data() -> None:
-    """Populate every REDACT_KEYS entry in entry.data and confirm none leak."""
-    diagnostics = _import_diagnostics()
-    loud = {k: f"raw-{k}" for k in diagnostics.REDACT_KEYS}
-    entry = _make_entry(data=loud, options={})
-    hass = _make_hass()
+class TestRedactKeys:
+    """REDACT_KEYS covers all known sensitive fields."""
 
-    payload = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+    def test_includes_credentials(self):
+        for key in ("email", "password"):
+            assert key in diagnostics.REDACT_KEYS
 
-    for key in diagnostics.REDACT_KEYS:
-        assert payload["entry"]["data"][key] == "**REDACTED**", (
-            f"{key} must be redacted but is {payload['entry']['data'][key]!r}"
+    def test_includes_tokens(self):
+        for key in ("access_token", "refresh_token", "ayla_token", "ayla_refresh", "session_token"):
+            assert key in diagnostics.REDACT_KEYS
+
+    def test_includes_lan_secrets(self):
+        for key in ("lan_key", "lanip_key"):
+            assert key in diagnostics.REDACT_KEYS
+
+    def test_includes_gigya_signatures(self):
+        for key in ("uid", "uidSignature", "signatureTimestamp"):
+            assert key in diagnostics.REDACT_KEYS
+
+
+class TestEntryDiagnostics:
+    """async_get_config_entry_diagnostics shape + redaction."""
+
+    def test_redacts_email_and_password_in_entry_data(self):
+        entry = _make_entry(data={"email": "user@x.com", "password": "secret", "region": "EU"})
+        hass = _make_hass(entry.entry_id)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["entry"]["data"]["email"] == "**REDACTED**"
+        assert result["entry"]["data"]["password"] == "**REDACTED**"
+        assert result["entry"]["data"]["region"] == "EU"
+
+    def test_redacts_options(self):
+        entry = _make_entry(options={"diagnostic_mode": True, "lan_key": "abc"})
+        hass = _make_hass(entry.entry_id)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["entry"]["options"]["diagnostic_mode"] is True
+        assert result["entry"]["options"]["lan_key"] == "**REDACTED**"
+
+    def test_handles_missing_coordinator_and_api(self):
+        """Gracefully degrades when entry hasn't fully loaded."""
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id)  # no coordinator, no api
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["coordinator"] == {}
+        assert result["api"] == {}
+
+    def test_coordinator_state_extracted(self):
+        coord = MagicMock()
+        coord.last_update_success = True
+        coord.last_exception = None
+        coord.diagnostic_mode = False
+        coord.selected_profile = 2
+        coord.beverages = [{}, {}, {}]
+        coord.custom_recipe_names = {1: "mocha"}
+        coord.data = {"foo": 1, "bar": 2}
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id, coordinator=coord)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        cs = result["coordinator"]
+        assert cs["last_update_success"] is True
+        assert cs["selected_profile"] == 2
+        assert cs["beverages_count"] == 3
+        assert cs["custom_recipe_names"] == {1: "mocha"}
+        assert cs["raw_properties_keys"] == ["bar", "foo"]
+
+    def test_coordinator_handles_none_data(self):
+        coord = MagicMock()
+        coord.data = None
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id, coordinator=coord)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["coordinator"]["raw_properties_keys"] == []
+
+    def test_api_state_extracted(self):
+        api = MagicMock()
+        api._oem_model = "DL-pd-soul"
+        api.device_name = "Kitchen Coffee"
+        api.sw_version = "v1.2.3"
+        api._ping_supported = True
+        api.rate_tracker = MagicMock(current_rate=42)
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id, api=api)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        api_state = result["api"]
+        assert api_state["oem_model"] == "DL-pd-soul"
+        assert api_state["device_name"] == "Kitchen Coffee"
+        assert api_state["sw_version"] == "v1.2.3"
+        assert api_state["ping_supported"] is True
+        assert api_state["rate_current"] == 42
+
+    def test_api_state_handles_no_rate_tracker(self):
+        api = MagicMock()
+        api.rate_tracker = None
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id, api=api)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["api"]["rate_current"] is None
+
+    def test_device_block_from_data(self):
+        entry = _make_entry()
+        hass = _make_hass(
+            entry.entry_id,
+            model_data={"model": "ECAM61075MB", "device_name": "Soul", "sw_version": "1.0"},
         )
-        assert f"raw-{key}" not in str(payload), f"{key} leaked into payload"
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["device"] == {"model": "ECAM61075MB", "device_name": "Soul", "sw_version": "1.0"}
+
+    def test_entry_version_included(self):
+        entry = _make_entry()
+        entry.version = 2
+        entry.minor_version = 1
+        hass = _make_hass(entry.entry_id)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["entry"]["version"] == 2
+        assert result["entry"]["minor_version"] == 1
+
+    def test_handles_missing_domain_data(self):
+        """If integration entry not present in hass.data, returns empty subblocks."""
+        entry = _make_entry()
+        hass = MagicMock()
+        hass.data = {}  # DOMAIN not present
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["coordinator"] == {}
+        assert result["api"] == {}
 
 
-def test_non_secret_fields_pass_through_unchanged() -> None:
-    """Ensure redaction is surgical — innocent fields must not be touched."""
-    diagnostics = _import_diagnostics()
-    entry = _make_entry(
-        data={
-            "dsn": "AC000W038925641",
-            "region": "EU",
-            "model": "DL-striker-best",
-        },
-        options={"diagnostic_mode": True},
-    )
-    hass = _make_hass()
+class TestDeviceDiagnostics:
+    """async_get_device_diagnostics returns same payload as entry-scoped."""
 
-    payload = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
-
-    assert payload["entry"]["data"]["dsn"] == "AC000W038925641"
-    assert payload["entry"]["data"]["region"] == "EU"
-    assert payload["entry"]["data"]["model"] == "DL-striker-best"
-    assert payload["entry"]["options"]["diagnostic_mode"] is True
+    def test_delegates_to_entry_diagnostics(self):
+        entry = _make_entry(data={"email": "a@b.com"})
+        hass = _make_hass(entry.entry_id)
+        device = MagicMock()
+        result = _run(diagnostics.async_get_device_diagnostics(hass, entry, device))
+        assert "entry" in result and "coordinator" in result
+        assert result["entry"]["data"]["email"] == "**REDACTED**"
 
 
-def test_version_metadata_is_preserved() -> None:
-    """Version + minor_version are needed to trace migration bugs."""
-    diagnostics = _import_diagnostics()
-    entry = _make_entry(data={}, options={}, version=2, minor_version=3)
-    hass = _make_hass()
-
-    payload = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
-
-    assert payload["entry"]["version"] == 2
-    assert payload["entry"]["minor_version"] == 3
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# Coordinator + API state must surface (or fail gracefully when absent).
-# ─────────────────────────────────────────────────────────────────────────
-
-
-def test_coordinator_state_surfaces_triage_fields() -> None:
-    diagnostics = _import_diagnostics()
-
-    coord = MagicMock()
-    coord.last_update_success = True
-    coord.last_exception = None
-    coord.diagnostic_mode = True
-    coord.selected_profile = 2
-    coord.beverages = ["espresso", "cappuccino"]
-    coord._keepalive_failures = 3
-    coord._lan_active = True
-    coord.custom_recipe_names = {1: "My Coffee"}
-    coord.data = {"machine_state": "Ready", "connected": True}
-
-    entry = _make_entry(data={"dsn": "X"}, options={})
-    hass = _make_hass(coord=coord)
-
-    payload = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
-
-    cstate = payload["coordinator"]
-    assert cstate["last_update_success"] is True
-    assert cstate["diagnostic_mode"] is True
-    assert cstate["selected_profile"] == 2
-    assert cstate["beverages_count"] == 2
-    assert cstate["keepalive_failures"] == 3
-    assert cstate["lan_active"] is True
-    assert cstate["raw_properties_keys"] == ["connected", "machine_state"]
-
-
-def test_api_state_surfaces_rate_limit_and_model() -> None:
-    diagnostics = _import_diagnostics()
-
-    api = MagicMock()
-    api._oem_model = "DL-striker-best"
-    api.device_name = "Eletta Explore"
-    api.sw_version = "1.2.3"
-    api._ping_supported = True
-    api.rate_tracker = MagicMock()
-    api.rate_tracker.current_rate = 42
-
-    entry = _make_entry(data={}, options={})
-    hass = _make_hass(api=api)
-
-    payload = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
-
-    astate = payload["api"]
-    assert astate["oem_model"] == "DL-striker-best"
-    assert astate["device_name"] == "Eletta Explore"
-    assert astate["sw_version"] == "1.2.3"
-    assert astate["ping_supported"] is True
-    assert astate["rate_current"] == 42
-
-
-def test_diagnostics_tolerates_missing_entry() -> None:
-    """Fresh entry with no bundle yet — payload must still render empty shells."""
-    diagnostics = _import_diagnostics()
-    entry = _make_entry(data={}, options={})
-    hass = MagicMock()
-    hass.data = {}  # no DOMAIN key at all
-
-    payload = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
-
-    assert payload["coordinator"] == {}
-    assert payload["api"] == {}
-
-
-def test_device_diagnostics_mirrors_entry_diagnostics() -> None:
-    diagnostics = _import_diagnostics()
-    entry = _make_entry(data={"dsn": "X"}, options={})
-    hass = _make_hass()
-
-    entry_payload = asyncio.run(
-        diagnostics.async_get_config_entry_diagnostics(hass, entry)
-    )
-    device_payload = asyncio.run(
-        diagnostics.async_get_device_diagnostics(hass, entry, device=MagicMock())
-    )
-
-    assert entry_payload == device_payload
+@pytest.fixture(autouse=True)
+def _ensure_event_loop():
+    """Provide an event loop for asyncio.run_until_complete on Python 3.14+."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    yield

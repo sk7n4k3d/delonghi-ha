@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "Усього всіх напоїв"
+      },
+      "bean_system_1_uses": {
+        "name": "Використання профілю зерен 1"
+      },
+      "bean_system_2_uses": {
+        "name": "Використання профілю зерен 2"
+      },
+      "bean_system_3_uses": {
+        "name": "Використання профілю зерен 3"
+      },
+      "bean_system_4_uses": {
+        "name": "Використання профілю зерен 4"
+      },
+      "bean_system_5_uses": {
+        "name": "Використання профілю зерен 5"
+      },
+      "bean_system_6_uses": {
+        "name": "Використання профілю зерен 6"
+      },
+      "beverages_modified": {
+        "name": "Змінені напої"
+      },
+      "beverages_aborted": {
+        "name": "Скасовані приготування"
+      },
+      "beverages_doubled": {
+        "name": "Подвійні порції"
+      },
+      "cortado": {
+        "name": "Кортадо"
+      },
+      "long_black": {
+        "name": "Лонг блек"
+      },
+      "preground_brews": {
+        "name": "Мелена кава"
+      },
+      "travel_mug": {
+        "name": "Дорожні чашки"
       }
     },
     "binary_sensor": {
@@ -461,6 +500,16 @@
     "select": {
       "profile_select": {
         "name": "Профіль"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Налаштування De'Longhi Coffee",
+        "data": {
+          "diagnostic_mode": "Режим діагностики (показує сирі властивості для налагодження)"
+        }
       }
     }
   }

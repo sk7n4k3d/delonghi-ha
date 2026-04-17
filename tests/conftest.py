@@ -129,13 +129,71 @@ _switch_mod.SwitchEntity = _StubEntity
 _select_mod = sys.modules["homeassistant.components.select"]
 _select_mod.SelectEntity = _StubEntity
 
+# Real ConfigFlow / OptionsFlow stubs so config_flow.py can subclass them.
+# class Foo(MagicMock_attr_value, domain=...): silently produces a MagicMock
+# instead of a real class, which then has no real methods to test.
+class _ConfigFlowBase:
+    """Stand-in for HA's config_entries.ConfigFlow base."""
+
+    def __init_subclass__(cls, **_kwargs) -> None:  # accept domain= kwarg
+        super().__init_subclass__()
+
+    async def async_set_unique_id(self, unique_id: str) -> None:
+        return None
+
+    def _abort_if_unique_id_configured(self) -> None:
+        return None
+
+    def async_create_entry(self, *, title: str, data: dict) -> dict:
+        return {"type": "create_entry", "title": title, "data": data}
+
+    def async_show_form(self, *, step_id: str, data_schema=None, errors=None, description_placeholders=None) -> dict:
+        return {
+            "type": "form",
+            "step_id": step_id,
+            "data_schema": data_schema,
+            "errors": errors or {},
+            "description_placeholders": description_placeholders,
+        }
+
+    def async_abort(self, *, reason: str) -> dict:
+        return {"type": "abort", "reason": reason}
+
+
+class _OptionsFlowBase:
+    """Stand-in for HA's config_entries.OptionsFlow base."""
+
+    def async_create_entry(self, *, title: str, data: dict) -> dict:
+        return {"type": "create_entry", "title": title, "data": data}
+
+    def async_show_form(self, *, step_id: str, data_schema=None) -> dict:
+        return {"type": "form", "step_id": step_id, "data_schema": data_schema}
+
+
+_ce_mod = sys.modules["homeassistant.config_entries"]
+_ce_mod.ConfigFlow = _ConfigFlowBase
+_ce_mod.OptionsFlow = _OptionsFlowBase
+
+# data_entry_flow stub — FlowResult is a TypedDict at runtime, dict is fine.
+sys.modules.setdefault("homeassistant.data_entry_flow", MagicMock())
+
+# `from homeassistant import config_entries` reads the attribute on the
+# parent MagicMock, not sys.modules — wire the submodules explicitly so
+# config_flow.py picks up the real ConfigFlow/OptionsFlow stubs.
+_ha_mod = sys.modules["homeassistant"]
+_ha_mod.config_entries = _ce_mod
+_ha_mod.const = sys.modules["homeassistant.const"]
+_ha_mod.core = sys.modules["homeassistant.core"]
+_ha_mod.exceptions = sys.modules["homeassistant.exceptions"]
+_ha_mod.helpers = sys.modules["homeassistant.helpers"]
+_ha_mod.components = sys.modules["homeassistant.components"]
+
 # Fix specific constants that code references directly
 sys.modules["homeassistant.const"].CONF_EMAIL = "email"
 sys.modules["homeassistant.const"].CONF_PASSWORD = "password"
 sys.modules["homeassistant.const"].Platform = MagicMock()
 sys.modules["homeassistant.helpers.entity"] = MagicMock()
 sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock()
-
 
 # config_flow.py subclasses ``config_entries.ConfigFlow`` with a
 # ``domain=`` kwargs metaclass call — can't inherit from MagicMock. Provide

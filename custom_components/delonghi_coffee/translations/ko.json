@@ -144,6 +144,45 @@
       },
       "computed_total": {
         "name": "전체 음료 합계"
+      },
+      "bean_system_1_uses": {
+        "name": "원두 프로필 1 사용 횟수"
+      },
+      "bean_system_2_uses": {
+        "name": "원두 프로필 2 사용 횟수"
+      },
+      "bean_system_3_uses": {
+        "name": "원두 프로필 3 사용 횟수"
+      },
+      "bean_system_4_uses": {
+        "name": "원두 프로필 4 사용 횟수"
+      },
+      "bean_system_5_uses": {
+        "name": "원두 프로필 5 사용 횟수"
+      },
+      "bean_system_6_uses": {
+        "name": "원두 프로필 6 사용 횟수"
+      },
+      "beverages_modified": {
+        "name": "수정된 음료"
+      },
+      "beverages_aborted": {
+        "name": "취소된 추출"
+      },
+      "beverages_doubled": {
+        "name": "더블 샷"
+      },
+      "cortado": {
+        "name": "코르타도"
+      },
+      "long_black": {
+        "name": "롱 블랙"
+      },
+      "preground_brews": {
+        "name": "분쇄 원두 추출"
+      },
+      "travel_mug": {
+        "name": "여행용 머그"
       }
     },
     "binary_sensor": {
@@ -461,6 +500,16 @@
     "select": {
       "profile_select": {
         "name": "프로필"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De'Longhi Coffee 옵션",
+        "data": {
+          "diagnostic_mode": "진단 모드 (디버깅을 위한 원시 속성 노출)"
+        }
       }
     }
   }
