@@ -68,22 +68,28 @@ class TestUserStepHappyPath:
         flow = _make_flow()
         api = MagicMock()
         api.authenticate = MagicMock()
-        api.get_devices = MagicMock(return_value=[
-            {
-                "dsn": "DSN-A",
-                "oem_model": "DL-striker-cb",
-                "product_name": "Soul",
-                "sw_version": "1.2.3",
-            },
-            {"dsn": "DSN-B"},  # ignored — only first kept
-        ])
+        api.get_devices = MagicMock(
+            return_value=[
+                {
+                    "dsn": "DSN-A",
+                    "oem_model": "DL-striker-cb",
+                    "product_name": "Soul",
+                    "sw_version": "1.2.3",
+                },
+                {"dsn": "DSN-B"},  # ignored — only first kept
+            ]
+        )
 
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
-            result = _run(flow.async_step_user({
-                "email": "u@x.com",
-                "password": "secret",
-                "region": "EU",
-            }))
+            result = _run(
+                flow.async_step_user(
+                    {
+                        "email": "u@x.com",
+                        "password": "secret",
+                        "region": "EU",
+                    }
+                )
+            )
 
         assert result["type"] == "create_entry"
         assert result["title"] == "De'Longhi Soul"
@@ -101,11 +107,15 @@ class TestUserStepHappyPath:
         api.authenticate = MagicMock()
         api.get_devices = MagicMock(return_value=[{"dsn": "DSN-X"}])
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
-            result = _run(flow.async_step_user({
-                "email": "u@x.com",
-                "password": "p",
-                "region": "EU",
-            }))
+            result = _run(
+                flow.async_step_user(
+                    {
+                        "email": "u@x.com",
+                        "password": "p",
+                        "region": "EU",
+                    }
+                )
+            )
         assert result["title"] == "De'Longhi DSN-X"
         assert result["data"]["model"] == "unknown"
 
@@ -115,11 +125,15 @@ class TestUserStepHappyPath:
         api.authenticate = MagicMock()
         api.get_devices = MagicMock(return_value=[])
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
-            result = _run(flow.async_step_user({
-                "email": "u@x.com",
-                "password": "p",
-                "region": "EU",
-            }))
+            result = _run(
+                flow.async_step_user(
+                    {
+                        "email": "u@x.com",
+                        "password": "p",
+                        "region": "EU",
+                    }
+                )
+            )
         assert result["type"] == "form"
         assert result["errors"] == {"base": "no_devices"}
 
@@ -130,11 +144,15 @@ class TestUserStepErrors:
         api = MagicMock()
         api.authenticate = MagicMock(side_effect=DeLonghiAuthError("nope"))
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
-            result = _run(flow.async_step_user({
-                "email": "u@x.com",
-                "password": "p",
-                "region": "EU",
-            }))
+            result = _run(
+                flow.async_step_user(
+                    {
+                        "email": "u@x.com",
+                        "password": "p",
+                        "region": "EU",
+                    }
+                )
+            )
         assert result["type"] == "form"
         assert result["errors"] == {"base": "invalid_auth"}
 
@@ -143,11 +161,15 @@ class TestUserStepErrors:
         api = MagicMock()
         api.authenticate = MagicMock(side_effect=DeLonghiApiError("network"))
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
-            result = _run(flow.async_step_user({
-                "email": "u@x.com",
-                "password": "p",
-                "region": "EU",
-            }))
+            result = _run(
+                flow.async_step_user(
+                    {
+                        "email": "u@x.com",
+                        "password": "p",
+                        "region": "EU",
+                    }
+                )
+            )
         assert result["errors"] == {"base": "cannot_connect"}
 
     def test_unexpected_error_returns_unknown(self):
@@ -155,11 +177,15 @@ class TestUserStepErrors:
         api = MagicMock()
         api.authenticate = MagicMock(side_effect=RuntimeError("boom"))
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
-            result = _run(flow.async_step_user({
-                "email": "u@x.com",
-                "password": "p",
-                "region": "EU",
-            }))
+            result = _run(
+                flow.async_step_user(
+                    {
+                        "email": "u@x.com",
+                        "password": "p",
+                        "region": "EU",
+                    }
+                )
+            )
         assert result["errors"] == {"base": "unknown"}
 
 

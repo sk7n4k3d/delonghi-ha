@@ -57,21 +57,15 @@ class TestProfileSelectCurrentOption:
 
     def test_returns_named_profile(self):
         profiles = {1: {"name": "Sebastien"}, 2: {"name": "Sasha"}}
-        sel = DeLonghiProfileSelect(
-            _make_coordinator(profiles=profiles, selected_profile=2), "DSN", "m", "n", None
-        )
+        sel = DeLonghiProfileSelect(_make_coordinator(profiles=profiles, selected_profile=2), "DSN", "m", "n", None)
         assert sel.current_option == "Sasha"
 
     def test_falls_back_to_default_label_when_no_name(self):
-        sel = DeLonghiProfileSelect(
-            _make_coordinator(profiles={3: {}}, selected_profile=3), "DSN", "m", "n", None
-        )
+        sel = DeLonghiProfileSelect(_make_coordinator(profiles={3: {}}, selected_profile=3), "DSN", "m", "n", None)
         assert sel.current_option == "Profile 3"
 
     def test_falls_back_to_default_label_when_profile_unknown(self):
-        sel = DeLonghiProfileSelect(
-            _make_coordinator(profiles={}, selected_profile=4), "DSN", "m", "n", None
-        )
+        sel = DeLonghiProfileSelect(_make_coordinator(profiles={}, selected_profile=4), "DSN", "m", "n", None)
         assert sel.current_option == "Profile 4"
 
 

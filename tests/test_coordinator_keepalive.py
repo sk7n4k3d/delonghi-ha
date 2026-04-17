@@ -53,9 +53,7 @@ def test_keepalive_failure_counter_increments_and_resets(caplog) -> None:
     caplog.set_level(logging.DEBUG, logger="custom_components.delonghi_coffee.coordinator")
     asyncio.run(hammer(4))
 
-    assert coord._keepalive_failures >= 3, (
-        f"counter should increment on each failure, got {coord._keepalive_failures}"
-    )
+    assert coord._keepalive_failures >= 3, f"counter should increment on each failure, got {coord._keepalive_failures}"
 
     # Warning emitted exactly when counter hits 3.
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "keepalive failing" in r.message]

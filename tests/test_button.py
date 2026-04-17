@@ -215,9 +215,7 @@ class TestCancelButtonEntity:
 
         api = MagicMock()
         coord = _make_coord(state)
-        entity = DeLonghiCancelButton(
-            api=api, coordinator=coord, dsn="DSN", model="t", device_name="T", sw_version="1"
-        )
+        entity = DeLonghiCancelButton(api=api, coordinator=coord, dsn="DSN", model="t", device_name="T", sw_version="1")
         _attach_hass(entity)
         entity.coordinator = coord
         return entity, api
@@ -239,6 +237,7 @@ class TestCancelButtonEntity:
         entity, api = self._entity("Brewing")
         api.cancel_brew.side_effect = DeLonghiAuthError("expired")
         from homeassistant.exceptions import HomeAssistantError
+
         with pytest.raises(HomeAssistantError):
             _run(entity.async_press())
 
@@ -249,9 +248,7 @@ class TestSyncButtonEntity:
 
         api = MagicMock()
         coord = _make_coord(state, selected_profile=2)
-        entity = DeLonghiSyncButton(
-            api=api, coordinator=coord, dsn="DSN", model="t", device_name="T", sw_version="1"
-        )
+        entity = DeLonghiSyncButton(api=api, coordinator=coord, dsn="DSN", model="t", device_name="T", sw_version="1")
         _attach_hass(entity)
         entity.coordinator = coord
         return entity, api
@@ -318,6 +315,7 @@ class TestLanDiagnosticButtonEntity:
         api.get_lan_config.side_effect = DeLonghiApiError("cloud down")
 
         from homeassistant.exceptions import HomeAssistantError
+
         with pytest.raises(HomeAssistantError):
             _run(entity.async_press())
 
@@ -334,5 +332,6 @@ class TestLanDiagnosticButtonEntity:
         monkeypatch.setattr(button_mod, "run_lan_diagnostic", _fake_run)
 
         from homeassistant.exceptions import HomeAssistantError
+
         with pytest.raises(HomeAssistantError):
             _run(entity.async_press())

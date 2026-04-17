@@ -253,9 +253,7 @@ class TestRateLimitTrackerAdvanced:
         # Sanity: default threshold is 200.
         assert tracker._warn_threshold == 200
 
-        with patch(
-            "custom_components.delonghi_coffee.logger._LOGGER"
-        ) as mock_logger:
+        with patch("custom_components.delonghi_coffee.logger._LOGGER") as mock_logger:
             for _ in range(205):
                 tracker.record()
 
@@ -283,12 +281,14 @@ class TestApiTimerSlowResponse:
         """Duration > 5000ms triggers warning — covers line 130."""
         fake_times = iter([0.0, 10.0])  # start, then __exit__ → 10_000 ms.
 
-        with patch(
-            "custom_components.delonghi_coffee.logger.time.monotonic",
-            side_effect=lambda: next(fake_times),
-        ), patch(
-            "custom_components.delonghi_coffee.logger._LOGGER"
-        ) as mock_logger, ApiTimer("slow_call"):
+        with (
+            patch(
+                "custom_components.delonghi_coffee.logger.time.monotonic",
+                side_effect=lambda: next(fake_times),
+            ),
+            patch("custom_components.delonghi_coffee.logger._LOGGER") as mock_logger,
+            ApiTimer("slow_call"),
+        ):
             pass
 
         mock_logger.warning.assert_called_once()
@@ -299,9 +299,7 @@ class TestApiTimerSlowResponse:
 
     def test_exception_path_logged_as_debug(self):
         """Exception during ApiTimer run is logged as debug."""
-        with patch(
-            "custom_components.delonghi_coffee.logger._LOGGER"
-        ) as mock_logger:
+        with patch("custom_components.delonghi_coffee.logger._LOGGER") as mock_logger:
             try:
                 with ApiTimer("failing_call"):
                     raise RuntimeError("boom")

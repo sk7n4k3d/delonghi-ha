@@ -184,15 +184,17 @@ class TestStatusSensor:
         assert "lan_enabled" not in attrs
 
     def test_extra_state_attributes_full(self):
-        s = self._make({
-            "status": "ONLINE",
-            "profile": 2,
-            "alarms": [{"name": "Water tank empty"}, {"name": "Grounds full"}],
-            "api_rate": 12,
-            "api_total_calls": 4567,
-            "lan_config": {"lan_enabled": True, "lan_ip": "10.0.0.42"},
-            "drink_catalog": {"espresso": {}, "americano": {}, "cappuccino": {}},
-        })
+        s = self._make(
+            {
+                "status": "ONLINE",
+                "profile": 2,
+                "alarms": [{"name": "Water tank empty"}, {"name": "Grounds full"}],
+                "api_rate": 12,
+                "api_total_calls": 4567,
+                "lan_config": {"lan_enabled": True, "lan_ip": "10.0.0.42"},
+                "drink_catalog": {"espresso": {}, "americano": {}, "cappuccino": {}},
+            }
+        )
         attrs = s.extra_state_attributes
         assert attrs["cloud_status"] == "ONLINE"
         assert attrs["profile"] == 2
@@ -218,20 +220,24 @@ class TestProfileSensor:
         assert s._attr_icon == "mdi:account"
 
     def test_native_value_uses_monitor_profile_first(self):
-        s = self._make({
-            "profile": 2,
-            "active_profile": 3,
-            "profiles": {2: {"name": "Sasha"}, 3: {"name": "Anna"}},
-        })
+        s = self._make(
+            {
+                "profile": 2,
+                "active_profile": 3,
+                "profiles": {2: {"name": "Sasha"}, 3: {"name": "Anna"}},
+            }
+        )
         # profile (monitor) wins over active_profile (cloud)
         assert s.native_value == "Sasha"
 
     def test_native_value_falls_back_to_cloud_when_monitor_zero(self):
-        s = self._make({
-            "profile": 0,
-            "active_profile": 3,
-            "profiles": {3: {"name": "Anna"}},
-        })
+        s = self._make(
+            {
+                "profile": 0,
+                "active_profile": 3,
+                "profiles": {3: {"name": "Anna"}},
+            }
+        )
         assert s.native_value == "Anna"
 
     def test_native_value_default_label_when_unnamed(self):
@@ -243,13 +249,15 @@ class TestProfileSensor:
         assert s.native_value == "Profile 5"
 
     def test_extra_state_attributes_lists_all_profiles(self):
-        s = self._make({
-            "active_profile": 2,
-            "profiles": {
-                1: {"name": "A", "color": "red", "figure": "1"},
-                2: {"name": "B", "color": "blue", "figure": "2"},
-            },
-        })
+        s = self._make(
+            {
+                "active_profile": 2,
+                "profiles": {
+                    1: {"name": "A", "color": "red", "figure": "1"},
+                    2: {"name": "B", "color": "blue", "figure": "2"},
+                },
+            }
+        )
         attrs = s.extra_state_attributes
         assert attrs["active_profile_id"] == 2
         assert attrs["profile_1_name"] == "A"
@@ -284,13 +292,15 @@ class TestBeanSensor:
         assert attrs["coffee_beans_catalog_count"] == 0
 
     def test_extra_state_attributes_with_beans_and_raw_hex(self):
-        s = self._make({
-            "beans": [
-                {"id": 1, "name": "Arabica", "english_name": "Arabica", "raw_params_hex": "deadbeef"},
-                {"id": 2, "name": "Robusta", "english_name": "Robusta"},  # no raw_hex
-            ],
-            "coffee_beans_count": 12,
-        })
+        s = self._make(
+            {
+                "beans": [
+                    {"id": 1, "name": "Arabica", "english_name": "Arabica", "raw_params_hex": "deadbeef"},
+                    {"id": 2, "name": "Robusta", "english_name": "Robusta"},  # no raw_hex
+                ],
+                "coffee_beans_count": 12,
+            }
+        )
         attrs = s.extra_state_attributes
         assert attrs["bean_1_name"] == "Arabica"
         assert attrs["bean_1_english"] == "Arabica"
@@ -300,10 +310,12 @@ class TestBeanSensor:
         assert attrs["coffee_beans_catalog_count"] == 12
 
     def test_extra_state_attributes_bean_system_par(self):
-        s = self._make({
-            "beans": [],
-            "bean_system_par": {"raw_hex": "cafebabe", "raw_bytes": 4},
-        })
+        s = self._make(
+            {
+                "beans": [],
+                "bean_system_par": {"raw_hex": "cafebabe", "raw_bytes": 4},
+            }
+        )
         attrs = s.extra_state_attributes
         assert attrs["bean_system_par_raw_hex"] == "cafebabe"
         assert attrs["bean_system_par_bytes"] == 4
@@ -319,30 +331,42 @@ class TestBeanSensor:
         assert "bean_system_par_raw_hex" not in attrs
 
     def test_extra_state_attributes_full_bean_adapt(self):
-        s = self._make({
-            "beans": [],
-            "bean_adapt": {
-                "bean_types": ["Arabica", "Robusta"],
-                "roasting_levels": ["Light", "Medium", "Dark"],
-                "taste_feedback": ["Bitter", "Balanced"],
-                "grinder_min": 1,
-                "grinder_max": 8,
-                "grinder_step": 1,
-                "flow_min": 5,
-                "flow_max": 25,
-                "flow_delta": 5,
-                "preinfusion_water_min": 5,
-                "preinfusion_water_max": 30,
-                "bean_table": [
-                    {"bean_type": "Light Roast", "powder_quantity": "8g"},
-                    {"bean_type": "Dark Roast", "powder_quantity": "10g"},
-                ],
-                "roasting_table": [
-                    {"roast_level": "Light", "stoichio_ratio": "1:2", "machine_roasting_level": 3, "temperature": 92},
-                    {"roast_level": "Dark", "stoichio_ratio": "1:3", "machine_roasting_level": 7, "temperature": 96},
-                ],
-            },
-        })
+        s = self._make(
+            {
+                "beans": [],
+                "bean_adapt": {
+                    "bean_types": ["Arabica", "Robusta"],
+                    "roasting_levels": ["Light", "Medium", "Dark"],
+                    "taste_feedback": ["Bitter", "Balanced"],
+                    "grinder_min": 1,
+                    "grinder_max": 8,
+                    "grinder_step": 1,
+                    "flow_min": 5,
+                    "flow_max": 25,
+                    "flow_delta": 5,
+                    "preinfusion_water_min": 5,
+                    "preinfusion_water_max": 30,
+                    "bean_table": [
+                        {"bean_type": "Light Roast", "powder_quantity": "8g"},
+                        {"bean_type": "Dark Roast", "powder_quantity": "10g"},
+                    ],
+                    "roasting_table": [
+                        {
+                            "roast_level": "Light",
+                            "stoichio_ratio": "1:2",
+                            "machine_roasting_level": 3,
+                            "temperature": 92,
+                        },
+                        {
+                            "roast_level": "Dark",
+                            "stoichio_ratio": "1:3",
+                            "machine_roasting_level": 7,
+                            "temperature": 96,
+                        },
+                    ],
+                },
+            }
+        )
         attrs = s.extra_state_attributes
         assert attrs["bean_types"] == ["Arabica", "Robusta"]
         assert attrs["roasting_levels"] == ["Light", "Medium", "Dark"]

@@ -129,6 +129,7 @@ _switch_mod.SwitchEntity = _StubEntity
 _select_mod = sys.modules["homeassistant.components.select"]
 _select_mod.SelectEntity = _StubEntity
 
+
 # Real ConfigFlow / OptionsFlow stubs so config_flow.py can subclass them.
 # class Foo(MagicMock_attr_value, domain=...): silently produces a MagicMock
 # instead of a real class, which then has no real methods to test.
@@ -194,6 +195,7 @@ sys.modules["homeassistant.const"].CONF_PASSWORD = "password"
 sys.modules["homeassistant.const"].Platform = MagicMock()
 sys.modules["homeassistant.helpers.entity"] = MagicMock()
 sys.modules["homeassistant.helpers.entity"].EntityCategory = MagicMock()
+
 
 # config_flow.py subclasses ``config_entries.ConfigFlow`` with a
 # ``domain=`` kwargs metaclass call — can't inherit from MagicMock. Provide

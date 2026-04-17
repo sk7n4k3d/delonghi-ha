@@ -88,6 +88,7 @@ def _fake_recipe_prop(
 # brew_beverage — lines 1049-1144
 # ---------------------------------------------------------------------------
 
+
 class TestBrewBeverage:
     """Exercise the full brew_beverage flow and its error paths."""
 
@@ -292,6 +293,7 @@ class TestBrewBeverage:
 # brew_custom — lines 1195-1247
 # ---------------------------------------------------------------------------
 
+
 class TestBrewCustomFull:
     """Exercise the param-building branches of brew_custom."""
 
@@ -384,6 +386,7 @@ class TestBrewCustomFull:
 # _pre_brew_check accessory branch — lines 1438-1450 + 1411
 # ---------------------------------------------------------------------------
 
+
 class TestPreBrewAccessoryCheck:
     """Exercise the monitor-based accessory validation."""
 
@@ -446,6 +449,7 @@ class TestPreBrewAccessoryCheck:
 # _recipe_to_brew_command edge cases — lines 1533-1541
 # ---------------------------------------------------------------------------
 
+
 class TestRecipeToBrewEdges:
     """Exhaust remaining `_recipe_to_brew_command` branches."""
 
@@ -454,16 +458,29 @@ class TestRecipeToBrewEdges:
         # Recipe with all 3 big params + TASTE(8)
         recipe = bytes(
             [
-                0xD0, 0x12, 0xA6, 0xF0, 0x01, 0x01,
-                1, 0x00, 0x28,   # COFFEE 40mL (should drop)
-                9, 0x00, 0x78,   # MILK 120mL (should drop)
-                15, 0x00, 0xC8,  # HOT_WATER 200mL (should drop)
-                8, 3,            # TASTE (keep)
-                0x00, 0x00,
+                0xD0,
+                0x12,
+                0xA6,
+                0xF0,
+                0x01,
+                0x01,
+                1,
+                0x00,
+                0x28,  # COFFEE 40mL (should drop)
+                9,
+                0x00,
+                0x78,  # MILK 120mL (should drop)
+                15,
+                0x00,
+                0xC8,  # HOT_WATER 200mL (should drop)
+                8,
+                3,  # TASTE (keep)
+                0x00,
+                0x00,
             ]
         )
         cmd = DeLonghiApi._recipe_to_brew_command(recipe, is_iced=True, profile=2)
-        params = cmd[6:-(1 + 2)]
+        params = cmd[6 : -(1 + 2)]
         # Collect param IDs
         param_ids: list[int] = []
         i = 0
@@ -484,10 +501,17 @@ class TestRecipeToBrewEdges:
         # breaks on the final ``else: break`` branch.
         recipe = bytes(
             [
-                0xD0, 0x0A, 0xA6, 0xF0, 0x01, 0x01,
-                8, 3,  # TASTE (keep)
-                1,     # COFFEE id with no following bytes → break
-                0x00, 0x00,
+                0xD0,
+                0x0A,
+                0xA6,
+                0xF0,
+                0x01,
+                0x01,
+                8,
+                3,  # TASTE (keep)
+                1,  # COFFEE id with no following bytes → break
+                0x00,
+                0x00,
             ]
         )
         cmd = DeLonghiApi._recipe_to_brew_command(recipe, profile=1)
@@ -499,6 +523,7 @@ class TestRecipeToBrewEdges:
 # ---------------------------------------------------------------------------
 # _ensure_token branches — lines 106-116 (retry 429) + refresh success
 # ---------------------------------------------------------------------------
+
 
 class TestEnsureTokenExtras:
     """Missing branches of the refresh logic."""
@@ -534,6 +559,7 @@ class TestEnsureTokenExtras:
 # ---------------------------------------------------------------------------
 # _retry 429 rate-limit branch — lines 106-116
 # ---------------------------------------------------------------------------
+
 
 class TestRetry429:
     """Exercise the dedicated 429 branch of the retry decorator."""
@@ -575,6 +601,7 @@ class TestRetry429:
 # fetch_transcode_table error paths — line 274
 # ---------------------------------------------------------------------------
 
+
 class TestFetchTranscodeTable:
     """Error paths of fetch_transcode_table."""
 
@@ -613,6 +640,7 @@ class TestFetchTranscodeTable:
 # ---------------------------------------------------------------------------
 # get_devices — line 487 (PrimaDonna backfill)
 # ---------------------------------------------------------------------------
+
 
 class TestGetDevicesBackfill:
     """OEM model backfill from Ayla metadata when config didn't carry it."""
@@ -663,6 +691,7 @@ class TestGetDevicesBackfill:
 # send_command error path — lines 691-694
 # ---------------------------------------------------------------------------
 
+
 class TestSendCommandHttpError:
     """Non-404 HTTP errors should propagate (and be sanitized in logs)."""
 
@@ -686,6 +715,7 @@ class TestSendCommandHttpError:
 # request_monitor + brew wrappers — lines 744, 748
 # ---------------------------------------------------------------------------
 
+
 class TestThinWrappers:
     """request_monitor and brew are one-liners that deserve basic coverage."""
 
@@ -708,6 +738,7 @@ class TestThinWrappers:
 # get_counters thin wrapper — line 841
 # ---------------------------------------------------------------------------
 
+
 class TestGetCounters:
     def test_get_counters_delegates(self):
         """get_counters fetches properties and delegates to parse_counters."""
@@ -725,6 +756,7 @@ class TestGetCounters:
 # get_profiles / get_bean_systems / get_available_beverages thin wrappers
 # lines 1558, 1626, 1706
 # ---------------------------------------------------------------------------
+
 
 class TestGetProfilesWrapper:
     def test_delegates(self):
@@ -763,6 +795,7 @@ class TestGetAvailableBeveragesWrapper:
 # get_custom_recipe_names — line 1784
 # ---------------------------------------------------------------------------
 
+
 class TestGetCustomRecipeNames:
     def test_empty_when_unset(self):
         api = _make_api()
@@ -780,6 +813,7 @@ class TestGetCustomRecipeNames:
 # ---------------------------------------------------------------------------
 # parse_available_beverages custom recipe name parsing — lines 1723-1737
 # ---------------------------------------------------------------------------
+
 
 class TestParseAvailableBeveragesCustomNames:
     """Exercises the `d053_custom_name_13`/`d054_custom_name_46` branches."""
@@ -859,6 +893,7 @@ class TestParseAvailableBeveragesCustomNames:
 # parse_bean_systems decode error branch — lines 1647 + 1671-1680
 # ---------------------------------------------------------------------------
 
+
 class TestParseBeanSystemsDecodeError:
     def test_empty_value_skipped(self):
         """Empty value skips the bean (line 1647 — `if not val: continue`)."""
@@ -881,6 +916,7 @@ class TestParseBeanSystemsDecodeError:
 # parse_profiles decode error — lines 1609-1610, 1619-1620
 # ---------------------------------------------------------------------------
 
+
 class TestParseProfilesErrors:
     def test_d052_decode_failure(self):
         """Malformed d052 falls through to pass."""
@@ -902,6 +938,7 @@ class TestParseProfilesErrors:
 # ---------------------------------------------------------------------------
 # parse_counters JSON edge — lines 954-955 + 983-984
 # ---------------------------------------------------------------------------
+
 
 class TestParseCountersEdges:
     def test_json_non_int_value_preserved_as_is(self):
@@ -930,6 +967,7 @@ class TestParseCountersEdges:
 # ---------------------------------------------------------------------------
 # get_lan_config error paths — lines 562-563, 601-602
 # ---------------------------------------------------------------------------
+
 
 class TestGetLanConfigErrors:
     def test_device_info_error_keeps_defaults(self):
@@ -967,13 +1005,12 @@ class TestGetLanConfigErrors:
 # get_property — lines 517-523
 # ---------------------------------------------------------------------------
 
+
 class TestGetProperty:
     def test_single_property(self):
         """get_property fetches a named property."""
         api = _make_api()
-        api._session.get.return_value = _mock_response(
-            200, {"property": {"name": "app_device_status", "value": "RUN"}}
-        )
+        api._session.get.return_value = _mock_response(200, {"property": {"name": "app_device_status", "value": "RUN"}})
         prop = api.get_property("DSN", "app_device_status")
         assert prop["value"] == "RUN"
 
@@ -988,6 +1025,7 @@ class TestGetProperty:
 # ---------------------------------------------------------------------------
 # authenticate — line 416-417 (invalid JSON)
 # ---------------------------------------------------------------------------
+
 
 class TestAuthenticateInvalidJson:
     def test_invalid_json_raises_api_error(self):
@@ -1006,6 +1044,7 @@ class TestAuthenticateInvalidJson:
 # ---------------------------------------------------------------------------
 # Final polish: cover the last handful of defensive branches
 # ---------------------------------------------------------------------------
+
 
 class TestFinalDefensiveBranches:
     """Cover the 4 remaining defensive lines to push api.py to 100%."""

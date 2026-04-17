@@ -40,13 +40,17 @@ def _make_entry(
     entry.version = version
     entry.minor_version = minor_version
     entry.entry_id = entry_id
-    entry.data = data if data is not None else {
-        "email": "user@example.com",
-        "password": "hunter2",
-        "dsn": "DSN-ABC",
-        "model": "DL-pd-soul",
-        "region": "EU",
-    }
+    entry.data = (
+        data
+        if data is not None
+        else {
+            "email": "user@example.com",
+            "password": "hunter2",
+            "dsn": "DSN-ABC",
+            "model": "DL-pd-soul",
+            "region": "EU",
+        }
+    )
     entry.options = options if options is not None else {}
     return entry
 
@@ -100,8 +104,10 @@ def _run_setup_entry(hass, entry, fake_api=None, fake_coord=None):
     """Patch DeLonghiApi + DeLonghiCoordinator, run async_setup_entry, return (api, coord)."""
     api = fake_api or _make_fake_api()
     coord = fake_coord or _make_fake_coord()
-    with patch.object(init_mod, "DeLonghiApi", return_value=api) as api_cls, \
-         patch.object(init_mod, "DeLonghiCoordinator", return_value=coord) as coord_cls:
+    with (
+        patch.object(init_mod, "DeLonghiApi", return_value=api) as api_cls,
+        patch.object(init_mod, "DeLonghiCoordinator", return_value=coord) as coord_cls,
+    ):
         result = _run(init_mod.async_setup_entry(hass, entry))
     return result, api, coord, api_cls, coord_cls
 
@@ -177,9 +183,7 @@ class TestAsyncSetupEntryHappyPath:
         )
         fake_api = _make_fake_api(device_name="PrimaDonnaSoul_UUID", sw_version="2.5")
         fake_coord = _make_fake_coord()
-        result, api, coord, api_cls, coord_cls = _run_setup_entry(
-            hass, entry, fake_api, fake_coord
-        )
+        result, api, coord, api_cls, coord_cls = _run_setup_entry(hass, entry, fake_api, fake_coord)
 
         assert result is True
         # API constructor received the correct args
@@ -201,9 +205,7 @@ class TestAsyncSetupEntryHappyPath:
         assert stored["device_name"] == "PrimaDonnaSoul_UUID"
         assert stored["sw_version"] == "2.5"
         # Platforms forwarded
-        hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(
-            entry, init_mod.PLATFORMS
-        )
+        hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(entry, init_mod.PLATFORMS)
         # All 5 services registered
         names = {c[0][1] for c in hass.services.async_register.call_args_list}
         assert names == {
@@ -406,9 +408,7 @@ class TestBrewCustomService:
             "profile": 2,
         }
         _run(handler(call))
-        api.brew_custom.assert_called_once_with(
-            "DSN-ABC", "espresso", 40, 0, 0, 4, 1, 2, 2
-        )
+        api.brew_custom.assert_called_once_with("DSN-ABC", "espresso", 40, 0, 0, 4, 1, 2, 2)
 
     def test_brew_custom_uses_defaults_for_optional(self):
         hass, api, coord, handler = self._setup(coord_selected_profile=5)
@@ -417,9 +417,7 @@ class TestBrewCustomService:
         _run(handler(call))
         # defaults: coffee_qty=None, milk_qty=None, water_qty=None,
         #           taste=3, milk_froth=2, temperature=1, profile=5 (coord.selected_profile)
-        api.brew_custom.assert_called_once_with(
-            "DSN-ABC", "americano", None, None, None, 3, 2, 1, 5
-        )
+        api.brew_custom.assert_called_once_with("DSN-ABC", "americano", None, None, None, 3, 2, 1, 5)
 
     def test_brew_custom_profile_fallback_to_1_when_coord_none(self):
         hass, api, coord, handler = self._setup(coord_selected_profile=None)
@@ -427,9 +425,7 @@ class TestBrewCustomService:
         call.data = {"beverage": "latte"}
         _run(handler(call))
         # coord.selected_profile is None → fallback to 1
-        api.brew_custom.assert_called_once_with(
-            "DSN-ABC", "latte", None, None, None, 3, 2, 1, 1
-        )
+        api.brew_custom.assert_called_once_with("DSN-ABC", "latte", None, None, None, 3, 2, 1, 1)
 
     def test_brew_custom_api_error_raises_home_assistant_error(self):
         hass, api, coord, handler = self._setup()
@@ -569,7 +565,7 @@ class TestWriteBeanProfileService:
         call = MagicMock()
         call.data = {
             "slot": "1",
-            "name": 12345,          # will be str()'d
+            "name": 12345,  # will be str()'d
             "temperature": "2",
             "intensity": "4",
             "grinder": "6",
@@ -577,9 +573,7 @@ class TestWriteBeanProfileService:
             "flag2": "0",
         }
         _run(handler(call))
-        api.write_bean_system.assert_called_once_with(
-            "DSN-ABC", 1, "12345", 2, 4, 6, 1, 0
-        )
+        api.write_bean_system.assert_called_once_with("DSN-ABC", 1, "12345", 2, 4, 6, 1, 0)
 
     def test_write_bean_profile_uses_defaults(self):
         hass, api, handler = self._setup()
@@ -587,9 +581,7 @@ class TestWriteBeanProfileService:
         call.data = {"slot": 2, "name": "House Blend"}
         _run(handler(call))
         # defaults: temperature=0, intensity=0, grinder=0, flag1=0, flag2=1
-        api.write_bean_system.assert_called_once_with(
-            "DSN-ABC", 2, "House Blend", 0, 0, 0, 0, 1
-        )
+        api.write_bean_system.assert_called_once_with("DSN-ABC", 2, "House Blend", 0, 0, 0, 0, 1)
 
     def test_write_bean_profile_api_error_raises_ha_error(self):
         hass, api, handler = self._setup()

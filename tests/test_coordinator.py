@@ -43,14 +43,16 @@ def _make_api(**overrides):
     single branch without rebuilding the entire mock.
     """
     api = MagicMock()
-    api.get_status = MagicMock(return_value={
-        "machine_state": "Off",
-        "profile": 0,
-        "monitor_raw": None,
-        "status": "RUN",
-        "alarms": [],
-        "alarm_word": None,
-    })
+    api.get_status = MagicMock(
+        return_value={
+            "machine_state": "Off",
+            "profile": 0,
+            "monitor_raw": None,
+            "status": "RUN",
+            "alarms": [],
+            "alarm_word": None,
+        }
+    )
     api.parse_counters = MagicMock(return_value={"total_coffees": 12})
     api.parse_profiles = MagicMock(return_value={"active": 1, "profiles": {1: {}}})
     api.parse_bean_systems = MagicMock(return_value=[])
@@ -202,9 +204,11 @@ class TestLoadContentstack:
     def test_happy_path(self):
         coord, _, _ = _make_coord()
         coord._last_all_props = {"d270_serialnumber": {"value": "ECAM63050FOO"}}
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={1: {"name": "Espresso"}}) as m_dc, \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={"bean_types": []}) as m_ba, \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[{"id": "x"}]) as m_cb:
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={1: {"name": "Espresso"}}) as m_dc,
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={"bean_types": []}) as m_ba,
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[{"id": "x"}]) as m_cb,
+        ):
             _run(coord._load_contentstack())
             assert coord.drink_catalog == {1: {"name": "Espresso"}}
             assert coord.bean_adapt == {"bean_types": []}
@@ -220,9 +224,11 @@ class TestLoadContentstack:
         api._oem_model = ""
         api.model_info = {}
         coord._last_all_props = {}
-        with patch.object(coord_mod, "fetch_drink_catalog") as m_dc, \
-             patch.object(coord_mod, "fetch_bean_adapt") as m_ba, \
-             patch.object(coord_mod, "fetch_coffee_beans") as m_cb:
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog") as m_dc,
+            patch.object(coord_mod, "fetch_bean_adapt") as m_ba,
+            patch.object(coord_mod, "fetch_coffee_beans") as m_cb,
+        ):
             _run(coord._load_contentstack())
             assert coord._contentstack_loaded is True
             m_dc.assert_not_called()
@@ -241,9 +247,11 @@ class TestLoadContentstack:
         """A fetcher blowing up must not flip _contentstack_loaded — retry next refresh."""
         coord, _, _ = _make_coord()
         coord._last_all_props = {"d270_serialnumber": {"value": "ECAM63050FOO"}}
-        with patch.object(coord_mod, "fetch_drink_catalog", side_effect=RuntimeError("boom")), \
-             patch.object(coord_mod, "fetch_bean_adapt"), \
-             patch.object(coord_mod, "fetch_coffee_beans"):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", side_effect=RuntimeError("boom")),
+            patch.object(coord_mod, "fetch_bean_adapt"),
+            patch.object(coord_mod, "fetch_coffee_beans"),
+        ):
             _run(coord._load_contentstack())
             assert coord._contentstack_loaded is False
 
@@ -252,9 +260,11 @@ class TestLoadContentstack:
         coord, _, api = _make_coord()
         coord._last_all_props = {"d270_serialnumber": {"value": "ECAM61075XXX"}}
         api.model_info = {"name": "ECAM610.75"}
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}) as m_dc, \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value=None), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}) as m_dc,
+            patch.object(coord_mod, "fetch_bean_adapt", return_value=None),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             _run(coord._load_contentstack())
             # first positional = pattern (ECAM61075), second = model_name (ECAM61075)
             args, _ = m_dc.call_args
@@ -266,9 +276,11 @@ class TestLoadContentstack:
         coord, _, api = _make_coord()
         coord._last_all_props = {"d270_serialnumber": {"value": "ECAM61075XXX"}}
         api.model_info = {"name": 12345}  # not a string
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}) as m_dc, \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value=None), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}) as m_dc,
+            patch.object(coord_mod, "fetch_bean_adapt", return_value=None),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             _run(coord._load_contentstack())
             args, _ = m_dc.call_args
             assert args[1] == ""  # model_name hint stays empty
@@ -385,9 +397,11 @@ class TestAsyncUpdateDataFullRefresh:
     def test_full_refresh_fetches_and_parses(self):
         coord, _, api = _make_coord()
         coord._last_full_refresh = 0  # force full refresh
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={1: {}}), \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={}), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={1: {}}),
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             result = _run(coord._async_update_data())
         api.get_properties.assert_called_once_with("DSN-1")
         api.parse_counters.assert_called_once()
@@ -413,9 +427,11 @@ class TestAsyncUpdateDataFullRefresh:
         coord, _, api = _make_coord()
         api.ping_connected.return_value = False
         coord._last_full_refresh = 0
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}), \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={}), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             _run(coord._async_update_data())
         api.ping_connected.assert_called_once_with("DSN-1")
         api.request_monitor.assert_called_once_with("DSN-1")
@@ -425,9 +441,11 @@ class TestAsyncUpdateDataFullRefresh:
         coord, _, api = _make_coord()
         api.ping_connected.side_effect = DeLonghiApiError("dead")
         coord._last_full_refresh = 0
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}), \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={}), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             result = _run(coord._async_update_data())
         # Refresh continues despite wake failure
         api.get_properties.assert_called_once()
@@ -437,9 +455,11 @@ class TestAsyncUpdateDataFullRefresh:
         coord, _, api = _make_coord()
         api.ping_connected.side_effect = DeLonghiAuthError("token")
         coord._last_full_refresh = 0
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}), \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={}), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             _run(coord._async_update_data())
         api.get_properties.assert_called_once()
 
@@ -447,9 +467,11 @@ class TestAsyncUpdateDataFullRefresh:
         """Second full refresh must NOT re-fetch LAN config."""
         coord, _, api = _make_coord()
         coord._last_full_refresh = 0
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}), \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={}), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             _run(coord._async_update_data())
             assert api.get_lan_config.call_count == 1
             # Force another full refresh
@@ -461,9 +483,11 @@ class TestAsyncUpdateDataFullRefresh:
         """Second full refresh must not re-trigger _load_contentstack."""
         coord, _, _ = _make_coord()
         coord._last_full_refresh = 0
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}) as m_dc, \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={}), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}) as m_dc,
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             _run(coord._async_update_data())
             assert m_dc.call_count == 1
             coord._last_full_refresh = 0
@@ -474,9 +498,11 @@ class TestAsyncUpdateDataFullRefresh:
         coord, _, api = _make_coord()
         coord._last_full_refresh = 0
         coord.beverages = ["already_here"]
-        with patch.object(coord_mod, "fetch_drink_catalog", return_value={}), \
-             patch.object(coord_mod, "fetch_bean_adapt", return_value={}), \
-             patch.object(coord_mod, "fetch_coffee_beans", return_value=[]):
+        with (
+            patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
+            patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
+            patch.object(coord_mod, "fetch_coffee_beans", return_value=[]),
+        ):
             _run(coord._async_update_data())
         api.parse_available_beverages.assert_not_called()
         api.get_custom_recipe_names.assert_not_called()
@@ -720,6 +746,7 @@ class TestDiagnosticMode:
 class TestErrorPaths:
     def test_auth_error_raises_update_failed(self):
         from homeassistant.helpers.update_coordinator import UpdateFailed
+
         coord, _, api = _make_coord()
         api.get_status.side_effect = DeLonghiAuthError("bad")
         with pytest.raises(UpdateFailed, match="Authentication error"):
@@ -727,6 +754,7 @@ class TestErrorPaths:
 
     def test_api_error_raises_update_failed(self):
         from homeassistant.helpers.update_coordinator import UpdateFailed
+
         coord, _, api = _make_coord()
         api.get_status.side_effect = DeLonghiApiError("timeout")
         with pytest.raises(UpdateFailed, match="Error fetching data"):
@@ -734,6 +762,7 @@ class TestErrorPaths:
 
     def test_generic_exception_raises_update_failed(self):
         from homeassistant.helpers.update_coordinator import UpdateFailed
+
         coord, _, api = _make_coord()
         api.get_status.side_effect = ValueError("weird")
         with pytest.raises(UpdateFailed, match="Unexpected error"):

@@ -50,7 +50,13 @@ class TestBrewButtonInit:
     def test_known_beverage_uses_translation_key(self):
         coord = _make_coordinator()
         btn = DeLonghiBrewButton(
-            _make_api(), coord, "DSN-1", "ECAM61075MB", "Soul", "1.0", "espresso",
+            _make_api(),
+            coord,
+            "DSN-1",
+            "ECAM61075MB",
+            "Soul",
+            "1.0",
+            "espresso",
             {"name": "Espresso", "icon": "mdi:coffee"},
         )
         assert btn._attr_unique_id == "DSN-1_brew_espresso"
@@ -62,7 +68,13 @@ class TestBrewButtonInit:
     def test_unknown_beverage_uses_attr_name(self):
         coord = _make_coordinator()
         btn = DeLonghiBrewButton(
-            _make_api(), coord, "DSN-1", "model", "name", None, "mystery_brew",
+            _make_api(),
+            coord,
+            "DSN-1",
+            "model",
+            "name",
+            None,
+            "mystery_brew",
             {"name": "Mystery Brew", "icon": "mdi:coffee"},
         )
         assert btn._attr_name == "Mystery Brew"
@@ -71,7 +83,13 @@ class TestBrewButtonInit:
     def test_custom_recipe_uses_attr_name(self):
         coord = _make_coordinator(custom_recipe_names={"custom_1": "Booster"})
         btn = DeLonghiBrewButton(
-            _make_api(), coord, "DSN-1", "model", "name", None, "custom_1",
+            _make_api(),
+            coord,
+            "DSN-1",
+            "model",
+            "name",
+            None,
+            "custom_1",
             {"name": "Booster", "icon": "mdi:coffee-to-go"},
         )
         # custom_1 is not in BEVERAGES so should use _attr_name
