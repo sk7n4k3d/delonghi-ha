@@ -194,9 +194,11 @@ class TestBrewButtonEntity:
         api.brew_beverage.assert_called_once_with("DSN", "espresso", 1)
 
     def test_press_raises_home_assistant_error_on_api_error(self):
+        from homeassistant.exceptions import HomeAssistantError
+
         entity, api = self._entity("Ready")
         api.brew_beverage.side_effect = DeLonghiApiError("boom")
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(HomeAssistantError) as exc_info:
             _run(entity.async_press())
         assert "boom" in str(exc_info.value) or "espresso" in str(exc_info.value)
 
@@ -236,7 +238,8 @@ class TestCancelButtonEntity:
     def test_press_raises_on_auth_error(self):
         entity, api = self._entity("Brewing")
         api.cancel_brew.side_effect = DeLonghiAuthError("expired")
-        with pytest.raises(Exception):
+        from homeassistant.exceptions import HomeAssistantError
+        with pytest.raises(HomeAssistantError):
             _run(entity.async_press())
 
 
@@ -309,9 +312,13 @@ class TestLanDiagnosticButtonEntity:
 
     def test_press_raises_when_cloud_fetch_fails(self, monkeypatch):
         entity, api = self._entity()
-        api.get_lan_config.side_effect = RuntimeError("cloud down")
+        # Narrowed except only catches known API / network failure modes.
+        # Use DeLonghiApiError rather than a bare RuntimeError — that's
+        # what the API layer actually raises on cloud trouble.
+        api.get_lan_config.side_effect = DeLonghiApiError("cloud down")
 
-        with pytest.raises(Exception):
+        from homeassistant.exceptions import HomeAssistantError
+        with pytest.raises(HomeAssistantError):
             _run(entity.async_press())
 
     def test_press_raises_when_diagnostic_reports_failure(self, monkeypatch):
@@ -326,5 +333,6 @@ class TestLanDiagnosticButtonEntity:
 
         monkeypatch.setattr(button_mod, "run_lan_diagnostic", _fake_run)
 
-        with pytest.raises(Exception):
+        from homeassistant.exceptions import HomeAssistantError
+        with pytest.raises(HomeAssistantError):
             _run(entity.async_press())

@@ -5,10 +5,9 @@ and reset on recovery. Breaks fast if someone drops the counter logic.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from unittest.mock import MagicMock
-
-import pytest
 
 from custom_components.delonghi_coffee.api import DeLonghiApiError
 from custom_components.delonghi_coffee.coordinator import DeLonghiCoordinator
@@ -48,10 +47,8 @@ def test_keepalive_failure_counter_increments_and_resets(caplog) -> None:
     async def hammer(n: int) -> None:
         for _ in range(n):
             coord._last_keepalive = 0  # force keepalive eligibility each cycle
-            try:
+            with contextlib.suppress(Exception):  # only care about the counter
                 await coord._async_update_data()
-            except Exception:  # noqa: BLE001 — we only care about the counter
-                pass
 
     caplog.set_level(logging.DEBUG, logger="custom_components.delonghi_coffee.coordinator")
     asyncio.run(hammer(4))
@@ -85,10 +82,8 @@ def test_keepalive_error_escalates_at_multiples_of_five(caplog) -> None:
     async def hammer(n: int) -> None:
         for _ in range(n):
             coord._last_keepalive = 0
-            try:
+            with contextlib.suppress(Exception):
                 await coord._async_update_data()
-            except Exception:  # noqa: BLE001
-                pass
 
     asyncio.run(hammer(12))
 

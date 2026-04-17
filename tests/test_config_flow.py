@@ -11,8 +11,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from custom_components.delonghi_coffee import config_flow
 from custom_components.delonghi_coffee.api import DeLonghiApiError, DeLonghiAuthError
 

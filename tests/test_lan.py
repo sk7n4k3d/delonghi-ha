@@ -914,3 +914,52 @@ def test_handshake_rejects_rollback_after_accept() -> None:
         assert progress.status == 202
 
     asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_strips_base64_padding_from_random_1() -> None:
+    """A peer that leaves `=` padding in random_1 must still derive the same
+    session as one that strips it — otherwise handshake crypto silently
+    disagrees and every subsequent message fails to decrypt.
+    """
+    import time as _time
+
+    from custom_components.delonghi_coffee.lan import (
+        DeLonghiLanServer,
+        LanServerConfig,
+        derive_session,
+    )
+
+    config = LanServerConfig(
+        dsn="DSN-PAD",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        now = int(_time.time())
+        # Peer sends random_1 with trailing `=` (valid base64 padding).
+        body = {"key_exchange": {"random_1": "AAAABBBB==", "time_1": now}}
+        resp = await server._handle_handshake(_MockRequest(body))
+        assert resp.status == 202
+
+        # Server's stored session must have been derived from the canonical
+        # (stripped) form. Rederive with "AAAABBBB" and confirm match.
+        # (We can only peek at fingerprints, but equality of derived keys
+        # implies the server canonicalized consistently.)
+        payload = json.loads(resp.body.decode("utf-8"))
+        random_2_from_resp = payload["random_2"]
+        time_2 = payload["time_2"]
+        canonical = derive_session(
+            "0123456789abcdef0123456789abcdef",
+            "AAAABBBB",
+            random_2_from_resp,
+            now,
+            time_2,
+        )
+        assert server._session is not None
+        assert server._session.app_crypto_key == canonical.app_crypto_key
+
+    asyncio.run(run())

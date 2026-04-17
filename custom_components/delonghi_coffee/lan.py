@@ -487,7 +487,10 @@ class DeLonghiLanServer:
         try:
             body = await request.json()
             exchange = body["key_exchange"]
-            random_1 = str(exchange["random_1"])
+            # Normalize: cremalink strips base64 `=` padding on the wire, but
+            # a non-conforming peer might leave it in. Canonicalize so both
+            # sides derive the same session material regardless.
+            random_1 = str(exchange["random_1"]).rstrip("=")
             time_1 = int(exchange["time_1"])
         except (KeyError, ValueError, TypeError) as err:
             _LAN_LOGGER.warning("handshake: malformed request from %s: %s", peer, err)
@@ -820,7 +823,8 @@ async def run_lan_diagnostic(
 
                 if handshake_status != 202:
                     raise LanHandshakeError(f"HTTP {handshake_status} body={handshake_body}")
-                random_2 = str(handshake_body["random_2"])
+                # Canonicalize incoming random_2 (see _handle_handshake for rationale).
+                random_2 = str(handshake_body["random_2"]).rstrip("=")
                 time_2 = int(handshake_body["time_2"])
                 _LAN_LOGGER.debug(
                     "handshake: server responded 202 random_2=%s time_2=%d",
@@ -895,7 +899,7 @@ async def run_lan_diagnostic(
                 # -- Stage: teardown -----------------------------------------
                 stage = "teardown"
 
-    except TimeoutError as err:
+    except TimeoutError:
         _LAN_LOGGER.error("diagnostic timed out after %.1fs at stage=%s", total_timeout, stage)
         result = LanDiagnosticResult(
             success=False,

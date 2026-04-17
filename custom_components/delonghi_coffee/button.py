@@ -255,10 +255,19 @@ class DeLonghiLanDiagnosticButton(CoordinatorEntity[DeLonghiCoordinator], Button
 
     async def async_press(self) -> None:
         """Fetch LAN config, spin up the pipeline, log everything."""
+        import requests as _requests
+
         _LOGGER.info("LAN diagnostic requested for %s", self._dsn)
         try:
             lan_config = await self.hass.async_add_executor_job(self._api.get_lan_config, self._dsn)
-        except Exception as err:  # noqa: BLE001 — never raise to HA
+        except (
+            DeLonghiApiError,
+            DeLonghiAuthError,
+            _requests.RequestException,
+            TimeoutError,
+            ValueError,
+            KeyError,
+        ) as err:
             _LOGGER.exception("LAN diagnostic: get_lan_config failed")
             raise HomeAssistantError(f"LAN diagnostic cloud fetch failed: {err}") from err
 
