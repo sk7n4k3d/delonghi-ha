@@ -4,7 +4,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from homeassistant.exceptions import (  # noqa: E402
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -357,20 +356,24 @@ class TestAsyncSetupEntryErrors:
         entry = _make_entry()
         api = _make_fake_api()
         api.authenticate.side_effect = DeLonghiAuthError("bad creds")
-        with patch.object(init_mod, "DeLonghiApi", return_value=api), \
-             patch.object(init_mod, "DeLonghiCoordinator", return_value=_make_fake_coord()):
-            with pytest.raises(ConfigEntryAuthFailed):
-                _run(init_mod.async_setup_entry(hass, entry))
+        with (
+            patch.object(init_mod, "DeLonghiApi", return_value=api),
+            patch.object(init_mod, "DeLonghiCoordinator", return_value=_make_fake_coord()),
+            pytest.raises(ConfigEntryAuthFailed),
+        ):
+            _run(init_mod.async_setup_entry(hass, entry))
 
     def test_api_error_raises_config_entry_not_ready(self):
         hass = _make_hass()
         entry = _make_entry()
         api = _make_fake_api()
         api.authenticate.side_effect = DeLonghiApiError("backend down")
-        with patch.object(init_mod, "DeLonghiApi", return_value=api), \
-             patch.object(init_mod, "DeLonghiCoordinator", return_value=_make_fake_coord()):
-            with pytest.raises(ConfigEntryNotReady):
-                _run(init_mod.async_setup_entry(hass, entry))
+        with (
+            patch.object(init_mod, "DeLonghiApi", return_value=api),
+            patch.object(init_mod, "DeLonghiCoordinator", return_value=_make_fake_coord()),
+            pytest.raises(ConfigEntryNotReady),
+        ):
+            _run(init_mod.async_setup_entry(hass, entry))
 
 
 # ---------------------------------------------------------------------------

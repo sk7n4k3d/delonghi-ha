@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -153,10 +154,10 @@ class TestAssumedAndIsOn:
         # Monitor keeps saying Off — contradicts our command
         sw.coordinator.data = {"machine_state": "Off"}
         # Tick 1: contradiction starts
-        sw.is_on
+        _ = sw.is_on
         assert sw._monitor_stale_count == 1
         # Tick 2
-        sw.is_on
+        _ = sw.is_on
         assert sw._monitor_stale_count == 2
         # Tick 3: stale threshold reached, assumed state takes over
         result = sw.is_on
@@ -168,9 +169,9 @@ class TestAssumedAndIsOn:
         sw = _make_switch()
         sw._last_commanded_on = True
         sw.coordinator.data = {"machine_state": "Off"}
-        sw.is_on  # count=1
+        _ = sw.is_on  # count=1
         sw.coordinator.data = {"machine_state": "Going to sleep"}
-        sw.is_on  # state changed, count resets to 1
+        _ = sw.is_on  # state changed, count resets to 1
         assert sw._monitor_stale_count == 1
 
     def test_no_command_pending_assumed_tracks_monitor(self):
@@ -198,10 +199,8 @@ class TestAsyncTurnOnFlow:
             # Cancel the bg retry to avoid leak
             if sw._retry_task is not None:
                 sw._retry_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await sw._retry_task
-                except (asyncio.CancelledError, Exception):
-                    pass
 
         asyncio.run(_go())
         sw._api.send_command.assert_called_once()
@@ -256,10 +255,8 @@ class TestAsyncTurnOnFlow:
                 await sw.async_turn_on()
             if sw._retry_task is not None:
                 sw._retry_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await sw._retry_task
-                except (asyncio.CancelledError, Exception):
-                    pass
 
         asyncio.run(_go())
         # Wake phase + post-command phase both fall back to request_monitor
@@ -424,10 +421,8 @@ class TestPowerOnExceptionPaths:
                 await sw.async_turn_on()
             if sw._retry_task is not None:
                 sw._retry_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await sw._retry_task
-                except (asyncio.CancelledError, Exception):
-                    pass
 
         asyncio.run(_go())
         sw._api.send_command.assert_called_once()
@@ -446,10 +441,8 @@ class TestPowerOnExceptionPaths:
                 await sw.async_turn_on()
             if sw._retry_task is not None:
                 sw._retry_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await sw._retry_task
-                except (asyncio.CancelledError, Exception):
-                    pass
 
         asyncio.run(_go())
         # Still completes successfully — _assumed_on flips
@@ -478,20 +471,16 @@ class TestPowerOnExceptionPaths:
                 await sw.async_turn_on()
 
             # Yield so the cancellation finishes propagating before we check.
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await old_task
-            except (asyncio.CancelledError, Exception):
-                pass
             assert old_task.cancelled() or old_task.done()
             # New retry task installed and different from the old one
             assert sw._retry_task is not None
             assert sw._retry_task is not old_task
             # Cleanup
             sw._retry_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await sw._retry_task
-            except (asyncio.CancelledError, Exception):
-                pass
 
         asyncio.run(_go())
 

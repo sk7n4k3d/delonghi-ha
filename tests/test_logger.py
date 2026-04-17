@@ -288,9 +288,8 @@ class TestApiTimerSlowResponse:
             side_effect=lambda: next(fake_times),
         ), patch(
             "custom_components.delonghi_coffee.logger._LOGGER"
-        ) as mock_logger:
-            with ApiTimer("slow_call"):
-                pass
+        ) as mock_logger, ApiTimer("slow_call"):
+            pass
 
         mock_logger.warning.assert_called_once()
         msg_args = mock_logger.warning.call_args.args
