@@ -394,6 +394,7 @@ def test_run_lan_diagnostic_full_pipeline_success() -> None:
     assert result.details["diagnostic_port"] > 0
 
 
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
 def test_run_lan_diagnostic_never_raises_on_unexpected_error(monkeypatch) -> None:
     """Every error path should be caught and returned as a result."""
     from custom_components.delonghi_coffee import lan as lan_module

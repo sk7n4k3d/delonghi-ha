@@ -344,7 +344,7 @@ class TestAsyncUpdateDataKeepalive:
         coord, _, api = _make_coord()
         now = monotonic()
         coord._last_full_refresh = now  # full NOT needed
-        coord._last_keepalive = 0  # keepalive overdue
+        coord._last_keepalive = -MQTT_KEEPALIVE_INTERVAL - 1  # keepalive overdue (CI-safe)
         return coord, api, now
 
     def test_ping_connected_ok(self):
@@ -381,8 +381,8 @@ class TestAsyncUpdateDataKeepalive:
     def test_keepalive_skipped_when_full_refresh_due(self):
         """need_keepalive and need_full both True → keepalive branch skipped; full path runs."""
         coord, _, api = _make_coord()
-        coord._last_full_refresh = 0
-        coord._last_keepalive = 0
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
+        coord._last_keepalive = -MQTT_KEEPALIVE_INTERVAL - 1
         _run(coord._async_update_data())
         # In full path, ping_connected is called ONCE by the full-refresh wake
         assert api.ping_connected.call_count == 1
@@ -396,7 +396,7 @@ class TestAsyncUpdateDataFullRefresh:
 
     def test_full_refresh_fetches_and_parses(self):
         coord, _, api = _make_coord()
-        coord._last_full_refresh = 0  # force full refresh
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1  # force full refresh (CI-safe: monotonic() may be small)
         with (
             patch.object(coord_mod, "fetch_drink_catalog", return_value={1: {}}),
             patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
@@ -426,7 +426,7 @@ class TestAsyncUpdateDataFullRefresh:
         """Full refresh: when ping returns False, request_monitor is called."""
         coord, _, api = _make_coord()
         api.ping_connected.return_value = False
-        coord._last_full_refresh = 0
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
         with (
             patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
             patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
@@ -440,7 +440,7 @@ class TestAsyncUpdateDataFullRefresh:
         """Ping raising DeLonghiApiError during full-refresh wake does not abort refresh."""
         coord, _, api = _make_coord()
         api.ping_connected.side_effect = DeLonghiApiError("dead")
-        coord._last_full_refresh = 0
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
         with (
             patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
             patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
@@ -454,7 +454,7 @@ class TestAsyncUpdateDataFullRefresh:
     def test_full_refresh_wake_auth_error_swallowed(self):
         coord, _, api = _make_coord()
         api.ping_connected.side_effect = DeLonghiAuthError("token")
-        coord._last_full_refresh = 0
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
         with (
             patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
             patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
@@ -466,7 +466,7 @@ class TestAsyncUpdateDataFullRefresh:
     def test_lan_config_fetched_only_once(self):
         """Second full refresh must NOT re-fetch LAN config."""
         coord, _, api = _make_coord()
-        coord._last_full_refresh = 0
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
         with (
             patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
             patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
@@ -475,14 +475,14 @@ class TestAsyncUpdateDataFullRefresh:
             _run(coord._async_update_data())
             assert api.get_lan_config.call_count == 1
             # Force another full refresh
-            coord._last_full_refresh = 0
+            coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
             _run(coord._async_update_data())
         assert api.get_lan_config.call_count == 1  # still only once
 
     def test_contentstack_loaded_only_once(self):
         """Second full refresh must not re-trigger _load_contentstack."""
         coord, _, _ = _make_coord()
-        coord._last_full_refresh = 0
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
         with (
             patch.object(coord_mod, "fetch_drink_catalog", return_value={}) as m_dc,
             patch.object(coord_mod, "fetch_bean_adapt", return_value={}),
@@ -490,13 +490,13 @@ class TestAsyncUpdateDataFullRefresh:
         ):
             _run(coord._async_update_data())
             assert m_dc.call_count == 1
-            coord._last_full_refresh = 0
+            coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
             _run(coord._async_update_data())
         assert m_dc.call_count == 1  # still only once
 
     def test_beverages_not_reparsed_when_already_populated(self):
         coord, _, api = _make_coord()
-        coord._last_full_refresh = 0
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
         coord.beverages = ["already_here"]
         with (
             patch.object(coord_mod, "fetch_drink_catalog", return_value={}),
