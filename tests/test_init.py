@@ -68,6 +68,9 @@ def _make_hass():
     hass.services = MagicMock()
     hass.services.async_register = MagicMock()
     hass.services.async_remove = MagicMock()
+    # Register-once guard: return False so _register_services actually wires
+    # the handlers we need to assert against.
+    hass.services.has_service = MagicMock(return_value=False)
     return hass
 
 

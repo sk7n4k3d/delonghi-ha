@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -17,6 +17,9 @@ def _make_switch() -> DeLonghiPowerSwitch:
     api = MagicMock()
     coordinator = MagicMock()
     coordinator.data = {"machine_state": "Off"}
+    # LAN path unavailable by default — switch falls back to cloud send_command,
+    # which is what the existing tests assert on.
+    coordinator.send_command_lan = AsyncMock(return_value=False)
     return DeLonghiPowerSwitch(
         api=api,
         coordinator=coordinator,
