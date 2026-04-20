@@ -57,14 +57,10 @@ def test_login_roundtrip_returns_jwt() -> None:
             assert body["oauth_token"] == "st"
             return web.json_response({"errorCode": 0, "id_token": "jwt-abc"})
 
-        runner, base = await _start_gigya(
-            {"/accounts.login": login, "/accounts.getJWT": get_jwt}
-        )
+        runner, base = await _start_gigya({"/accounts.login": login, "/accounts.getJWT": get_jwt})
         try:
             api = DaedalusApi(gigya_base_url=base)
-            session_token, jwt = await api.login_and_get_jwt(
-                email="user@example.com", password="hunter2"
-            )
+            session_token, jwt = await api.login_and_get_jwt(email="user@example.com", password="hunter2")
             assert session_token == "st"
             assert jwt == "jwt-abc"
         finally:
@@ -77,9 +73,7 @@ def test_login_roundtrip_returns_jwt() -> None:
 def test_login_raises_auth_error_on_gigya_error_code() -> None:
     async def _run() -> None:
         async def login(request: web.Request) -> web.Response:
-            return web.json_response(
-                {"errorCode": 403042, "errorMessage": "Invalid credentials"}
-            )
+            return web.json_response({"errorCode": 403042, "errorMessage": "Invalid credentials"})
 
         runner, base = await _start_gigya({"/accounts.login": login})
         try:
