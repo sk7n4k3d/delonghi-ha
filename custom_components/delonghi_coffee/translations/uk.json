@@ -490,6 +490,51 @@
       },
       "run_lan_diagnostic": {
         "name": "Запустити діагностику LAN"
+      },
+      "brew_drip_style": {
+        "name": "Дрип-стиль"
+      },
+      "brew_caffe_crema": {
+        "name": "Кафе Крема"
+      },
+      "brew_red_eye": {
+        "name": "Ред Ай"
+      },
+      "brew_black_eye": {
+        "name": "Блек Ай"
+      },
+      "brew_espresso_intenso": {
+        "name": "Еспресо інтенсо"
+      },
+      "brew_ristretto_napoletano": {
+        "name": "Ристретто Наполетано"
+      },
+      "brew_babyccino": {
+        "name": "Бейбічіно"
+      },
+      "brew_milchkaffee": {
+        "name": "Мількафе"
+      },
+      "brew_koffie_verkeerd": {
+        "name": "Коффі Феркерд"
+      },
+      "brew_custom_1": {
+        "name": "Свій напій 1"
+      },
+      "brew_custom_2": {
+        "name": "Свій напій 2"
+      },
+      "brew_custom_3": {
+        "name": "Свій напій 3"
+      },
+      "brew_custom_4": {
+        "name": "Свій напій 4"
+      },
+      "brew_custom_5": {
+        "name": "Свій напій 5"
+      },
+      "brew_custom_6": {
+        "name": "Свій напій 6"
       }
     },
     "switch": {

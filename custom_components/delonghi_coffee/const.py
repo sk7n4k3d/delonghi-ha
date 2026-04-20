@@ -66,6 +66,16 @@ REQUEST_TIMEOUT: Final = (5, 15)
 RETRY_COUNT: Final = 3
 RETRY_DELAY: Final = 2  # seconds
 
+# Monitor freshness — raw payload unchanged for this many seconds => machine
+# has likely auto-slept or disconnected. Machine auto-sleep is 30 min, so we
+# pick 45 min to absorb one missed poll cycle safely.
+MONITOR_STALE_TIMEOUT: Final = 2700  # 45 minutes
+
+# Power switch timings (derived from MITM capture of the official Coffee Link app)
+POWER_WAKE_DELAY: Final = 15.0       # Seconds between keepalive ping and power-on command
+POWER_RETRY_DELAY: Final = 180.0     # Seconds before re-sending power-on if machine didn't wake
+POWER_STALE_THRESHOLD: Final = 3     # Consecutive polls before trusting assumed state over monitor
+
 # Beverage profiles — complete catalog from ContentStack + Ayla recipe keys
 # Keys match Ayla recipe property names; drink_id is the ContentStack/ECAM numeric ID
 BEVERAGES: Final[dict[str, dict[str, str]]] = {
@@ -100,6 +110,15 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "cafe_con_leche": {"name": "Café Con Leche", "icon": "mdi:glass-mug-variant", "drink_id": "29"},
     "cafe_au_lait": {"name": "Café Au Lait", "icon": "mdi:glass-mug-variant", "drink_id": "30"},
     "galao": {"name": "Galão", "icon": "mdi:glass-mug-variant", "drink_id": "31"},
+    "drip_style": {"name": "Drip Style", "icon": "mdi:coffee-outline", "drink_id": "32"},
+    "caffe_crema": {"name": "Caffè Crema", "icon": "mdi:coffee", "drink_id": "33"},
+    "red_eye": {"name": "Red Eye", "icon": "mdi:coffee", "drink_id": "34"},
+    "black_eye": {"name": "Black Eye", "icon": "mdi:coffee", "drink_id": "35"},
+    "espresso_intenso": {"name": "Espresso Intenso", "icon": "mdi:coffee", "drink_id": "36"},
+    "ristretto_napoletano": {"name": "Ristretto Napoletano", "icon": "mdi:coffee", "drink_id": "37"},
+    "babyccino": {"name": "Babyccino", "icon": "mdi:cup", "drink_id": "38"},
+    "milchkaffee": {"name": "Milchkaffee", "icon": "mdi:glass-mug-variant", "drink_id": "39"},
+    "koffie_verkeerd": {"name": "Koffie Verkeerd", "icon": "mdi:glass-mug-variant", "drink_id": "40"},
     # ── Iced (50-57) ────────────────────────────────────────────────────
     "i_americano": {"name": "Iced Americano", "icon": "mdi:snowflake", "drink_id": "50"},
     "i_cappuccino": {"name": "Iced Cappuccino", "icon": "mdi:snowflake", "drink_id": "51"},
@@ -155,6 +174,16 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "mi_capp_mix": {"name": "My Iced Cappuccino Mix", "icon": "mdi:snowflake"},
     "mi_flat_white": {"name": "My Iced Flat White", "icon": "mdi:snowflake"},
     "mi_cold_milk": {"name": "My Iced Cold Milk", "icon": "mdi:snowflake"},
+    # ── User Custom slots (230-235) ─────────────────────────────────────
+    # 6 personalisable slots that users configure through the official
+    # Coffee Link app. Names can be overridden at runtime via
+    # coordinator.custom_recipe_names (fetched from Ayla).
+    "custom_1": {"name": "Custom Drink 1", "icon": "mdi:star-outline", "drink_id": "230"},
+    "custom_2": {"name": "Custom Drink 2", "icon": "mdi:star-outline", "drink_id": "231"},
+    "custom_3": {"name": "Custom Drink 3", "icon": "mdi:star-outline", "drink_id": "232"},
+    "custom_4": {"name": "Custom Drink 4", "icon": "mdi:star-outline", "drink_id": "233"},
+    "custom_5": {"name": "Custom Drink 5", "icon": "mdi:star-outline", "drink_id": "234"},
+    "custom_6": {"name": "Custom Drink 6", "icon": "mdi:star-outline", "drink_id": "235"},
 }
 
 # ContentStack drink_id → recipe key reverse mapping (for beverage discovery)

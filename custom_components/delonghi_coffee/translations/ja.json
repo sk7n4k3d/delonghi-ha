@@ -490,6 +490,51 @@
       },
       "run_lan_diagnostic": {
         "name": "LAN診断を実行"
+      },
+      "brew_drip_style": {
+        "name": "ドリップスタイル"
+      },
+      "brew_caffe_crema": {
+        "name": "カフェクレマ"
+      },
+      "brew_red_eye": {
+        "name": "レッドアイ"
+      },
+      "brew_black_eye": {
+        "name": "ブラックアイ"
+      },
+      "brew_espresso_intenso": {
+        "name": "エスプレッソ・インテンソ"
+      },
+      "brew_ristretto_napoletano": {
+        "name": "リストレット・ナポレターノ"
+      },
+      "brew_babyccino": {
+        "name": "ベビーチーノ"
+      },
+      "brew_milchkaffee": {
+        "name": "ミルヒカフェ"
+      },
+      "brew_koffie_verkeerd": {
+        "name": "コフィ・フェルケールト"
+      },
+      "brew_custom_1": {
+        "name": "カスタムドリンク 1"
+      },
+      "brew_custom_2": {
+        "name": "カスタムドリンク 2"
+      },
+      "brew_custom_3": {
+        "name": "カスタムドリンク 3"
+      },
+      "brew_custom_4": {
+        "name": "カスタムドリンク 4"
+      },
+      "brew_custom_5": {
+        "name": "カスタムドリンク 5"
+      },
+      "brew_custom_6": {
+        "name": "カスタムドリンク 6"
       }
     },
     "switch": {

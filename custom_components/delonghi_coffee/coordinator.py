@@ -12,7 +12,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
-from .const import DOMAIN, FULL_REFRESH_INTERVAL, MQTT_KEEPALIVE_INTERVAL, SCAN_INTERVAL_SECONDS
+from .const import (
+    DOMAIN,
+    FULL_REFRESH_INTERVAL,
+    MONITOR_STALE_TIMEOUT,
+    MQTT_KEEPALIVE_INTERVAL,
+    SCAN_INTERVAL_SECONDS,
+)
 from .contentstack import fetch_bean_adapt, fetch_coffee_beans, fetch_drink_catalog
 from .lan import _LAN_LOGGER, DeLonghiLanServer, LanError, LanServerConfig, register_with_device
 from .logger import get_diagnostic_dump
@@ -58,7 +64,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
         self._monitor_last_changed: float = monotonic()
-        self._monitor_stale_timeout: int = 2700  # 45 minutes (machine auto-sleep is 30min)
+        self._monitor_stale_timeout: int = MONITOR_STALE_TIMEOUT
         self.diagnostic_mode: bool = False
         self._last_diagnostic: dict[str, Any] = {}
         self._last_all_props: dict[str, Any] = {}
@@ -254,7 +260,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Authentication error: {err}") from err
         except DeLonghiApiError as err:
             raise UpdateFailed(f"Error fetching data: {err}") from err
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 — last-resort guard: coordinator must surface UpdateFailed
+            _LOGGER.exception("Unexpected error during coordinator refresh")
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
     # ── LAN server lifecycle ─────────────────────────────────────────────

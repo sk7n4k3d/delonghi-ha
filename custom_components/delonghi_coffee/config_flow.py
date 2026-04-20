@@ -80,7 +80,7 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except DeLonghiApiError:
                 errors["base"] = "cannot_connect"
-            except Exception:
+            except Exception:  # noqa: BLE001 — config flows must never surface unhandled exceptions to the user
                 _LOGGER.exception("Unexpected error during config flow")
                 errors["base"] = "unknown"
 
@@ -119,7 +119,7 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except DeLonghiApiError:
                 errors["base"] = "cannot_connect"
-            except Exception:
+            except Exception:  # noqa: BLE001 — reauth flow must never surface unhandled exceptions to the user
                 _LOGGER.exception("Unexpected error during reauth")
                 errors["base"] = "unknown"
 

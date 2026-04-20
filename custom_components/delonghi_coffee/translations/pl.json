@@ -490,6 +490,51 @@
       },
       "run_lan_diagnostic": {
         "name": "Uruchom diagnostykę LAN"
+      },
+      "brew_drip_style": {
+        "name": "Drip Style"
+      },
+      "brew_caffe_crema": {
+        "name": "Caffè Crema"
+      },
+      "brew_red_eye": {
+        "name": "Red Eye"
+      },
+      "brew_black_eye": {
+        "name": "Black Eye"
+      },
+      "brew_espresso_intenso": {
+        "name": "Espresso Intenso"
+      },
+      "brew_ristretto_napoletano": {
+        "name": "Ristretto Napoletano"
+      },
+      "brew_babyccino": {
+        "name": "Babyccino"
+      },
+      "brew_milchkaffee": {
+        "name": "Milchkaffee"
+      },
+      "brew_koffie_verkeerd": {
+        "name": "Koffie Verkeerd"
+      },
+      "brew_custom_1": {
+        "name": "Napój niestandardowy 1"
+      },
+      "brew_custom_2": {
+        "name": "Napój niestandardowy 2"
+      },
+      "brew_custom_3": {
+        "name": "Napój niestandardowy 3"
+      },
+      "brew_custom_4": {
+        "name": "Napój niestandardowy 4"
+      },
+      "brew_custom_5": {
+        "name": "Napój niestandardowy 5"
+      },
+      "brew_custom_6": {
+        "name": "Napój niestandardowy 6"
       }
     },
     "switch": {

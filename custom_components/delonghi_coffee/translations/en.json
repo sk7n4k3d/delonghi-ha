@@ -500,6 +500,51 @@
       },
       "run_lan_diagnostic": {
         "name": "Run LAN Diagnostic"
+      },
+      "brew_drip_style": {
+        "name": "Drip Style"
+      },
+      "brew_caffe_crema": {
+        "name": "Caffè Crema"
+      },
+      "brew_red_eye": {
+        "name": "Red Eye"
+      },
+      "brew_black_eye": {
+        "name": "Black Eye"
+      },
+      "brew_espresso_intenso": {
+        "name": "Espresso Intenso"
+      },
+      "brew_ristretto_napoletano": {
+        "name": "Ristretto Napoletano"
+      },
+      "brew_babyccino": {
+        "name": "Babyccino"
+      },
+      "brew_milchkaffee": {
+        "name": "Milchkaffee"
+      },
+      "brew_koffie_verkeerd": {
+        "name": "Koffie Verkeerd"
+      },
+      "brew_custom_1": {
+        "name": "Custom Drink 1"
+      },
+      "brew_custom_2": {
+        "name": "Custom Drink 2"
+      },
+      "brew_custom_3": {
+        "name": "Custom Drink 3"
+      },
+      "brew_custom_4": {
+        "name": "Custom Drink 4"
+      },
+      "brew_custom_5": {
+        "name": "Custom Drink 5"
+      },
+      "brew_custom_6": {
+        "name": "Custom Drink 6"
       }
     },
     "switch": {

@@ -15,16 +15,23 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
-from .const import DOMAIN, POWER_OFF_CMD, POWER_ON_CMD
+from .const import (
+    DOMAIN,
+    POWER_OFF_CMD,
+    POWER_ON_CMD,
+    POWER_RETRY_DELAY,
+    POWER_STALE_THRESHOLD,
+    POWER_WAKE_DELAY,
+)
 from .coordinator import DeLonghiCoordinator
 from .sensor import _device_info
 
 _LOGGER = logging.getLogger(__name__)
 
-# Timing constants (from MITM capture of official Coffee Link app)
-_WAKE_DELAY: float = 15.0  # App waits ~15s after ping before sending command
-_RETRY_DELAY: float = 180.0  # App retries power on after ~3 minutes
-_STALE_THRESHOLD: int = 3  # Polls before trusting assumed state over monitor
+# Re-exported under legacy names so existing tests and private callers still resolve.
+_WAKE_DELAY: float = POWER_WAKE_DELAY
+_RETRY_DELAY: float = POWER_RETRY_DELAY
+_STALE_THRESHOLD: int = POWER_STALE_THRESHOLD
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:

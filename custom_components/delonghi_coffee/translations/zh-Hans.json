@@ -490,6 +490,51 @@
       },
       "run_lan_diagnostic": {
         "name": "运行 LAN 诊断"
+      },
+      "brew_drip_style": {
+        "name": "滴滤咖啡"
+      },
+      "brew_caffe_crema": {
+        "name": "奶油咖啡"
+      },
+      "brew_red_eye": {
+        "name": "红眼咖啡"
+      },
+      "brew_black_eye": {
+        "name": "黑眼咖啡"
+      },
+      "brew_espresso_intenso": {
+        "name": "浓缩咖啡（强）"
+      },
+      "brew_ristretto_napoletano": {
+        "name": "那不勒斯浓缩"
+      },
+      "brew_babyccino": {
+        "name": "宝宝奶泡"
+      },
+      "brew_milchkaffee": {
+        "name": "牛奶咖啡"
+      },
+      "brew_koffie_verkeerd": {
+        "name": "荷式咖啡"
+      },
+      "brew_custom_1": {
+        "name": "自定义饮品 1"
+      },
+      "brew_custom_2": {
+        "name": "自定义饮品 2"
+      },
+      "brew_custom_3": {
+        "name": "自定义饮品 3"
+      },
+      "brew_custom_4": {
+        "name": "自定义饮品 4"
+      },
+      "brew_custom_5": {
+        "name": "自定义饮品 5"
+      },
+      "brew_custom_6": {
+        "name": "自定义饮品 6"
       }
     },
     "switch": {

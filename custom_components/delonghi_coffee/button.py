@@ -112,9 +112,12 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         self._beverage_key = beverage_key
         self._attr_unique_id = f"{dsn}_brew_{beverage_key}"
         self._attr_has_entity_name = True
-        # Use translation_key for beverages with known translations,
-        # otherwise use the name directly (custom recipes, unknown beverages)
-        if beverage_key in BEVERAGES:
+        # Use translation_key when the resolved meta still matches the BEVERAGES
+        # default (translated label). If the user has set a custom recipe name —
+        # meta['name'] diverges from BEVERAGES[key]['name'] — fall back to
+        # _attr_name so the label reflects the user's override instead of the
+        # generic "Custom Drink N" translation.
+        if beverage_key in BEVERAGES and meta["name"] == BEVERAGES[beverage_key]["name"]:
             self._attr_translation_key = f"brew_{beverage_key}"
         else:
             self._attr_name = meta["name"]

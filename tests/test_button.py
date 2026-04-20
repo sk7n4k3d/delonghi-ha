@@ -56,10 +56,17 @@ class TestResolveBeverageMeta:
         assert meta["name"] == "Morning Booster"
         assert meta["icon"] == "mdi:coffee-to-go"
 
-    def test_custom_recipe_fallback_when_no_name(self):
+    def test_custom_slot_without_user_name_uses_generic_label(self):
+        """custom_2 with no user override resolves to the generic BEVERAGES default."""
         meta, is_known = resolve_beverage_meta("custom_2", {})
+        assert is_known is True
+        assert meta["name"] == "Custom Drink 2"
+        assert meta["icon"] == "mdi:star-outline"
+
+    def test_truly_unknown_key_falls_back_to_title_case(self):
+        meta, is_known = resolve_beverage_meta("mystery_brew", {})
         assert is_known is False
-        assert meta["name"] == "Custom 2"
+        assert meta["name"] == "Mystery Brew"
         assert meta["icon"] == "mdi:coffee"
 
     def test_unknown_beverage_fallback(self):
@@ -73,6 +80,37 @@ class TestResolveBeverageMeta:
         meta, _ = resolve_beverage_meta("espresso", {})
         meta["name"] = "Mutated"
         assert BEVERAGES["espresso"]["name"] != "Mutated"
+
+
+class TestCustomSlotsUseWireKey:
+    """Issue #17: machine reports custom_1..custom_6 on the wire.
+
+    Buttons created with those wire keys must resolve to a known BEVERAGES
+    entry (not the title-case fallback), otherwise lodzen keeps seeing:
+        "Unknown beverage keys — buttons created with default name/icon:
+         ['custom_1', 'custom_2', 'custom_3', 'custom_4', 'custom_5', 'custom_6']"
+    """
+
+    def test_custom_1_wire_key_is_known_in_beverages(self):
+        assert "custom_1" in BEVERAGES
+
+    def test_all_six_custom_slots_are_known_in_beverages(self):
+        missing = [f"custom_{i}" for i in range(1, 7) if f"custom_{i}" not in BEVERAGES]
+        assert not missing, f"Custom slots absent from BEVERAGES: {missing}"
+
+    def test_custom_slot_resolves_without_custom_name(self):
+        """With no user-defined name, custom_1 must still hit BEVERAGES (is_known=True)."""
+        meta, is_known = resolve_beverage_meta("custom_1", {})
+        assert is_known is True
+        assert meta["name"] == "Custom Drink 1"
+        assert meta["icon"] == "mdi:star-outline"
+
+    def test_custom_slot_en_translation_uses_wire_key(self):
+        """en.json must expose brew_custom_1 (matching wire key), not brew_custom_bev_1."""
+        en = json.loads((TRANSLATIONS_DIR / "en.json").read_text(encoding="utf-8"))
+        button_keys = set(en["entity"]["button"].keys())
+        missing = [f"brew_custom_{i}" for i in range(1, 7) if f"brew_custom_{i}" not in button_keys]
+        assert not missing, f"Missing translation keys: {missing}"
 
 
 class TestPrimaDonnaSoulButtonCoverage:
