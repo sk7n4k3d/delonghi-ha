@@ -10,7 +10,13 @@ import logging
 from unittest.mock import MagicMock
 
 from custom_components.delonghi_coffee.api import DeLonghiApiError
+from custom_components.delonghi_coffee.const import MQTT_KEEPALIVE_INTERVAL
 from custom_components.delonghi_coffee.coordinator import DeLonghiCoordinator
+
+# On a fresh CI runner monotonic() can start near zero, so '_last_keepalive = 0'
+# leaves 'now - 0 < MQTT_KEEPALIVE_INTERVAL' and the keepalive branch never
+# runs. Use a negative offset that guarantees eligibility regardless of uptime.
+_KEEPALIVE_FORCE = -MQTT_KEEPALIVE_INTERVAL - 1
 
 
 class _DirectExecutor:
@@ -28,7 +34,7 @@ def _make_coord(api: MagicMock) -> DeLonghiCoordinator:
     coord.hass = hass
     # Force keepalive path (not full refresh) every call.
     coord._last_full_refresh = 1e12  # far in the future so need_full == False
-    coord._last_keepalive = 0  # first call always hits keepalive branch
+    coord._last_keepalive = _KEEPALIVE_FORCE  # first call always hits keepalive branch
     return coord
 
 
@@ -46,7 +52,7 @@ def test_keepalive_failure_counter_increments_and_resets(caplog) -> None:
 
     async def hammer(n: int) -> None:
         for _ in range(n):
-            coord._last_keepalive = 0  # force keepalive eligibility each cycle
+            coord._last_keepalive = _KEEPALIVE_FORCE  # force keepalive eligibility each cycle
             with contextlib.suppress(Exception):  # only care about the counter
                 await coord._async_update_data()
 
@@ -62,7 +68,7 @@ def test_keepalive_failure_counter_increments_and_resets(caplog) -> None:
     # Recovery resets the counter and emits an info line.
     api.ping_connected.side_effect = None
     api.ping_connected.return_value = True
-    coord._last_keepalive = 0
+    coord._last_keepalive = _KEEPALIVE_FORCE
     asyncio.run(coord._async_update_data())
     assert coord._keepalive_failures == 0, "successful keepalive must reset the counter"
 
@@ -79,7 +85,7 @@ def test_keepalive_error_escalates_at_multiples_of_five(caplog) -> None:
 
     async def hammer(n: int) -> None:
         for _ in range(n):
-            coord._last_keepalive = 0
+            coord._last_keepalive = _KEEPALIVE_FORCE
             with contextlib.suppress(Exception):
                 await coord._async_update_data()
 

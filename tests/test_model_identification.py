@@ -49,6 +49,129 @@ class TestSerialNumberParsing:
         assert info["raw"] == "EC"
 
 
+class TestBinarySerialDecoder:
+    """Modern ECAM firmware (PrimaDonna Soul et al.) exposes d270_serialnumber
+    as base64-encoded binary: 6-byte header + 19 ASCII chars + 3-byte trailer.
+
+    The 19-char payload structure (per De'Longhi service documentation):
+        CCCCCC EE AA MM GG L PPPP
+        where C=codice, E=esecuzione, A=anno, M=mese, G=giorno,
+              L=lettera, P=produzione
+    """
+
+    # Real-world sample from @lodzen (PrimaDonna Soul, DSN AC000W040821014,
+    # production 2025-07-01). Structure: 217055 ZZ 25 07 01 3 0134.
+    PRIMADONNA_SOUL_B64 = "0BuhDwDNMjE3MDU1WloyNTA3MDEzMDEzNAD9pg=="
+
+    def test_binary_serial_extracts_sku_digits(self):
+        """Base64 binary serial exposes the first 6 SKU digits."""
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        assert info["digits"].startswith("217055")
+
+    def test_binary_serial_surfaces_production_date(self):
+        """Production date fields are decoded when binary envelope detected."""
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        assert info.get("year") == 2025
+        assert info.get("month") == 7
+        assert info.get("day") == 1
+
+    def test_binary_serial_surfaces_execution_code(self):
+        """Execution code (2 alphanumeric chars after SKU) is surfaced."""
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        assert info.get("execution") == "ZZ"
+
+    def test_binary_serial_surfaces_production_sequence(self):
+        """Production sequence (last 4 digits) is surfaced for uniqueness."""
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        assert info.get("production") == "0134"
+
+    def test_binary_serial_preserves_raw(self):
+        """Raw base64 is preserved alongside decoded fields."""
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        assert info["raw"] == self.PRIMADONNA_SOUL_B64
+
+    def test_binary_serial_marks_format(self):
+        """Binary-decoded samples expose format='binary' for downstream logic."""
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        assert info.get("format") == "binary"
+
+    def test_plaintext_fallback_marks_format(self):
+        """Legacy plaintext serials expose format='plaintext'."""
+        info = DeLonghiApi.parse_serial_number("ECAM61075MB12345")
+        assert info is not None
+        assert info.get("format") == "plaintext"
+
+    def test_invalid_base64_falls_back_to_regex(self):
+        """Non-b64 garbage still yields best-effort digit extraction."""
+        info = DeLonghiApi.parse_serial_number("!!!garbage!!!XY42Z")
+        assert info is not None
+        assert info.get("format") == "plaintext"
+        assert info["digits"] == "42"
+
+    def test_binary_serial_matches_transcode_table(self):
+        """Decoded SKU digits feed directly into match_transcode_table."""
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        # The match_transcode_table call uses the first 6 digits of `digits`,
+        # which the decoder guarantees to be the codice.
+        assert info["digits"][:6] == "217055"
+
+    def test_binary_serial_roundtrips_into_transcode_table(self):
+        """End-to-end: decoded SKU resolves to the PrimaDonna Soul entry."""
+        table = _load_transcode_table()
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        match = DeLonghiApi.match_transcode_table(table, sku_digits=info["digits"][:6])
+        assert match is not None
+        assert match["appModelId"] == "PD_SOUL"
+
+    def test_invalid_calendar_date_falls_back_to_plaintext(self):
+        """Structurally valid but calendrically impossible date (Feb 31) is rejected.
+
+        Without datetime.date validation, 217055ZZ250231 1 0700 passes the
+        month<=12 / day<=31 guard and yields a bogus binary record. It must
+        instead fall back to the plaintext regex path.
+        """
+        import base64
+
+        payload = b"header\x00217055ZZ2502311" + b"0700" + b"\x00\x00\x00"
+        encoded = base64.b64encode(payload).decode("ascii")
+        info = DeLonghiApi.parse_serial_number(encoded)
+        assert info is not None
+        assert info.get("format") == "plaintext", (
+            "Feb 31 must be rejected by real-date validation, forcing plaintext fallback"
+        )
+
+    def test_binary_regex_does_not_match_outside_payload_slice(self):
+        """Payload shaped like a serial but placed outside the documented frame
+        slice (6-byte header + payload + 3-byte trailer) must not be accepted.
+
+        This guards against false positives where random bytes in a larger
+        envelope happen to match the SKU pattern.
+        """
+        import base64
+
+        # 6-byte header, NO real payload, trailer, then a decoy shaped like
+        # a serial (but the frame length is inconsistent — payload would extend
+        # past the declared trailer).
+        header = b"hdr\x01\x02\x03"
+        trailer = b"\xaa\xbb\xcc"
+        decoy = b"999999ZZ250815X1234"
+        garbage = header + trailer + decoy
+        encoded = base64.b64encode(garbage).decode("ascii")
+        info = DeLonghiApi.parse_serial_number(encoded)
+        assert info is not None
+        assert info.get("format") == "plaintext", (
+            "Decoy at wrong frame offset must not be treated as a valid binary serial"
+        )
+
+
 class TestTranscodeTableMatching:
     """Match serial/OEM model against TranscodeTable.
 

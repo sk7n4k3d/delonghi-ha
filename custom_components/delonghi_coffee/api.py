@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
 import functools
 import json
@@ -11,6 +12,7 @@ import re
 import struct
 import threading
 import time
+from datetime import date
 from typing import Any
 
 import requests
@@ -208,20 +210,115 @@ class DeLonghiApi:
     # ── Model identification (TranscodeTable) ─────────────────────────
     # Credit: TranscodeTable approach from FrozenGalaxy/PyDeLonghiAPI
 
-    @staticmethod
-    def parse_serial_number(value: str | None) -> dict[str, str] | None:
-        """Parse d270_serialnumber to extract SKU-matching digits.
+    # Binary serial payload: 6 SKU digits + 2 exec alphanum + 2 year + 2 month
+    # + 2 day + 1 letter + 4 production seq = 19 printable ASCII chars.
+    # Framed by 6 bytes of device-specific header and 3 bytes of trailer (CRC).
+    _BINARY_SERIAL_RE = re.compile(rb"(\d{6}[A-Z0-9]{2}\d{6}[A-Z0-9]\d{4})")
+    _BINARY_SERIAL_HEADER_LEN = 6
+    _BINARY_SERIAL_PAYLOAD_LEN = 19
+    _BINARY_SERIAL_TRAILER_LEN = 3
+    _BINARY_SERIAL_FRAME_LEN = _BINARY_SERIAL_HEADER_LEN + _BINARY_SERIAL_PAYLOAD_LEN + _BINARY_SERIAL_TRAILER_LEN
 
-        The serial format is typically: ECAM{model}{suffix}{production_info}
-        e.g. "ECAM45065S12345" or "ECAM61075MB12345"
-        We extract the numeric portion for TranscodeTable matching.
+    @staticmethod
+    def parse_serial_number(value: str | None) -> dict[str, Any] | None:
+        """Parse ``d270_serialnumber`` to extract SKU digits and production info.
+
+        Two known formats are supported:
+
+        1. **Legacy plaintext** — e.g. ``ECAM61075MB12345``. Digit sequences
+           are concatenated for TranscodeTable matching.
+        2. **Binary envelope (base64)** — e.g. ``0BuhDwDNMjE3MDU1...D9pg==``.
+           Decodes to a 6-byte header, a 19-char ASCII payload laid out as
+           ``CCCCCC EE AA MM GG L PPPP`` (codice / esecuzione / anno / mese /
+           giorno / lettera / produzione per De'Longhi service documentation),
+           and a 3-byte trailer (CRC). Exposes year/month/day/execution/
+           production fields alongside SKU digits.
+
+        Returns ``None`` for empty input. Falls back to plaintext regex when
+        base64 decoding fails or the payload structure does not match.
         """
         if not value:
             return None
-        # Extract all digit sequences from the serial
+
+        binary = DeLonghiApi._try_decode_binary_serial(value)
+        if binary is not None:
+            return binary
+
+        # Plaintext fallback — concatenate all digit runs for SKU matching.
         digits = re.findall(r"\d+", value)
-        all_digits = "".join(digits)
-        return {"raw": value, "digits": all_digits}
+        return {
+            "raw": value,
+            "digits": "".join(digits),
+            "format": "plaintext",
+        }
+
+    @staticmethod
+    def _try_decode_binary_serial(value: str) -> dict[str, Any] | None:
+        """Attempt to decode a base64-framed binary serial envelope.
+
+        Returns the structured dict on success, ``None`` if the input is not
+        a well-formed binary envelope (caller falls back to plaintext).
+        """
+        # Base64 payload must be exclusively b64 alphabet (+ padding) and at
+        # least ~28 bytes encoded. Short plaintext ("ECAM...") or noisy
+        # strings ("!!!not_base64!!!") are rejected here before attempting
+        # decode to avoid false positives.
+        if len(value) < 28 or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", value):
+            return None
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error):
+            return None
+
+        # Require the documented frame size (header + payload + trailer) and
+        # only search within the payload slice. This rejects envelopes where
+        # random bytes happen to match the SKU pattern at the wrong offset
+        # (CodeRabbit review on PR #19).
+        if len(decoded) < DeLonghiApi._BINARY_SERIAL_FRAME_LEN:
+            return None
+        payload_slice = decoded[DeLonghiApi._BINARY_SERIAL_HEADER_LEN : -DeLonghiApi._BINARY_SERIAL_TRAILER_LEN]
+        match = DeLonghiApi._BINARY_SERIAL_RE.search(payload_slice)
+        if match is None:
+            return None
+
+        payload = match.group(1).decode("ascii")
+        # Layout: CCCCCC EE AA MM GG L PPPP (6 + 2 + 2 + 2 + 2 + 1 + 4)
+        sku = payload[0:6]
+        execution = payload[6:8]
+        year_suffix = payload[8:10]
+        month = payload[10:12]
+        day = payload[12:14]
+        letter = payload[14:15]
+        production = payload[15:19]
+
+        try:
+            year = 2000 + int(year_suffix)
+            # Build a real date object to reject calendrically impossible
+            # combinations like 2025-02-31 that pass naive range checks
+            # (CodeRabbit review on PR #19).
+            production_date = date(year, int(month), int(day))
+        except ValueError:
+            return None
+
+        month_int = production_date.month
+        day_int = production_date.day
+
+        return {
+            "raw": value,
+            # Concatenated digits feed downstream TranscodeTable matching; the
+            # execution field is skipped because it may contain letters (e.g.
+            # "ZZ") and the first 6 digits — the SKU/codice — are what the
+            # matcher consumes.
+            "digits": sku + year_suffix + month + day + production,
+            "sku": sku,
+            "execution": execution,
+            "year": year,
+            "month": month_int,
+            "day": day_int,
+            "letter": letter,
+            "production": production,
+            "format": "binary",
+        }
 
     @staticmethod
     def match_transcode_table(
