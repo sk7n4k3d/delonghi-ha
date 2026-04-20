@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "De'Longhi My Coffee Lounge",
+        "description": "Entrez vos identifiants My Coffee Lounge et l'adresse LAN de votre Eletta Ultra (Daedalus).",
+        "data": {
+          "email": "Email",
+          "password": "Mot de passe",
+          "host": "IP locale de la machine",
+          "serial_number": "Numéro de série"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Identifiants My Coffee Lounge invalides",
+      "cannot_connect": "Impossible de joindre la machine sur le réseau local",
+      "invalid_host": "IP ou nom d'hôte invalide",
+      "unknown": "Erreur inattendue"
+    },
+    "abort": {
+      "already_configured": "Machine déjà configurée"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Connectée"
+      }
+    },
+    "sensor": {
+      "connection_id": {
+        "name": "ID de connexion LAN"
+      },
+      "serial_number": {
+        "name": "Numéro de série"
+      },
+      "lan_ip": {
+        "name": "Adresse IP locale"
+      }
+    }
+  }
+}

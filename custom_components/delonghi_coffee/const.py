@@ -72,9 +72,9 @@ RETRY_DELAY: Final = 2  # seconds
 MONITOR_STALE_TIMEOUT: Final = 2700  # 45 minutes
 
 # Power switch timings (derived from MITM capture of the official Coffee Link app)
-POWER_WAKE_DELAY: Final = 15.0       # Seconds between keepalive ping and power-on command
-POWER_RETRY_DELAY: Final = 180.0     # Seconds before re-sending power-on if machine didn't wake
-POWER_STALE_THRESHOLD: Final = 3     # Consecutive polls before trusting assumed state over monitor
+POWER_WAKE_DELAY: Final = 15.0  # Seconds between keepalive ping and power-on command
+POWER_RETRY_DELAY: Final = 180.0  # Seconds before re-sending power-on if machine didn't wake
+POWER_STALE_THRESHOLD: Final = 3  # Consecutive polls before trusting assumed state over monitor
 
 # Beverage profiles — complete catalog from ContentStack + Ayla recipe keys
 # Keys match Ayla recipe property names; drink_id is the ContentStack/ECAM numeric ID
