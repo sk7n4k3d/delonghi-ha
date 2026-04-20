@@ -12,6 +12,7 @@ import re
 import struct
 import threading
 import time
+from datetime import date
 from typing import Any
 
 import requests
@@ -212,9 +213,11 @@ class DeLonghiApi:
     # Binary serial payload: 6 SKU digits + 2 exec alphanum + 2 year + 2 month
     # + 2 day + 1 letter + 4 production seq = 19 printable ASCII chars.
     # Framed by 6 bytes of device-specific header and 3 bytes of trailer (CRC).
-    _BINARY_SERIAL_RE = re.compile(
-        rb"(\d{6}[A-Z0-9]{2}\d{6}[A-Z0-9]\d{4})"
-    )
+    _BINARY_SERIAL_RE = re.compile(rb"(\d{6}[A-Z0-9]{2}\d{6}[A-Z0-9]\d{4})")
+    _BINARY_SERIAL_HEADER_LEN = 6
+    _BINARY_SERIAL_PAYLOAD_LEN = 19
+    _BINARY_SERIAL_TRAILER_LEN = 3
+    _BINARY_SERIAL_FRAME_LEN = _BINARY_SERIAL_HEADER_LEN + _BINARY_SERIAL_PAYLOAD_LEN + _BINARY_SERIAL_TRAILER_LEN
 
     @staticmethod
     def parse_serial_number(value: str | None) -> dict[str, Any] | None:
@@ -267,7 +270,14 @@ class DeLonghiApi:
         except (ValueError, binascii.Error):
             return None
 
-        match = DeLonghiApi._BINARY_SERIAL_RE.search(decoded)
+        # Require the documented frame size (header + payload + trailer) and
+        # only search within the payload slice. This rejects envelopes where
+        # random bytes happen to match the SKU pattern at the wrong offset
+        # (CodeRabbit review on PR #19).
+        if len(decoded) < DeLonghiApi._BINARY_SERIAL_FRAME_LEN:
+            return None
+        payload_slice = decoded[DeLonghiApi._BINARY_SERIAL_HEADER_LEN : -DeLonghiApi._BINARY_SERIAL_TRAILER_LEN]
+        match = DeLonghiApi._BINARY_SERIAL_RE.search(payload_slice)
         if match is None:
             return None
 
@@ -283,13 +293,15 @@ class DeLonghiApi:
 
         try:
             year = 2000 + int(year_suffix)
-            month_int = int(month)
-            day_int = int(day)
+            # Build a real date object to reject calendrically impossible
+            # combinations like 2025-02-31 that pass naive range checks
+            # (CodeRabbit review on PR #19).
+            production_date = date(year, int(month), int(day))
         except ValueError:
             return None
 
-        if not (1 <= month_int <= 12 and 1 <= day_int <= 31):
-            return None
+        month_int = production_date.month
+        day_int = production_date.day
 
         return {
             "raw": value,

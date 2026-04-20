@@ -122,6 +122,55 @@ class TestBinarySerialDecoder:
         # which the decoder guarantees to be the codice.
         assert info["digits"][:6] == "217055"
 
+    def test_binary_serial_roundtrips_into_transcode_table(self):
+        """End-to-end: decoded SKU resolves to the PrimaDonna Soul entry."""
+        table = _load_transcode_table()
+        info = DeLonghiApi.parse_serial_number(self.PRIMADONNA_SOUL_B64)
+        assert info is not None
+        match = DeLonghiApi.match_transcode_table(table, sku_digits=info["digits"][:6])
+        assert match is not None
+        assert match["appModelId"] == "PD_SOUL"
+
+    def test_invalid_calendar_date_falls_back_to_plaintext(self):
+        """Structurally valid but calendrically impossible date (Feb 31) is rejected.
+
+        Without datetime.date validation, 217055ZZ250231 1 0700 passes the
+        month<=12 / day<=31 guard and yields a bogus binary record. It must
+        instead fall back to the plaintext regex path.
+        """
+        import base64
+
+        payload = b"header\x00217055ZZ2502311" + b"0700" + b"\x00\x00\x00"
+        encoded = base64.b64encode(payload).decode("ascii")
+        info = DeLonghiApi.parse_serial_number(encoded)
+        assert info is not None
+        assert info.get("format") == "plaintext", (
+            "Feb 31 must be rejected by real-date validation, forcing plaintext fallback"
+        )
+
+    def test_binary_regex_does_not_match_outside_payload_slice(self):
+        """Payload shaped like a serial but placed outside the documented frame
+        slice (6-byte header + payload + 3-byte trailer) must not be accepted.
+
+        This guards against false positives where random bytes in a larger
+        envelope happen to match the SKU pattern.
+        """
+        import base64
+
+        # 6-byte header, NO real payload, trailer, then a decoy shaped like
+        # a serial (but the frame length is inconsistent — payload would extend
+        # past the declared trailer).
+        header = b"hdr\x01\x02\x03"
+        trailer = b"\xaa\xbb\xcc"
+        decoy = b"999999ZZ250815X1234"
+        garbage = header + trailer + decoy
+        encoded = base64.b64encode(garbage).decode("ascii")
+        info = DeLonghiApi.parse_serial_number(encoded)
+        assert info is not None
+        assert info.get("format") == "plaintext", (
+            "Decoy at wrong frame offset must not be treated as a valid binary serial"
+        )
+
 
 class TestTranscodeTableMatching:
     """Match serial/OEM model against TranscodeTable.
