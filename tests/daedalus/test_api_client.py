@@ -97,3 +97,36 @@ def test_login_wraps_transport_errors() -> None:
             await api.close()
 
     asyncio.run(_run())
+
+
+def test_login_uses_custom_api_key_when_pool_is_eu_us() -> None:
+    """EU_US accounts (Gigya SDK v3) need the alternate apiKey from the manifest."""
+
+    async def _run() -> None:
+        captured: dict[str, str] = {}
+
+        async def login(request: web.Request) -> web.Response:
+            body = await request.post()
+            captured["apiKey"] = str(body["apiKey"])
+            return web.json_response(
+                {
+                    "errorCode": 0,
+                    "sessionInfo": {"sessionToken": "st", "sessionSecret": "ss"},
+                    "UID": "uid-1",
+                }
+            )
+
+        async def get_jwt(request: web.Request) -> web.Response:
+            return web.json_response({"errorCode": 0, "id_token": "jwt-abc"})
+
+        runner, base = await _start_gigya({"/accounts.login": login, "/accounts.getJWT": get_jwt})
+        try:
+            api = DaedalusApi(gigya_base_url=base)
+            eu_us_key = "3_e5qn7USZK-QtsIso1wCelqUKAK_IVEsYshRIssQ-X-k55haiZXmKWDHDRul2e5Y2"
+            await api.login_and_get_jwt(email="u", password="p", api_key=eu_us_key)
+            assert captured["apiKey"] == eu_us_key
+        finally:
+            await api.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())

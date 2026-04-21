@@ -31,9 +31,12 @@ from .const import (
     CONF_JWT,
     CONF_MACHINE_NAME,
     CONF_PASSWORD,
+    CONF_POOL,
     CONF_SERIAL_NUMBER,
     CONF_SESSION_TOKEN,
     DOMAIN,
+    GIGYA_API_KEYS,
+    GIGYA_POOL_EU,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,6 +47,7 @@ _USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PASSWORD): str,
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_SERIAL_NUMBER): str,
+        vol.Optional(CONF_POOL, default=GIGYA_POOL_EU): vol.In(list(GIGYA_API_KEYS.keys())),
     }
 )
 
@@ -66,6 +70,8 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         serial = user_input[CONF_SERIAL_NUMBER]
         host = user_input[CONF_HOST]
+        pool = user_input.get(CONF_POOL, GIGYA_POOL_EU)
+        api_key = GIGYA_API_KEYS[pool]
 
         # Unique id = email + SN, so the same account on multiple machines is OK.
         await self.async_set_unique_id(f"{user_input[CONF_EMAIL]}:{serial}")
@@ -74,13 +80,22 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         api = self._api_factory()
         try:
             session_token, jwt = await api.login_and_get_jwt(
-                email=user_input[CONF_EMAIL], password=user_input[CONF_PASSWORD]
+                email=user_input[CONF_EMAIL],
+                password=user_input[CONF_PASSWORD],
+                api_key=api_key,
             )
             lan = await api.connect_lan(host=host, serial_number=serial, jwt=jwt)
             await lan.close()
-        except DaedalusAuthError:
+        except DaedalusAuthError as exc:
+            _LOGGER.warning("Daedalus login refused (pool=%s, host=%s): %s", pool, host, exc)
             errors["base"] = "invalid_auth"
-        except DaedalusConnectionError:
+        except DaedalusConnectionError as exc:
+            _LOGGER.warning(
+                "Daedalus LAN probe failed (host=%s, serial=%s): %s",
+                host,
+                serial,
+                exc,
+            )
             errors["base"] = "cannot_connect"
         except Exception:  # noqa: BLE001 — last-resort net so the form still renders
             _LOGGER.exception("Unexpected error validating Daedalus machine")
@@ -99,6 +114,7 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_HOST: host,
                 CONF_SERIAL_NUMBER: serial,
                 CONF_MACHINE_NAME: serial,
+                CONF_POOL: pool,
                 CONF_JWT: jwt,
                 CONF_SESSION_TOKEN: session_token,
             },

@@ -8,7 +8,8 @@
           "email": "Email",
           "password": "Mot de passe",
           "host": "IP locale de la machine",
-          "serial_number": "Numéro de série"
+          "serial_number": "Numéro de série",
+          "pool": "Région du compte (pool Gigya) — essayer EU en premier ; passer à EU_US si la connexion échoue"
         }
       }
     },

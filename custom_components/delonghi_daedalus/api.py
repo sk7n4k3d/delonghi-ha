@@ -16,7 +16,7 @@ from typing import Any
 
 import aiohttp
 
-from .const import GIGYA_BASE_URL
+from .const import GIGYA_API_KEY_PROD, GIGYA_BASE_URL
 from .gigya_auth import (
     GigyaAuthError,
     build_jwt_request_params,
@@ -74,31 +74,44 @@ class DaedalusApi:
             await self._session.close()
             self._session = None
 
-    async def login_and_get_jwt(self, *, email: str, password: str) -> tuple[str, str]:
+    async def login_and_get_jwt(
+        self,
+        *,
+        email: str,
+        password: str,
+        api_key: str = GIGYA_API_KEY_PROD,
+    ) -> tuple[str, str]:
         """Perform Gigya login + getJWT in sequence.
 
+        `api_key` must match the Gigya Pool the account was created under
+        (EU / EU_US / CH — see const.GIGYA_API_KEYS). Using the wrong key
+        yields errorCode 400093 ("Invalid parameter value: apiKey"), which
+        the UI translates as 'invalid credentials' and is misleading.
         Returns (sessionToken, jwt). The sessionToken is what we'll pass
         to getJWT later to rotate the JWT without asking the user again.
         """
-        session_token, _session_secret = await self._gigya_login(email, password)
-        jwt = await self._gigya_get_jwt(session_token)
+        session_token, _session_secret = await self._gigya_login(email, password, api_key)
+        jwt = await self._gigya_get_jwt(session_token, api_key)
         return session_token, jwt
 
-    async def refresh_jwt(self, *, session_token: str) -> str:
+    async def refresh_jwt(self, *, session_token: str, api_key: str = GIGYA_API_KEY_PROD) -> str:
         """Get a fresh JWT from an existing session token."""
-        return await self._gigya_get_jwt(session_token)
+        return await self._gigya_get_jwt(session_token, api_key)
 
-    async def _gigya_login(self, email: str, password: str) -> tuple[str, str]:
-        payload = await self._post_gigya("/accounts.login", build_login_params(loginID=email, password=password))
+    async def _gigya_login(self, email: str, password: str, api_key: str) -> tuple[str, str]:
+        payload = await self._post_gigya(
+            "/accounts.login",
+            build_login_params(loginID=email, password=password, api_key=api_key),
+        )
         try:
             return parse_login_response(payload)
         except GigyaAuthError as exc:
             raise DaedalusAuthError(str(exc)) from exc
 
-    async def _gigya_get_jwt(self, session_token: str) -> str:
+    async def _gigya_get_jwt(self, session_token: str, api_key: str) -> str:
         payload = await self._post_gigya(
             "/accounts.getJWT",
-            build_jwt_request_params(session_token=session_token),
+            build_jwt_request_params(session_token=session_token, api_key=api_key),
         )
         try:
             return parse_jwt_response(payload)
