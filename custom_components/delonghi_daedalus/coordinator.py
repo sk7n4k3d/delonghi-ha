@@ -29,10 +29,13 @@ from .const import (
     CONF_HOST,
     CONF_JWT,
     CONF_MACHINE_NAME,
+    CONF_POOL,
     CONF_SERIAL_NUMBER,
     CONF_SESSION_TOKEN,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
     DOMAIN,
+    GIGYA_API_KEYS,
+    GIGYA_POOL_EU,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,7 +94,9 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             session_token = self.entry.data.get(CONF_SESSION_TOKEN)
             if not session_token:
                 raise
-            fresh_jwt = await self._api.refresh_jwt(session_token=session_token)
+            pool = self.entry.data.get(CONF_POOL, GIGYA_POOL_EU)
+            api_key = GIGYA_API_KEYS.get(pool, GIGYA_API_KEYS[GIGYA_POOL_EU])
+            fresh_jwt = await self._api.refresh_jwt(session_token=session_token, api_key=api_key)
             self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_JWT: fresh_jwt})
             self._lan = await self._api.connect_lan(host=host, serial_number=self.serial_number, jwt=fresh_jwt)
 

@@ -8,7 +8,8 @@
           "email": "Email",
           "password": "Password",
           "host": "Machine IP on LAN",
-          "serial_number": "Machine serial number"
+          "serial_number": "Machine serial number",
+          "pool": "Account region (Gigya pool) — try EU first; switch to EU_US if login fails"
         }
       }
     },
