@@ -9,12 +9,13 @@
           "password": "Password",
           "host": "Machine IP on LAN",
           "serial_number": "Machine serial number",
-          "pool": "Account region (Gigya pool) — try EU first; switch to EU_US if login fails"
+          "pool": "Account region (Gigya pool) — the integration auto-probes all regions, leave on EU unless you know otherwise"
         }
       }
     },
     "error": {
       "invalid_auth": "Invalid My Coffee Lounge credentials",
+      "all_pools_unauthorized": "Login failed on all account regions (EU, EU_US, CH). Your account may have been created via the in-app registration page (OAuth2/OIDC), which uses a different authentication path than direct login. Check that your password is correct, then open an issue on the integration's GitHub repository for further investigation.",
       "cannot_connect": "Cannot reach the machine on the LAN",
       "invalid_host": "Invalid IP / hostname",
       "unknown": "Unexpected error"
