@@ -32,6 +32,7 @@ from .lan_protocol import (
     generate_request_id,
     parse_auth_response,
     parse_message,
+    validate_lan_host,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -136,7 +137,15 @@ class DaedalusApi:
 
     # ------------------------------------------------------------------ LAN --
     async def connect_lan(self, *, host: str, serial_number: str, jwt: str) -> DaedalusLanConnection:
-        """Open a LAN WS, perform AUTH, return a live connection handle."""
+        """Open a LAN WS, perform AUTH, return a live connection handle.
+
+        Refuses to connect to a non-private / hostname target — see
+        `lan_protocol.validate_lan_host` for the rationale.
+        """
+        try:
+            validate_lan_host(host)
+        except LanProtocolError as exc:
+            raise DaedalusConnectionError(str(exc)) from exc
         url = build_lan_ws_url(host)
         ssl_ctx = _build_trust_all_ssl_context()
         session = self._get_session()

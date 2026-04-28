@@ -27,6 +27,42 @@ def build_lan_ws_url(host: str) -> str:
     return f"wss://{host}{LAN_WS_PATH}"
 
 
+def validate_lan_host(host: str) -> str:
+    """Reject hosts that aren't an IP literal in a private / loopback / link-local range.
+
+    The Daedalus firmware presents a self-signed certificate, so the integration
+    builds the TLS context with `verify_mode=CERT_NONE` (see `api._build_trust_all_ssl_context`).
+    That's safe **only** as long as the target host is on the user's own LAN.
+    A hostname or a public IP would let any on-path attacker MITM the WebSocket
+    handshake and steal the JWT carried in the AUTH frame.
+
+    Accepted:
+        - RFC1918 v4 (10/8, 172.16/12, 192.168/16)
+        - Loopback (127/8, ::1)
+        - Link-local (169.254/16, fe80::/10)
+        - Unique-local v6 (fc00::/7)
+
+    Rejected:
+        - Any DNS hostname (no resolution attempted — the user must enter an IP)
+        - Public / globally-routable IPs
+
+    Returns the original host string when valid; raises `LanProtocolError` otherwise.
+    """
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise LanProtocolError(
+            f"LAN host must be a numeric IP address, got {host!r} "
+            "(self-signed TLS means we can't accept hostnames safely)"
+        ) from exc
+    if not (ip.is_private or ip.is_loopback or ip.is_link_local):
+        raise LanProtocolError(
+            f"LAN host {host!r} is not in a private / loopback / link-local range; "
+            "trust-all TLS would expose the JWT to any on-path attacker"
+        )
+    return host
+
+
 def build_auth_frame(*, serial_number: str, jwt: str) -> str:
     """Serialize the initial AUTH frame expected by the machine."""
     return json.dumps(

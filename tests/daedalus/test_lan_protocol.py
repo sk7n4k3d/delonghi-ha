@@ -30,6 +30,7 @@ from custom_components.delonghi_daedalus.lan_protocol import (
     generate_request_id,
     parse_auth_response,
     parse_message,
+    validate_lan_host,
 )
 
 
@@ -109,3 +110,54 @@ def test_parse_message_raises_on_garbage() -> None:
         parse_message("not-json")
     with pytest.raises(LanProtocolError):
         parse_message('["arrays","are","not","valid","top-level"]')
+
+
+# ---------------------------------------------------------------------------
+# validate_lan_host — gates the trust-all TLS context to LAN-only targets.
+# Preserves the security invariant that the JWT in the AUTH frame can never be
+# exposed to an off-path attacker because of an accidental public host.
+# ---------------------------------------------------------------------------
+
+
+class TestValidateLanHost:
+    def test_accepts_rfc1918_v4(self) -> None:
+        for host in ("192.168.1.42", "10.0.0.5", "172.16.0.1"):
+            assert validate_lan_host(host) == host
+
+    def test_accepts_loopback(self) -> None:
+        assert validate_lan_host("127.0.0.1") == "127.0.0.1"
+        assert validate_lan_host("::1") == "::1"
+
+    def test_accepts_link_local(self) -> None:
+        assert validate_lan_host("169.254.10.20") == "169.254.10.20"
+        assert validate_lan_host("fe80::1") == "fe80::1"
+
+    def test_accepts_unique_local_v6(self) -> None:
+        # ULA fc00::/7 — fd00::/8 is the slice in practical use.
+        assert validate_lan_host("fd12:3456:789a::1") == "fd12:3456:789a::1"
+
+    def test_rejects_public_v4(self) -> None:
+        with pytest.raises(LanProtocolError, match="not in a private"):
+            validate_lan_host("8.8.8.8")
+        with pytest.raises(LanProtocolError, match="not in a private"):
+            validate_lan_host("1.1.1.1")
+
+    def test_rejects_public_v6(self) -> None:
+        with pytest.raises(LanProtocolError, match="not in a private"):
+            validate_lan_host("2606:4700:4700::1111")
+
+    def test_rejects_hostname(self) -> None:
+        # No DNS lookup — hostnames can resolve to anything, and self-signed
+        # TLS leaves no room to detect a hostile resolver swap.
+        with pytest.raises(LanProtocolError, match="numeric IP address"):
+            validate_lan_host("delonghi.example.com")
+        with pytest.raises(LanProtocolError, match="numeric IP address"):
+            validate_lan_host("coffee.local")
+        with pytest.raises(LanProtocolError, match="numeric IP address"):
+            validate_lan_host("localhost")
+
+    def test_rejects_garbage(self) -> None:
+        with pytest.raises(LanProtocolError):
+            validate_lan_host("not-an-ip")
+        with pytest.raises(LanProtocolError):
+            validate_lan_host("")
