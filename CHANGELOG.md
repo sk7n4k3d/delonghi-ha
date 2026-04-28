@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.9] — 2026-04-29
+
+### Added
+- **`delonghi_daedalus` companion integration** — separate component scaffolded for "My Coffee Lounge" / Eletta Ultra machines (package `com.delonghigroup.daedalus`). Independent config flow + auth path; the legacy `delonghi_coffee` component is unchanged for Coffee Link / Ayla machines. (#20)
+- **Gigya pool selector** — daedalus config flow exposes the three documented Gigya pools (`EU`, `EU_US`, `CN`) so users on regional accounts can pick the right one explicitly instead of hard-failing on `403005`. Detailed auth/connect logging now surfaces the exact `errorCode` and `errorMessage` from Gigya in the HA log. (#21)
+- **9 static beverages** — `drip_style`, `caffe_crema`, `red_eye`, `black_eye`, `espresso_intenso`, `ristretto_napoletano`, `babyccino`, `milchkaffee`, `koffie_verkeerd` — registered with localized labels in every shipped locale.
+
+### Fixed
+- **Custom slot wire-key mismatch** — custom drinks were registered under `custom_bev_1..6` while the wire format reports them as `custom_1..6`. The integration now uses the wire keys (matching `coordinator.custom_recipe_names`), eliminating the recurring `Unknown beverage keys — buttons created with default name/icon: ['custom_1', ...]` warning. The brew button also now falls back to the user's custom name when set, so e.g. a slot renamed "Booster" wins over the localized "Custom Drink 1" label. Locks the contract with `TestCustomSlotsUseWireKey` so it can't regress.
+- **Binary-encoded device serial** — `api.py` now decodes base64-encoded binary serials reported by PrimaDonna Soul and other modern firmwares, instead of treating them as opaque strings. (#19)
+- **Coordinator unexpected-exception path** — log the exception before re-raising as `UpdateFailed` so the underlying error is visible in HA logs instead of being silently wrapped.
+
+### Internals
+- **Timing constants extracted** — `MONITOR_STALE_TIMEOUT`, `POWER_WAKE_DELAY`, `POWER_RETRY_DELAY`, `POWER_STALE_THRESHOLD` moved to `const.py` (legacy `_WAKE_DELAY` etc. kept as aliases so private callers still resolve).
+- **BLE001 rationale comments** added on the broad `except` in `config_flow`.
+- **812 tests** passing (was 769 at beta.8), ruff clean.
+
 ## [1.6.0-beta.8] — 2026-04-17
 
 ### Security
@@ -61,7 +78,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 See the [GitHub releases](https://github.com/sk7n4k3d/delonghi-ha/releases) page.
 
-[Unreleased]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.7...HEAD
+[Unreleased]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.9...HEAD
+[1.6.0-beta.9]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.8...v1.6.0-beta.9
+[1.6.0-beta.8]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.7...v1.6.0-beta.8
 [1.6.0-beta.7]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.6...v1.6.0-beta.7
 [1.6.0-beta.6]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.5...v1.6.0-beta.6
 [1.6.0-beta.5]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.5.10...v1.6.0-beta.5
