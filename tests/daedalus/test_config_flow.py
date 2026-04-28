@@ -17,7 +17,10 @@ from custom_components.delonghi_daedalus.api import (
     DaedalusAuthError,
     DaedalusConnectionError,
 )
-from custom_components.delonghi_daedalus.config_flow import DaedalusConfigFlow
+from custom_components.delonghi_daedalus.config_flow import (
+    DaedalusConfigFlow,
+    _probe_pools,
+)
 from custom_components.delonghi_daedalus.const import (
     CONF_EMAIL,
     CONF_HOST,
@@ -251,3 +254,129 @@ def test_unknown_error_shows_form_error() -> None:
     )
     assert result["type"] == "form"
     assert result["errors"]["base"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _probe_pools — locks the contract of PR #22 (auto-probe on 403005).
+# Originally merged without unit coverage; these tests make sure a future
+# refactor can't quietly regress the fallback / short-circuit semantics.
+# ---------------------------------------------------------------------------
+
+
+class TestProbePools:
+    def test_preferred_pool_succeeds_no_fallback(self) -> None:
+        """Preferred pool succeeds → no other pool is tried."""
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(return_value=("session", "jwt"))
+
+        pool, session_token, jwt = asyncio.run(
+            _probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU)
+        )
+
+        assert pool == GIGYA_POOL_EU
+        assert session_token == "session"
+        assert jwt == "jwt"
+        assert api.login_and_get_jwt.await_count == 1
+        # Preferred pool's apiKey was used.
+        assert api.login_and_get_jwt.await_args.kwargs["api_key"] == GIGYA_API_KEYS[GIGYA_POOL_EU]
+
+    def test_falls_back_when_preferred_returns_403005(self) -> None:
+        """Preferred returns 403005 → next pool tried, returned on success."""
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=[
+                DaedalusAuthError("Gigya error 403005: Unauthorized user"),
+                ("session", "jwt"),
+            ]
+        )
+
+        pool, session_token, jwt = asyncio.run(
+            _probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU)
+        )
+
+        # Resolved pool must be one of the non-preferred pools.
+        assert pool != GIGYA_POOL_EU
+        assert pool in GIGYA_API_KEYS
+        assert session_token == "session"
+        assert jwt == "jwt"
+        assert api.login_and_get_jwt.await_count == 2
+
+    def test_all_pools_403005_raises_all_pools_marker(self) -> None:
+        """Every pool returns 403005 → raise with `all_pools:` prefix for caller mapping."""
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user")
+        )
+
+        with pytest.raises(DaedalusAuthError, match="^all_pools:"):
+            asyncio.run(
+                _probe_pools(api, email="u@example.com", password="p", preferred_pool=GIGYA_POOL_EU)
+            )
+
+        # Every pool must have been tried exactly once.
+        assert api.login_and_get_jwt.await_count == len(GIGYA_API_KEYS)
+
+    def test_non_403005_short_circuits(self) -> None:
+        """Wrong password (403042) must NOT cause us to burn the other pools."""
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403042: Login was unsuccessful — bad password")
+        )
+
+        with pytest.raises(DaedalusAuthError, match="403042"):
+            asyncio.run(_probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU))
+
+        assert api.login_and_get_jwt.await_count == 1
+
+    def test_preferred_pool_first_in_order(self) -> None:
+        """When preferred is EU_US, the first call uses EU_US apiKey, not EU."""
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(return_value=("session", "jwt"))
+
+        pool, _, _ = asyncio.run(
+            _probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU_US)
+        )
+
+        assert pool == GIGYA_POOL_EU_US
+        assert api.login_and_get_jwt.await_args.kwargs["api_key"] == GIGYA_API_KEYS[GIGYA_POOL_EU_US]
+
+    def test_fallback_logs_info_with_resolved_pool(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Operators should see in logs which pool actually worked when fallback fires."""
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=[
+                DaedalusAuthError("Gigya error 403005: Unauthorized user"),
+                ("session", "jwt"),
+            ]
+        )
+
+        with caplog.at_level(logging.INFO, logger="custom_components.delonghi_daedalus.config_flow"):
+            asyncio.run(_probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU))
+
+        assert any(
+            "preferred pool" in record.getMessage() and "succeeded" in record.getMessage()
+            for record in caplog.records
+        ), f"expected fallback log, got: {[r.getMessage() for r in caplog.records]}"
+
+
+def test_step_user_maps_all_pools_failure_to_dedicated_error_key() -> None:
+    """End-to-end: when probe burns all pools, surface the all_pools_unauthorized error key."""
+    api = MagicMock()
+    api.login_and_get_jwt = AsyncMock(
+        side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user")
+    )
+    api.close = AsyncMock()
+
+    flow = _make_flow(api)
+    result = asyncio.run(
+        flow.async_step_user(
+            {
+                CONF_EMAIL: "u",
+                CONF_PASSWORD: "p",
+                CONF_HOST: "192.168.1.42",
+                CONF_SERIAL_NUMBER: "SN",
+            }
+        )
+    )
+    assert result["type"] == "form"
+    assert result["errors"]["base"] == "all_pools_unauthorized"
