@@ -1,26 +1,17 @@
-"""Test diagnostics module — entry-scoped + device-scoped redaction."""
+"""Test diagnostics module — entry-scoped + device-scoped redaction.
+
+The `homeassistant.components.diagnostics` module is stubbed in
+`tests/conftest.py` with a real `async_redact_data` implementation, so
+top-level keys in REDACT_KEYS are actually scrubbed in the test payload.
+"""
 
 import asyncio
-import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-
-def _real_redact(data, keys_to_redact):
-    """Stand-in for HA's async_redact_data — redacts top-level keys."""
-    if not isinstance(data, dict):
-        return data
-    return {k: ("**REDACTED**" if k in keys_to_redact else v) for k, v in data.items()}
-
-
-# Stub HA's diagnostics module before importing custom_components.diagnostics
-_diag_mod = MagicMock()
-_diag_mod.async_redact_data = _real_redact
-sys.modules["homeassistant.components.diagnostics"] = _diag_mod
-
-from custom_components.delonghi_coffee import diagnostics  # noqa: E402
-from custom_components.delonghi_coffee.const import DOMAIN  # noqa: E402
+from custom_components.delonghi_coffee import diagnostics
+from custom_components.delonghi_coffee.const import DOMAIN
 
 
 def _run(coro):

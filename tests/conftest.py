@@ -25,11 +25,22 @@ _HA_MODULES = [
     "homeassistant.components.button",
     "homeassistant.components.switch",
     "homeassistant.components.select",
+    "homeassistant.components.diagnostics",
 ]
+
+
+def _real_redact(data, keys_to_redact):
+    """Stand-in for HA's async_redact_data — redacts top-level keys."""
+    if not isinstance(data, dict):
+        return data
+    return {k: ("**REDACTED**" if k in keys_to_redact else v) for k, v in data.items()}
 
 for mod_name in _HA_MODULES:
     if mod_name not in sys.modules:
         sys.modules[mod_name] = MagicMock()
+
+# Diagnostics needs the real redacter, not a MagicMock that returns another MagicMock.
+sys.modules["homeassistant.components.diagnostics"].async_redact_data = _real_redact
 
 
 def _wire_submodule(parent: str, child: str) -> None:
