@@ -41,6 +41,11 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Gigya errorCode returned when the account exists but has no access to this
+# application's apiKey.  Happens when the account was registered via a
+# different Gigya site (OIDC / OAuth2 redirect) rather than direct login.
+_GIGYA_UNAUTHORIZED_USER = "403005"
+
 _USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_EMAIL): str,
@@ -50,6 +55,51 @@ _USER_SCHEMA = vol.Schema(
         vol.Optional(CONF_POOL, default=GIGYA_POOL_EU): vol.In(list(GIGYA_API_KEYS.keys())),
     }
 )
+
+
+async def _probe_pools(
+    api: DaedalusApi,
+    *,
+    email: str,
+    password: str,
+    preferred_pool: str,
+) -> tuple[str, str, str]:
+    """Try Gigya login across all pools, preferred pool first.
+
+    Returns (pool, session_token, jwt) for the first pool that succeeds.
+
+    If the preferred pool returns 403005 ("Unauthorized user") the remaining
+    pools are tried automatically — this covers accounts registered on a
+    different pool than EU without requiring the user to guess.
+
+    Any other auth error (wrong password, rate-limit…) short-circuits
+    immediately so we don't burn all pools on a typo.
+
+    Raises DaedalusAuthError with message starting with "all_pools:" when
+    every pool returns 403005 — the caller maps this to the dedicated
+    translation key.
+    """
+    pools_ordered = [preferred_pool] + [p for p in GIGYA_API_KEYS if p != preferred_pool]
+    last_exc: DaedalusAuthError | None = None
+
+    for pool in pools_ordered:
+        api_key = GIGYA_API_KEYS[pool]
+        try:
+            session_token, jwt = await api.login_and_get_jwt(email=email, password=password, api_key=api_key)
+            if pool != preferred_pool:
+                _LOGGER.info(
+                    "Daedalus: preferred pool %s returned 403005, succeeded with %s",
+                    preferred_pool,
+                    pool,
+                )
+            return pool, session_token, jwt
+        except DaedalusAuthError as exc:
+            last_exc = exc
+            if _GIGYA_UNAUTHORIZED_USER not in str(exc):
+                raise  # wrong password / rate-limit — no point probing other pools
+            _LOGGER.debug("Daedalus: pool %s → 403005, probing next pool", pool)
+
+    raise DaedalusAuthError(f"all_pools: every Gigya pool returned 403005 for {email}") from last_exc
 
 
 class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -70,25 +120,32 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         serial = user_input[CONF_SERIAL_NUMBER]
         host = user_input[CONF_HOST]
-        pool = user_input.get(CONF_POOL, GIGYA_POOL_EU)
-        api_key = GIGYA_API_KEYS[pool]
+        preferred_pool = user_input.get(CONF_POOL, GIGYA_POOL_EU)
+        resolved_pool = preferred_pool
 
         # Unique id = email + SN, so the same account on multiple machines is OK.
         await self.async_set_unique_id(f"{user_input[CONF_EMAIL]}:{serial}")
         self._abort_if_unique_id_configured()
 
         api = self._api_factory()
+        session_token = jwt = ""
         try:
-            session_token, jwt = await api.login_and_get_jwt(
+            resolved_pool, session_token, jwt = await _probe_pools(
+                api,
                 email=user_input[CONF_EMAIL],
                 password=user_input[CONF_PASSWORD],
-                api_key=api_key,
+                preferred_pool=preferred_pool,
             )
             lan = await api.connect_lan(host=host, serial_number=serial, jwt=jwt)
             await lan.close()
         except DaedalusAuthError as exc:
-            _LOGGER.warning("Daedalus login refused (pool=%s, host=%s): %s", pool, host, exc)
-            errors["base"] = "invalid_auth"
+            _LOGGER.warning(
+                "Daedalus login refused (preferred_pool=%s, host=%s): %s",
+                preferred_pool,
+                host,
+                exc,
+            )
+            errors["base"] = "all_pools_unauthorized" if str(exc).startswith("all_pools:") else "invalid_auth"
         except DaedalusConnectionError as exc:
             _LOGGER.warning(
                 "Daedalus LAN probe failed (host=%s, serial=%s): %s",
@@ -114,7 +171,7 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_HOST: host,
                 CONF_SERIAL_NUMBER: serial,
                 CONF_MACHINE_NAME: serial,
-                CONF_POOL: pool,
+                CONF_POOL: resolved_pool,
                 CONF_JWT: jwt,
                 CONF_SESSION_TOKEN: session_token,
             },

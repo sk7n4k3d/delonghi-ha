@@ -9,12 +9,13 @@
           "password": "Mot de passe",
           "host": "IP locale de la machine",
           "serial_number": "Numéro de série",
-          "pool": "Région du compte (pool Gigya) — essayer EU en premier ; passer à EU_US si la connexion échoue"
+          "pool": "Région du compte (pool Gigya) — l'intégration sonde automatiquement toutes les régions, laisser EU sauf si vous savez"
         }
       }
     },
     "error": {
       "invalid_auth": "Identifiants My Coffee Lounge invalides",
+      "all_pools_unauthorized": "Connexion échouée sur toutes les régions (EU, EU_US, CH). Votre compte a peut-être été créé via la page d'inscription intégrée à l'app (OAuth2/OIDC), qui utilise un chemin d'authentification différent du login direct. Vérifiez votre mot de passe, puis ouvrez une issue sur le dépôt GitHub de l'intégration pour investigation.",
       "cannot_connect": "Impossible de joindre la machine sur le réseau local",
       "invalid_host": "IP ou nom d'hôte invalide",
       "unknown": "Erreur inattendue"
