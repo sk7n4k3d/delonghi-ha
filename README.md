@@ -11,6 +11,12 @@
 
 Home Assistant custom integration for De'Longhi connected coffee machines (Eletta Explore, Dinamica Plus, Rivelia, etc.) via the De'Longhi Coffee Link cloud API.
 
+> 🆕 **For modern Eletta Ultra / My Coffee Lounge machines** (Daedalus stack), see the companion repo
+> [`sk7n4k3d/delonghi-daedalus-ha`](https://github.com/sk7n4k3d/delonghi-daedalus-ha) — different cloud
+> stack (Gigya + AWS IoT instead of Ayla), shipped as a separate HACS repository because the two
+> stacks share nothing at the wire-protocol level. Source code lives in this monorepo under
+> `custom_components/delonghi_daedalus/`; the other repo is a packaging mirror.
+
 ## Features
 
 - **Power switch** — single on/off toggle (`switch.power`) to wake from standby or put the machine to sleep
