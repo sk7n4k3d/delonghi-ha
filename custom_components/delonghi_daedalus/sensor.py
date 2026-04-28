@@ -5,6 +5,7 @@ from __future__ import annotations
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -29,6 +30,9 @@ async def async_setup_entry(
 
 class _DaedalusSensorBase(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
     _attr_has_entity_name = True
+    # These are wiring-state sensors (LAN ID / SN / LAN IP), not user-facing
+    # measurements — keep them out of the main dashboard.
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: DaedalusCoordinator, *, key: str) -> None:
         super().__init__(coordinator)

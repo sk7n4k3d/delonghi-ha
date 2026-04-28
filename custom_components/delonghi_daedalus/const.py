@@ -56,6 +56,3 @@ CONF_SESSION_TOKEN: Final = "session_token"  # noqa: S105
 CONF_SESSION_SECRET: Final = "session_secret"  # noqa: S105
 
 DEFAULT_UPDATE_INTERVAL_SECONDS: Final = 30
-
-# JWT refresh when remaining TTL drops below this (80% of 90d ≈ 72d).
-JWT_REFRESH_THRESHOLD_SECONDS: Final = 18 * 24 * 60 * 60

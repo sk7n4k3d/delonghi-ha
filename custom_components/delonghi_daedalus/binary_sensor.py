@@ -8,6 +8,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -28,6 +29,8 @@ class DaedalusConnectedSensor(CoordinatorEntity[DaedalusCoordinator], BinarySens
     _attr_has_entity_name = True
     _attr_translation_key = "connected"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    # Wiring-state, not a brewing-state — keep off the main dashboard.
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: DaedalusCoordinator) -> None:
         super().__init__(coordinator)
