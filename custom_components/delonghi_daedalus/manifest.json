@@ -7,5 +7,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/sk7n4k3d/delonghi-ha/issues",
   "requirements": ["aiohttp>=3.9.0"],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

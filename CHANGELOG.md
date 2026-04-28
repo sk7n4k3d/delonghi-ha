@@ -5,6 +5,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+### `delonghi_daedalus` 0.2.0 — security & diagnostics
+This component is shipped from the same repository but is not bundled in the
+HACS zip; install via manual clone until a separate HACS release pipeline is
+ready.
+
+#### Security
+- **Drop password from entry data + add reauth flow** — the user's password
+  is no longer persisted in `.storage/core.config_entries`. Runtime auth uses
+  the long-lived Gigya session token (LAN AUTH frame uses the JWT). When the
+  session token is revoked the coordinator now raises
+  `ConfigEntryAuthFailed`, triggering HA's native reauth notification — the
+  user is asked for the password only at that point.
+- **LAN host validation** — `connect_lan` now rejects any host that isn't a
+  numeric IP in a private / loopback / link-local range. The Daedalus
+  firmware presents a self-signed cert, so the integration uses
+  `verify_mode=CERT_NONE`. Without this guard, a public IP or hostname would
+  let any on-path attacker MITM the WebSocket handshake and steal the JWT
+  carried in the AUTH frame.
+
+#### Added
+- **Diagnostics endpoint** — HA-native "Download diagnostics" with secret
+  scrubbing (jwt, session_token, session_secret, AuthToken, apiKey, host,
+  serial_number, …). Safe to upload to a public GitHub issue.
+- **Auto-probe Gigya pools on 403005** — already merged in PR #22, now
+  locked by 7 unit tests covering preferred-pool / fallback / all-fail /
+  short-circuit / ordering / log line.
+
+#### Internal
+- Sensors marked `EntityCategory.DIAGNOSTIC` to keep wiring-state out of
+  default dashboards.
+- Dropped dead `JWT_REFRESH_THRESHOLD_SECONDS` constant (refresh has always
+  been reactive on auth failure, never proactive).
+- 41/41 daedalus tests passing.
+
 ## [1.6.0-beta.9] — 2026-04-29
 
 ### Added
