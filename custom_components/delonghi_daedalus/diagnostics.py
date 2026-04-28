@@ -39,9 +39,7 @@ REDACT_KEYS: set[str] = {
 }
 
 
-async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> dict[str, Any]:
+async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Return a redacted diagnostics dump for a Daedalus config entry."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
 

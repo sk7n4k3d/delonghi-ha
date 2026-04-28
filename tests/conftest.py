@@ -35,6 +35,7 @@ def _real_redact(data, keys_to_redact):
         return data
     return {k: ("**REDACTED**" if k in keys_to_redact else v) for k, v in data.items()}
 
+
 for mod_name in _HA_MODULES:
     if mod_name not in sys.modules:
         sys.modules[mod_name] = MagicMock()

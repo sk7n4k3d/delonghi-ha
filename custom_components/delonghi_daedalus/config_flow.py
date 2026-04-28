@@ -188,9 +188,7 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Ask only the password again; everything else stays as configured."""
         errors: dict[str, str] = {}
         entry = getattr(self, "_reauth_entry", None)
@@ -209,14 +207,8 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     preferred_pool=preferred_pool,
                 )
             except DaedalusAuthError as exc:
-                _LOGGER.warning(
-                    "Daedalus reauth refused (preferred_pool=%s): %s", preferred_pool, exc
-                )
-                errors["base"] = (
-                    "all_pools_unauthorized"
-                    if str(exc).startswith("all_pools:")
-                    else "invalid_auth"
-                )
+                _LOGGER.warning("Daedalus reauth refused (preferred_pool=%s): %s", preferred_pool, exc)
+                errors["base"] = "all_pools_unauthorized" if str(exc).startswith("all_pools:") else "invalid_auth"
             except Exception:  # noqa: BLE001 — reauth must always render a form
                 _LOGGER.exception("Unexpected error during Daedalus reauth")
                 errors["base"] = "unknown"
