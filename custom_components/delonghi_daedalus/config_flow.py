@@ -7,8 +7,11 @@ User supplies:
 
 Flow validates by performing the Gigya login, fetching a JWT, then opening
 the LAN `/ws/lan2lan` WebSocket to confirm that the (IP, SN, JWT) triple is
-accepted by the firmware. On success the tokens are persisted in the config
-entry so the runtime can skip cloud login on boot.
+accepted by the firmware. On success the JWT and the long-lived Gigya
+session token are persisted; the user's password is **not** kept on disk —
+JWT rotation goes through the session token, and a HA reauth flow asks for
+the password again on the rare occasion the session token is itself
+revoked.
 """
 
 from __future__ import annotations
@@ -163,11 +166,14 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if errors:
             return self.async_show_form(step_id="user", data_schema=_USER_SCHEMA, errors=errors)
 
+        # NOTE: password is intentionally NOT persisted in entry.data — Gigya
+        # session_token + JWT cover both runtime auth (LAN AUTH frame) and
+        # JWT rotation. If session_token is ever revoked we trigger reauth
+        # via async_step_reauth and ask the user for the password again.
         return self.async_create_entry(
             title=f"My Coffee Lounge ({serial})",
             data={
                 CONF_EMAIL: user_input[CONF_EMAIL],
-                CONF_PASSWORD: user_input[CONF_PASSWORD],
                 CONF_HOST: host,
                 CONF_SERIAL_NUMBER: serial,
                 CONF_MACHINE_NAME: serial,
@@ -175,4 +181,63 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_JWT: jwt,
                 CONF_SESSION_TOKEN: session_token,
             },
+        )
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+        """HA-triggered reauth — typically when the stored session_token expires."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask only the password again; everything else stays as configured."""
+        errors: dict[str, str] = {}
+        entry = getattr(self, "_reauth_entry", None)
+
+        if user_input is not None and entry is not None:
+            email = entry.data[CONF_EMAIL]
+            preferred_pool = entry.data.get(CONF_POOL, GIGYA_POOL_EU)
+            password = user_input[CONF_PASSWORD]
+
+            api = self._api_factory()
+            try:
+                resolved_pool, session_token, jwt = await _probe_pools(
+                    api,
+                    email=email,
+                    password=password,
+                    preferred_pool=preferred_pool,
+                )
+            except DaedalusAuthError as exc:
+                _LOGGER.warning(
+                    "Daedalus reauth refused (preferred_pool=%s): %s", preferred_pool, exc
+                )
+                errors["base"] = (
+                    "all_pools_unauthorized"
+                    if str(exc).startswith("all_pools:")
+                    else "invalid_auth"
+                )
+            except Exception:  # noqa: BLE001 — reauth must always render a form
+                _LOGGER.exception("Unexpected error during Daedalus reauth")
+                errors["base"] = "unknown"
+            else:
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data={
+                        **entry.data,
+                        CONF_POOL: resolved_pool,
+                        CONF_JWT: jwt,
+                        CONF_SESSION_TOKEN: session_token,
+                    },
+                )
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
+            finally:
+                await api.close()
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+            description_placeholders={"email": entry.data[CONF_EMAIL] if entry else ""},
+            errors=errors,
         )

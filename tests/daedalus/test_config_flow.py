@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -73,7 +74,9 @@ def test_create_entry_on_success() -> None:
     assert result["title"].startswith("My Coffee Lounge")
     data = result["data"]
     assert data[CONF_EMAIL] == "user@example.com"
-    assert data[CONF_PASSWORD] == "hunter2"
+    # Password is intentionally NOT persisted — reauth flow is used to
+    # ask the user for it again if the session token is ever revoked.
+    assert CONF_PASSWORD not in data
     assert data[CONF_HOST] == "192.168.1.42"
     assert data[CONF_SERIAL_NUMBER] == "SN1234"
     assert data[CONF_JWT] == "jwt-xyz"
@@ -357,6 +360,113 @@ class TestProbePools:
             "preferred pool" in record.getMessage() and "succeeded" in record.getMessage()
             for record in caplog.records
         ), f"expected fallback log, got: {[r.getMessage() for r in caplog.records]}"
+
+
+class TestReauthFlow:
+    """Reauth path replaces a revoked session_token without losing host/SN/region."""
+
+    def _make_entry(self, *, data: dict[str, Any]) -> MagicMock:
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.data = data
+        return entry
+
+    def _make_reauth_flow(self, api: MagicMock, entry: MagicMock) -> DaedalusConfigFlow:
+        flow = DaedalusConfigFlow()
+        flow.hass = MagicMock()
+        flow.hass.config_entries.async_get_entry = MagicMock(return_value=entry)
+        flow.hass.config_entries.async_update_entry = MagicMock()
+        flow.hass.config_entries.async_reload = AsyncMock()
+        flow.context = {"entry_id": entry.entry_id}
+        flow._api_factory = lambda: api  # type: ignore[attr-defined]
+        return flow
+
+    def test_reauth_confirm_renews_session_and_aborts_successful(self) -> None:
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(return_value=("session-new", "jwt-new"))
+        api.close = AsyncMock()
+        entry = self._make_entry(
+            data={
+                CONF_EMAIL: "user@example.com",
+                CONF_HOST: "192.168.1.42",
+                CONF_SERIAL_NUMBER: "SN1234",
+                CONF_MACHINE_NAME: "SN1234",
+                CONF_POOL: GIGYA_POOL_EU,
+                CONF_JWT: "jwt-old",
+                CONF_SESSION_TOKEN: "session-old",
+            }
+        )
+        flow = self._make_reauth_flow(api, entry)
+
+        # Step 1 — HA triggers reauth, we render the password form.
+        first = asyncio.run(flow.async_step_reauth({}))
+        assert first["type"] == "form"
+        assert first["step_id"] == "reauth_confirm"
+
+        # Step 2 — user submits new password.
+        result = asyncio.run(flow.async_step_reauth_confirm({CONF_PASSWORD: "new-pw"}))
+
+        assert result["type"] == "abort"
+        assert result["reason"] == "reauth_successful"
+        # Entry was updated with renewed tokens; non-secret fields preserved.
+        flow.hass.config_entries.async_update_entry.assert_called_once()
+        kwargs = flow.hass.config_entries.async_update_entry.call_args.kwargs
+        new_data = kwargs["data"]
+        assert new_data[CONF_JWT] == "jwt-new"
+        assert new_data[CONF_SESSION_TOKEN] == "session-new"
+        assert new_data[CONF_HOST] == "192.168.1.42"
+        assert new_data[CONF_SERIAL_NUMBER] == "SN1234"
+        assert CONF_PASSWORD not in new_data  # still not persisted
+        flow.hass.config_entries.async_reload.assert_awaited_once_with("entry-1")
+
+    def test_reauth_confirm_invalid_password_keeps_form(self) -> None:
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403042: bad password")
+        )
+        api.close = AsyncMock()
+        entry = self._make_entry(
+            data={
+                CONF_EMAIL: "user@example.com",
+                CONF_HOST: "192.168.1.42",
+                CONF_SERIAL_NUMBER: "SN1234",
+                CONF_POOL: GIGYA_POOL_EU,
+                CONF_JWT: "jwt-old",
+                CONF_SESSION_TOKEN: "session-old",
+            }
+        )
+        flow = self._make_reauth_flow(api, entry)
+        asyncio.run(flow.async_step_reauth({}))
+
+        result = asyncio.run(flow.async_step_reauth_confirm({CONF_PASSWORD: "wrong"}))
+
+        assert result["type"] == "form"
+        assert result["errors"]["base"] == "invalid_auth"
+        flow.hass.config_entries.async_update_entry.assert_not_called()
+
+    def test_reauth_confirm_all_pools_failure_maps_to_dedicated_error(self) -> None:
+        api = MagicMock()
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user")
+        )
+        api.close = AsyncMock()
+        entry = self._make_entry(
+            data={
+                CONF_EMAIL: "user@example.com",
+                CONF_HOST: "192.168.1.42",
+                CONF_SERIAL_NUMBER: "SN1234",
+                CONF_POOL: GIGYA_POOL_EU,
+                CONF_JWT: "jwt-old",
+                CONF_SESSION_TOKEN: "session-old",
+            }
+        )
+        flow = self._make_reauth_flow(api, entry)
+        asyncio.run(flow.async_step_reauth({}))
+
+        result = asyncio.run(flow.async_step_reauth_confirm({CONF_PASSWORD: "p"}))
+
+        assert result["type"] == "form"
+        assert result["errors"]["base"] == "all_pools_unauthorized"
 
 
 def test_step_user_maps_all_pools_failure_to_dedicated_error_key() -> None:

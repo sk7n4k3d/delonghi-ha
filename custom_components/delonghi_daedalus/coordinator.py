@@ -14,6 +14,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -89,16 +90,32 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         jwt = self.entry.data[CONF_JWT]
         try:
             self._lan = await self._api.connect_lan(host=host, serial_number=self.serial_number, jwt=jwt)
-        except DaedalusAuthError:
+        except DaedalusAuthError as initial_exc:
             # Likely JWT expired — try to rotate via the stored session token.
+            # If the session token itself is revoked, escalate to a HA reauth
+            # flow so the user is prompted for the password again instead of
+            # failing silently every 30 s.
             session_token = self.entry.data.get(CONF_SESSION_TOKEN)
             if not session_token:
-                raise
+                raise ConfigEntryAuthFailed(
+                    "Daedalus session token missing, reauth required"
+                ) from initial_exc
             pool = self.entry.data.get(CONF_POOL, GIGYA_POOL_EU)
             api_key = GIGYA_API_KEYS.get(pool, GIGYA_API_KEYS[GIGYA_POOL_EU])
-            fresh_jwt = await self._api.refresh_jwt(session_token=session_token, api_key=api_key)
-            self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_JWT: fresh_jwt})
-            self._lan = await self._api.connect_lan(host=host, serial_number=self.serial_number, jwt=fresh_jwt)
+            try:
+                fresh_jwt = await self._api.refresh_jwt(
+                    session_token=session_token, api_key=api_key
+                )
+            except DaedalusAuthError as refresh_exc:
+                raise ConfigEntryAuthFailed(
+                    f"Daedalus session token rejected by Gigya: {refresh_exc}"
+                ) from refresh_exc
+            self.hass.config_entries.async_update_entry(
+                self.entry, data={**self.entry.data, CONF_JWT: fresh_jwt}
+            )
+            self._lan = await self._api.connect_lan(
+                host=host, serial_number=self.serial_number, jwt=fresh_jwt
+            )
 
     async def async_shutdown(self) -> None:
         if self._lan is not None:

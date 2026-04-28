@@ -11,6 +11,13 @@
           "serial_number": "Numéro de série",
           "pool": "Région du compte (pool Gigya) — l'intégration sonde automatiquement toutes les régions, laisser EU sauf si vous savez"
         }
+      },
+      "reauth_confirm": {
+        "title": "De'Longhi My Coffee Lounge — Réauthentification requise",
+        "description": "La session stockée pour {email} a été rejetée par Gigya. Saisissez à nouveau votre mot de passe pour la renouveler ; le reste de la configuration (IP machine, numéro de série, région) reste tel quel.",
+        "data": {
+          "password": "Mot de passe"
+        }
       }
     },
     "error": {
@@ -21,7 +28,8 @@
       "unknown": "Erreur inattendue"
     },
     "abort": {
-      "already_configured": "Machine déjà configurée"
+      "already_configured": "Machine déjà configurée",
+      "reauth_successful": "Réauthentification réussie"
     }
   },
   "entity": {
