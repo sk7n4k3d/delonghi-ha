@@ -284,11 +284,17 @@ MODEL_NAMES: Final[dict[str, str]] = {
 
 # OEM model → TranscodeTable appModelId mapping
 # Credit: TranscodeTable approach from FrozenGalaxy/PyDeLonghiAPI
+#
+# DL-millcore is PrimaDonna Soul firmware shipped on later production runs
+# (observed on @dalodzik's AC000W040821014 in issue #10). It maps to the
+# same PD_SOUL appModelId as DL-pd-soul; only the firmware identifier
+# changed between manufacturing batches.
 OEM_TO_APP_MODEL: Final[dict[str, str]] = {
     "DL-striker-cb": "STRIKER_COLD-BREW",
     "DL-striker-best": "STRIKER_BEST",
     "DL-pd-soul": "PD_SOUL",
     "DL-pd-soul-better": "PD_SOUL_BETTER",
+    "DL-millcore": "PD_SOUL",
     "DL-pd-class-better": "PD_CLASS_BETTER_INT",
     "DL-pd-class-top": "PD_CLASS_TOP_INT",
     "DL-pd-elite-better": "PD_ELITE_BETTER_EX1",
@@ -298,6 +304,18 @@ OEM_TO_APP_MODEL: Final[dict[str, str]] = {
     "DL-dinamica-plus": "DINAMICA_PLUS",
     "DL-maestosa-best": "MAESTOSA_BEST",
     "DL-maestosa-good": "MAESTOSA_GOOD",
+}
+
+# SKU (first 6 digits of d270_serialnumber binary payload) → ECAM family
+# pattern. Used by coordinator._detect_contentstack_pattern when neither
+# the raw serial nor the TranscodeTable model_info expose an ECAM number.
+#
+# Sources:
+#   - 217055 → ECAM610.75 (PrimaDonna Soul) — confirmed via @dalodzik
+#     hardware (issue #10) and De'Longhi service-sheet layout decoded
+#     from his binary serial envelope (PR #19 / #25).
+SKU_TO_ECAM_PATTERN: Final[dict[str, str]] = {
+    "217055": "ECAM61075",
 }
 
 # TranscodeTable API endpoint (De'Longhi backend)

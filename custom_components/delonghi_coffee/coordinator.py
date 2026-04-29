@@ -482,11 +482,23 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return the best ECAM pattern for ContentStack title lookups.
 
         Order of precedence:
-        1. ``d270_serialnumber`` — hardware serial, e.g. ``ECAM61075MB...``.
-        2. TranscodeTable model info (``appModelId``/``product_code``/``name``).
-        3. Static OEM → ECAM family map for known CMS-indexed models.
+        1. ``d270_serialnumber`` raw — plaintext serials like ``ECAM61075MB…``.
+        2. ``d270_serialnumber`` decoded — binary envelope SKU (issue #10).
+        3. TranscodeTable model info (``appModelId``/``product_code``/``name``).
+        4. Static OEM → ECAM family map (covers firmwares that surface no
+           identifying string anywhere else, e.g. PD Soul ``DL-millcore``).
+
+        Returning a non-empty pattern does not imply ContentStack actually
+        indexes that family — only ECAM47/ECAM63 are populated as of
+        2026-04. The downstream :func:`fetch_drink_catalog` path skips the
+        HTTP call for unindexed families. Surfacing the correct family
+        anyway lets users see their machine recognised in logs and gives
+        future ContentStack data updates a working hook.
         """
         import re
+
+        from .api import DeLonghiApi
+        from .const import SKU_TO_ECAM_PATTERN
 
         if self._last_all_props:
             serial_prop = self._last_all_props.get("d270_serialnumber", {})
@@ -495,6 +507,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 match = re.search(r"ECAM\d+", serial_val, re.IGNORECASE)
                 if match:
                     return match.group(0).upper()
+                # Binary envelope (PR #19) — decode and try a SKU-based map.
+                serial_info = DeLonghiApi.parse_serial_number(serial_val)
+                if serial_info and serial_info.get("format") == "binary":
+                    sku = serial_info.get("sku", "")
+                    if sku and sku in SKU_TO_ECAM_PATTERN:
+                        return SKU_TO_ECAM_PATTERN[sku]
 
         if self.api.model_info:
             info = self.api.model_info
@@ -508,12 +526,15 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         return match.group(0).upper()
 
         oem = self.api._oem_model or ""
-        # Only list families actually indexed in ContentStack. Everything
-        # else falls through to an empty pattern and skips the fetch — we
-        # used to map DL-pd-* → ECAM61, which silently returned zero drinks
-        # on every startup and caused issue #6 to appear unfixed.
+        # Map covers OEM identifiers we have hardware for. Families that
+        # ContentStack does not yet index (ECAM61 PD Soul) are still listed
+        # so the integration can surface the correct family in logs;
+        # contentstack.fetch_drink_catalog short-circuits unknown families.
         oem_ecam_map = {
             "DL-striker-cb": "ECAM63050",
             "DL-striker-best": "ECAM63075",
+            "DL-pd-soul": "ECAM61075",
+            "DL-pd-soul-better": "ECAM61075",
+            "DL-millcore": "ECAM61075",
         }
         return oem_ecam_map.get(oem, "")

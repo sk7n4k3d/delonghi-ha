@@ -196,6 +196,35 @@ class TestDetectContentstackPattern:
         coord._last_all_props = {}
         assert coord._detect_contentstack_pattern() == ""
 
+    # ── Issue #10: PrimaDonna Soul "millcore" firmware support ─────────
+    #
+    # @dalodzik beta.9 log shows:
+    #   ContentStack: cannot determine ECAM model
+    #   (oem=DL-millcore, serial=0BuhDwDNMjE3MDU1WloyNTA3MDEzMDEzNAD9pg==)
+    #
+    # Decoded the serial decodes to a binary envelope with payload
+    # "217055ZZ25070130134" — SKU 217055 = PrimaDonna Soul, ECAM family
+    # ECAM61075. The detector must:
+    #   (a) decode the binary serial and look up the SKU,
+    #   (b) recognise DL-millcore as a PrimaDonna Soul OEM family,
+    # so that the user no longer sees "cannot determine ECAM model".
+
+    def test_serial_binary_envelope_pd_soul_sku_217055(self):
+        """Real serial from @dalodzik (issue #10) → SKU lookup → ECAM61075."""
+        coord, _, api = _make_coord(api=_make_api())
+        api._oem_model = "DL-millcore"
+        api.model_info = {}
+        coord._last_all_props = {"d270_serialnumber": {"value": "0BuhDwDNMjE3MDU1WloyNTA3MDEzMDEzNAD9pg=="}}
+        assert coord._detect_contentstack_pattern() == "ECAM61075"
+
+    def test_oem_map_millcore_pd_soul(self):
+        """DL-millcore (PrimaDonna Soul) without serial → ECAM61075 family."""
+        coord, _, api = _make_coord(api=_make_api())
+        api._oem_model = "DL-millcore"
+        api.model_info = {}
+        coord._last_all_props = {}
+        assert coord._detect_contentstack_pattern() == "ECAM61075"
+
 
 # ───────────────────────── _load_contentstack ────────────────────────
 
