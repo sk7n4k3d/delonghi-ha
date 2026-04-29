@@ -5,6 +5,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.10] — 2026-04-29
+
+### Fixed
+- **PrimaDonna Soul "millcore" handshake — accept non-wallclock `time_1`**
+  (#10). Reported by @dalodzik on `AC000W040821014`: the LAN handshake was
+  rejected with `clock_skew` because the firmware ships `time_1` as a
+  free-running monotonic counter (uptime nanoseconds, ≈1.4×10¹⁴ after a
+  couple of days), not as UNIX seconds. The skew check now applies only
+  when `time_1` looks like a wall-clock value (< 5×10⁹, year ≈2128); above
+  that threshold the value is treated as a monotonic counter and the
+  ratchet on `_last_handshake_time1` is the sole anti-replay control.
+  Cremalink-style firmwares (Eletta Explore, PrimaDonna early FW) keep
+  the original wall-clock guarantees. Locks the exact lodzen value with
+  `test_handshake_accepts_primadonna_soul_uptime_time1`,
+  `test_handshake_uptime_time1_still_enforces_anti_replay` and
+  `test_handshake_still_rejects_wallclock_skew_replay`. Without this fix
+  every PD Soul session fell back to the cloud, which never wakes the
+  machine — power on/off and brewing all silently failed.
+- **PrimaDonna Soul "millcore" model recognition** (#10). Decoder for
+  `d270_serialnumber` already handled the binary envelope correctly
+  (PR #19), but `_detect_contentstack_pattern` only scanned for
+  `ECAM\d+` in the raw base64 string and didn't know about
+  `DL-millcore`. The detector now consumes the decoded SKU through a
+  new `SKU_TO_ECAM_PATTERN` map (currently `217055 → ECAM61075`), and
+  the OEM map gained `DL-pd-soul`, `DL-pd-soul-better`, `DL-millcore`
+  → `ECAM61075`. The user no longer sees `ContentStack: cannot
+  determine ECAM model`; the downstream short-circuit on unindexed
+  families still applies, so we don't spam HTTP for ECAM61.
+
+### Security / CI
+- **Release pipeline — verify tag matches manifest version** (#10).
+  `release.yaml` now runs two cross-checks before publishing:
+  the `manifest.json` at the tagged commit must declare the same
+  version as the tag (`vX.Y.Z`), and the produced zip artefact must
+  carry that exact manifest. A stale checkout, a forgotten bump, or a
+  mistyped tag now fails the workflow loudly instead of shipping a
+  release whose code doesn't match its name. Direct response to
+  @dalodzik's "how do you test that your release commit is matching the
+  expected release tag?".
+
 ### `delonghi_daedalus` 0.2.0 — security & diagnostics
 This component is shipped from the same repository but is not bundled in the
 HACS zip; install via manual clone until a separate HACS release pipeline is
