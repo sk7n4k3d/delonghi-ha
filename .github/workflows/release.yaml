@@ -19,10 +19,54 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Issue #10 — @dalodzik flagged that release commits sometimes did not
+      # appear to match the announced fixes. Block publishing if the tag and
+      # the manifest disagree, so a stale checkout, a forgotten bump, or a
+      # mistyped tag fail the workflow loudly instead of shipping a quiet lie.
+      #
+      # TAG is read from github.ref_name (a git ref, restricted to a safe
+      # character set by git itself) and consumed only via "$TAG" inside a
+      # quoted shell, so this can't be turned into a command-injection sink.
+      - name: Verify tag matches manifest.json version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          MANIFEST_VERSION=$(jq -r .version custom_components/delonghi_coffee/manifest.json)
+          EXPECTED_TAG="v${MANIFEST_VERSION}"
+          echo "manifest.json version : ${MANIFEST_VERSION}"
+          echo "git tag               : ${TAG}"
+          if [[ "${TAG}" != "${EXPECTED_TAG}" ]]; then
+            echo "::error::tag '${TAG}' does not match manifest version '${MANIFEST_VERSION}' (expected '${EXPECTED_TAG}'). Bump manifest.json before tagging." >&2
+            exit 1
+          fi
+          echo "tag and manifest agree on ${MANIFEST_VERSION}"
+
       - name: Build release zip
         run: |
           cd custom_components/delonghi_coffee
           zip -r ../../delonghi_coffee.zip .
+
+      # Independent check on the produced artefact — guarantees the zip the
+      # users will download carries the same manifest version we just
+      # validated, even if a future workflow step starts mutating files
+      # between checkout and zip.
+      - name: Verify zip carries the expected manifest version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/zipverify
+          unzip -o delonghi_coffee.zip -d /tmp/zipverify > /dev/null
+          ZIP_VERSION=$(jq -r .version /tmp/zipverify/manifest.json)
+          EXPECTED_TAG="v${ZIP_VERSION}"
+          echo "zipped manifest.json version : ${ZIP_VERSION}"
+          echo "git tag                      : ${TAG}"
+          if [[ "${TAG}" != "${EXPECTED_TAG}" ]]; then
+            echo "::error::zip manifest version '${ZIP_VERSION}' does not match tag '${TAG}'." >&2
+            exit 1
+          fi
+          rm -rf /tmp/zipverify
 
       - name: Detect prerelease from tag
         id: prerelease
