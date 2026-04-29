@@ -355,6 +355,13 @@ class LanServerConfig:
     drift from our own ``time.time()``. cremalink picks its own time_1 so
     any huge delta is either a badly reset clock or a stale replay. 30
     minutes is conservative; real devices are within a few seconds.
+
+    Non-wallclock firmwares (PrimaDonna Soul "millcore", issue #10) ship
+    ``time_1`` as a free-running monotonic counter — uptime in nanoseconds
+    by observation, ≈1.4e14 after a couple of days. We can't compare those
+    to wall-clock so the skew check is bypassed when ``time_1`` exceeds
+    :data:`NON_WALLCLOCK_TIME1_THRESHOLD`; the anti-replay ratchet on
+    ``_last_handshake_time1`` still rejects rollback attempts in that mode.
     """
 
     dsn: str
@@ -364,6 +371,14 @@ class LanServerConfig:
     port: int = LAN_SERVER_DEFAULT_PORT
     allowed_peers: frozenset[str] = field(default_factory=frozenset)
     handshake_max_skew: int = 30 * 60  # seconds
+
+
+# Any UNIX-second timestamp we'd legitimately see is < 5e9 (year ~2128).
+# Firmwares that ship a non-wallclock time_1 (PD Soul = uptime ns) start
+# vastly higher — 1e14+ within hours of boot. Picking 5e9 as the cutoff
+# leaves a 130-year safety margin for real wall clocks while reliably
+# catching every uptime-style counter we've seen.
+NON_WALLCLOCK_TIME1_THRESHOLD: int = 5_000_000_000
 
 
 class DeLonghiLanServer:
@@ -498,7 +513,9 @@ class DeLonghiLanServer:
 
         # Anti-replay: the device always advances time_1 on a fresh boot.
         # A captured handshake from yesterday is either a clock regression
-        # or an adversary rolling us back — reject it.
+        # or an adversary rolling us back — reject it. This ratchet runs
+        # regardless of whether time_1 is wall-clock seconds (cremalink)
+        # or a monotonic uptime counter (PD Soul "millcore", issue #10).
         now = int(time.time())
         if self._last_handshake_time1 and time_1 < self._last_handshake_time1:
             _LAN_LOGGER.warning(
@@ -508,15 +525,30 @@ class DeLonghiLanServer:
                 self._last_handshake_time1,
             )
             return web.json_response({"error": "stale"}, status=400)
-        if abs(now - time_1) > self._config.handshake_max_skew:
-            _LAN_LOGGER.warning(
-                "handshake: reject peer=%s time_1=%d vs local now=%d (max skew %ds)",
+
+        # Wall-clock skew check only applies to wall-clock-style time_1.
+        # Above the threshold the value is structurally not a UNIX epoch
+        # (cf. NON_WALLCLOCK_TIME1_THRESHOLD docstring); anti-replay above
+        # is the only protection for that path, which is sufficient because
+        # the peer is already in the IP allowlist and the handshake derives
+        # a fresh session key per call.
+        if time_1 < NON_WALLCLOCK_TIME1_THRESHOLD:
+            if abs(now - time_1) > self._config.handshake_max_skew:
+                _LAN_LOGGER.warning(
+                    "handshake: reject peer=%s time_1=%d vs local now=%d (max skew %ds)",
+                    peer,
+                    time_1,
+                    now,
+                    self._config.handshake_max_skew,
+                )
+                return web.json_response({"error": "clock_skew"}, status=400)
+        else:
+            _LAN_LOGGER.debug(
+                "handshake: peer=%s time_1=%d looks like a monotonic counter "
+                "(uptime/ns), skipping wall-clock skew check (issue #10)",
                 peer,
                 time_1,
-                now,
-                self._config.handshake_max_skew,
             )
-            return web.json_response({"error": "clock_skew"}, status=400)
 
         _LAN_LOGGER.debug(
             "handshake: received random_1=%s time_1=%d from %s",

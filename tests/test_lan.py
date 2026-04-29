@@ -964,3 +964,112 @@ def test_handshake_strips_base64_padding_from_random_1() -> None:
         assert server._session.app_crypto_key == canonical.app_crypto_key
 
     asyncio.run(run())
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Issue #10 — PrimaDonna Soul firmware sends a non-UNIX time_1.
+#
+# Real handshake captured 2026-04-29 from @dalodzik (DSN AC000W040821014):
+#
+#   handshake: inbound from peer=192.168.178.129
+#   handshake: reject peer=192.168.178.129 time_1=138962869177743
+#                vs local now=1777437028 (max skew 1800s)
+#
+# Decoding 138962869177743:
+#   - UNIX seconds → year ~6371 AD (impossible)
+#   - UNIX µs      → year 6373 AD  (impossible)
+#   - uptime ns    → 38.6 hours    (plausible: machine paired ~2 days)
+#
+# The correct interpretation is "uptime-ish monotonic counter, not a
+# wall-clock". Anti-replay (the _last_handshake_time1 ratchet) still
+# applies regardless of the unit, so we keep that protection but skip
+# the wall-clock skew check when time_1 is far above any sensible UNIX
+# epoch.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_accepts_primadonna_soul_uptime_time1() -> None:
+    """PrimaDonna Soul firmware (millcore) sends time_1 as uptime-ns ≈ 1.4e14.
+
+    Locks the exact value from @dalodzik's beta.9 log so any future
+    refactor of the skew check that re-rejects this handshake fails
+    fast in CI.
+    """
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="AC000W040821014",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        # Exact value lifted from dalodzik's home-assistant.log on 2026-04-29.
+        body = _make_handshake_body(time_1=138_962_869_177_743)
+        resp = await server._handle_handshake(_MockRequest(body))
+        assert resp.status == 202, (
+            f"PD Soul handshake rejected (status={resp.status}); the firmware "
+            f"sends uptime-style time_1, not wall-clock seconds — see issue #10"
+        )
+        # Session must be live so subsequent commands can be encrypted.
+        assert server.session is not None
+        # And the value must be remembered for the anti-replay ratchet.
+        assert server._last_handshake_time1 == 138_962_869_177_743
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_uptime_time1_still_enforces_anti_replay() -> None:
+    """A non-wallclock time_1 must still ratchet — earlier values are rejected
+    even when they pass the skew check (because there is no skew check)."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-PDS-REPLAY",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        first = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=200_000_000_000_000)))
+        assert first.status == 202
+
+        # An earlier uptime value (older boot snapshot, captured replay) → 400.
+        replay = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=199_999_999_999_999)))
+        assert replay.status == 400
+
+        # A later uptime value advances the ratchet.
+        progress = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=200_000_000_000_001)))
+        assert progress.status == 202
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_still_rejects_wallclock_skew_replay() -> None:
+    """time_1 in the UNIX-seconds range but years out of phase must still
+    reject (cremalink path). The fix for PD Soul must NOT relax this."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-WALLCLOCK",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        # 2001 epoch — same as test_handshake_rejects_clock_skew_replay,
+        # duplicated here for clarity of intent post-fix.
+        stale = _make_handshake_body(time_1=1_000_000_000)
+        resp = await server._handle_handshake(_MockRequest(stale))
+        assert resp.status == 400
+
+    asyncio.run(run())
