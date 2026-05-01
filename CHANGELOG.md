@@ -5,6 +5,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.12] — 2026-05-01
+
+### Added
+- **Blocking alarms surfaced — UX visibility for "machine stuck Turning On"**.
+  When a blocking alarm is active (Water Tank Empty, Hydraulic Problem,
+  Drip Tray Missing, Heater/Steamer Probe Failure, Infuser Motor Failure,
+  Bean Hopper Absent, Grid Missing, Water Tank Missing, Grounds Container
+  Full, Machine Service Required), the De'Longhi firmware accepts the
+  POWER_ON sequence but never reaches Ready — the machine sits in
+  `Turning On` indefinitely with no visible reason. Two complementary
+  surfaces now make the cause obvious:
+  - New `sensor.<dsn>_blocking_alarms` aggregator. State = number of
+    blocking alarms currently active. Attributes:
+    `blocking_alarms` (list of names), `blocking_bits` (raw alarm bits,
+    useful for automations), `is_blocking_power_on` (bool),
+    `all_active_alarms` (every active alarm, blocking or not).
+  - `async_turn_on` now logs a WARNING with the explicit alarm names
+    *and* schedules a `persistent_notification` in the HA UI so the
+    user sees the issue in their notification tray instead of buried in
+    logs. Power-on still proceeds (some alarm states clear themselves
+    once the wake sequence runs); the announcement is purely
+    informational and never aborts the command.
+- `BLOCKING_ALARM_BITS: frozenset[int]` constant in `const.py`, derived
+  once from the `blocking: True` flag now carried by each entry of
+  `ALARMS`. Advisory alarms (Descale Needed, Cleaning Needed, Replace
+  Water Filter, Coffee Beans Empty…) are *not* in the blocking set —
+  the machine still operates with those active.
+- 10 regression tests:
+  `TestBlockingAlarmsSensor::test_zero_when_no_alarms`,
+  `…test_zero_when_only_non_blocking_alarms`,
+  `…test_counts_blocking_alarms`,
+  `…test_handles_missing_alarms_key`,
+  `…test_handles_alarm_without_name_falls_back_to_bit`,
+  `TestBlockingAlarmsAnnouncement::test_no_blocking_alarms_is_silent`,
+  `…test_only_advisory_alarms_is_silent`,
+  `…test_water_tank_empty_warns_and_notifies`,
+  `…test_multiple_blocking_alarms_listed`,
+  `…test_announce_never_aborts_turn_on`. Suite total: 862 passed.
+
 ## [1.6.0-beta.11] — 2026-05-01
 
 ### Fixed
