@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import (
+    BLOCKING_ALARM_BITS,
     DOMAIN,
     POWER_OFF_CMD,
     POWER_ON_CMD,
@@ -132,6 +133,12 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             _LOGGER.warning("Power command already in progress, ignoring")
             return
 
+        # Surface blocking alarms upfront — without this, a turn_on with
+        # Water Tank Empty (or any other blocking alarm) silently sends the
+        # wake/POWER_ON commands and the machine sits in Turning On forever
+        # while the user wonders why nothing happens.
+        self._announce_blocking_alarms_for_power_on()
+
         async with self._cmd_lock:
             _LOGGER.info("Powering on %s", self._dsn)
             try:
@@ -172,6 +179,56 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             if self._retry_task is not None and not self._retry_task.done():
                 self._retry_task.cancel()
             self._retry_task = self.hass.async_create_task(self._retry_power_on())
+
+    def _announce_blocking_alarms_for_power_on(self) -> None:
+        """Surface blocking alarms before sending POWER_ON_CMD.
+
+        The De'Longhi firmware accepts the wake-up + POWER_ON sequence even
+        when a blocking alarm is active (Water Tank Empty, Hydraulic Problem,
+        etc.). It just sits in Turning On indefinitely — never reaching Ready
+        — leaving the user with no visible reason. We emit:
+          - WARNING in the HA log with the explicit list of blocking alarms;
+          - persistent_notification in the HA UI so the issue surfaces in the
+            user's notification tray instead of buried in logs.
+        We do *not* abort the command: some alarm states clear themselves
+        once the wake sequence runs (e.g. transient probe blips after a
+        long sleep), and short-circuiting power-on would regress users who
+        actually want to wake the machine to clear an old alarm.
+        """
+        alarms = self.coordinator.data.get("alarms") or []
+        blocking = [a for a in alarms if isinstance(a, dict) and a.get("bit") in BLOCKING_ALARM_BITS]
+        if not blocking:
+            return
+
+        names = ", ".join(a.get("name", f"bit{a.get('bit')}") for a in blocking)
+        _LOGGER.warning(
+            "Power on requested with blocking alarms active — machine may stay in 'Turning On': %s",
+            names,
+        )
+
+        # The persistent notification puts the same info in the HA UI so the
+        # user sees it without reading logs. Failing to schedule the
+        # notification (test harness, missing service) must never break the
+        # power-on path.
+        try:
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    "persistent_notification",
+                    "create",
+                    {
+                        "title": f"Cafetière bloquée — {self._dsn}",
+                        "message": (
+                            "La machine ne pourra pas finir de s'allumer tant que ces "
+                            "alarmes restent actives :\n\n- "
+                            + "\n- ".join(a.get("name", f"bit{a.get('bit')}") for a in blocking)
+                        ),
+                        "notification_id": f"delonghi_blocking_alarms_{self._dsn}",
+                    },
+                    blocking=False,
+                )
+            )
+        except Exception as err:  # noqa: BLE001 — defensive, must never abort turn_on
+            _LOGGER.debug("Skipping persistent_notification (harness or unsupported): %s", err)
 
     async def _retry_power_on(self) -> None:
         """Retry power on if monitor hasn't confirmed within 3 minutes.
