@@ -308,6 +308,53 @@ class TestAsyncTurnOffFlow:
         with pytest.raises(HomeAssistantError, match="Failed to power off"):
             asyncio.run(sw.async_turn_off())
 
+    def test_turn_off_cancels_pending_power_on_retry(self):
+        """Regression: a pending _retry_task from turn_on must be cancelled by
+        turn_off, otherwise the retry rallumes the machine 3 min after the user
+        explicitly asked to switch it off (observed at ~11:21 on 2026-05-01)."""
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            # Simulate a pending retry from a previous turn_on
+            async def _never():
+                await asyncio.sleep(99999)
+
+            sw._retry_task = asyncio.create_task(_never())
+            await asyncio.sleep(0)  # let the task start
+            assert not sw._retry_task.done()
+
+            await sw.async_turn_off()
+
+            # Yield to let the cancellation propagate to the awaited coroutine
+            with contextlib.suppress(asyncio.CancelledError):
+                await sw._retry_task
+
+            # The pending retry MUST be cancelled by turn_off
+            assert sw._retry_task.cancelled()
+
+        asyncio.run(_go())
+
+    def test_turn_off_handles_no_pending_retry(self):
+        """turn_off without a prior turn_on (no _retry_task) must not crash."""
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+
+        # No retry task pending
+        assert sw._retry_task is None
+        asyncio.run(sw.async_turn_off())
+        # Still no retry task, command sent
+        assert sw._retry_task is None
+        sw._api.send_command.assert_called_once()
+
 
 class TestAsyncSetupEntry:
     def test_adds_one_switch_entity(self):
@@ -364,6 +411,7 @@ class TestRetryPowerOn:
         sw.hass = hass
         sw._api.ping_connected = MagicMock(return_value=True)
         sw._api.send_command = MagicMock()
+        sw._last_commanded_on = True
         sw.coordinator.data = {"machine_state": "Off"}
 
         async def _go():
@@ -382,6 +430,7 @@ class TestRetryPowerOn:
         sw._api.ping_connected = MagicMock(return_value=False)
         sw._api.request_monitor = MagicMock()
         sw._api.send_command = MagicMock()
+        sw._last_commanded_on = True
         sw.coordinator.data = {"machine_state": "Going to sleep"}
 
         async def _go():
@@ -397,6 +446,7 @@ class TestRetryPowerOn:
         sw.hass = hass
         sw._api.ping_connected = MagicMock(side_effect=DeLonghiApiError("boom"))
         sw._api.send_command = MagicMock()
+        sw._last_commanded_on = True
         sw.coordinator.data = {"machine_state": "Off"}
 
         async def _go():
@@ -405,6 +455,49 @@ class TestRetryPowerOn:
                 await sw._retry_power_on()
 
         asyncio.run(_go())
+
+    def test_retry_aborts_after_user_turned_off(self):
+        """Regression: if the user issued a turn_off after the original turn_on,
+        the retry must NOT renvoie POWER_ON_CMD even if state == Off — that's
+        what the user explicitly asked for. Before the fix, the retry re-allumait
+        the machine 3 min after a turn_off, ignoring user intent."""
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+        # Simulate: user did turn_on (sets last_commanded_on=True), then turn_off
+        # which should set last_commanded_on=False before the retry fires.
+        sw._last_commanded_on = False
+        sw.coordinator.data = {"machine_state": "Off"}
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw._retry_power_on()
+
+        asyncio.run(_go())
+        # No POWER_ON_CMD must have been sent
+        sw._api.send_command.assert_not_called()
+        # ping not called either
+        sw._api.ping_connected.assert_not_called()
+
+    def test_retry_proceeds_when_last_commanded_still_on(self):
+        """Symmetry check: when last_commanded_on==True (real case), retry
+        proceeds normally if monitor still says Off."""
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+        sw._last_commanded_on = True
+        sw.coordinator.data = {"machine_state": "Off"}
+
+        async def _go():
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
+                await sw._retry_power_on()
+
+        asyncio.run(_go())
+        sw._api.send_command.assert_called_once()
 
 
 class TestPowerOnExceptionPaths:
