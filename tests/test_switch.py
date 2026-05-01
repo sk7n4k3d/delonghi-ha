@@ -603,3 +603,115 @@ class TestPowerOffPostCommandFailure:
 
         asyncio.run(sw.async_turn_off())
         sw._api.request_monitor.assert_called_once()
+
+
+class TestBlockingAlarmsAnnouncement:
+    """v1.6.0-beta.12: turn_on with blocking alarms must surface them."""
+
+    def test_no_blocking_alarms_is_silent(self, caplog):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.coordinator.data = {"machine_state": "Off", "alarms": []}
+
+        sw._announce_blocking_alarms_for_power_on()
+
+        # Must not warn, must not schedule notifications.
+        assert "blocking alarms active" not in caplog.text
+        hass.services.async_call.assert_not_called() if hasattr(hass.services, "async_call") else None
+
+    def test_only_advisory_alarms_is_silent(self, caplog):
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        # Descale (bit 2) + Cleaning (bit 16) — both advisory, never blocking
+        sw.coordinator.data = {
+            "machine_state": "Off",
+            "alarms": [
+                {"bit": 2, "name": "Descale Needed"},
+                {"bit": 16, "name": "Cleaning Needed"},
+            ],
+        }
+
+        sw._announce_blocking_alarms_for_power_on()
+
+        assert "blocking alarms active" not in caplog.text
+
+    def test_water_tank_empty_warns_and_notifies(self, caplog):
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="custom_components.delonghi_coffee.switch")
+        sw = _make_switch()
+        hass = _make_hass()
+        # Capture the persistent_notification call
+        hass.services = MagicMock()
+        hass.services.async_call = AsyncMock()
+        sw.hass = hass
+        sw.coordinator.data = {
+            "machine_state": "Off",
+            "alarms": [{"bit": 0, "name": "Water Tank Empty"}],
+        }
+
+        async def _go():
+            sw._announce_blocking_alarms_for_power_on()
+            await asyncio.sleep(0)  # let the scheduled task run
+
+        asyncio.run(_go())
+
+        # Log warning surfaces the alarm name
+        assert "Water Tank Empty" in caplog.text
+        # persistent_notification was scheduled
+        assert hass.services.async_call.called
+        args, kwargs = hass.services.async_call.call_args
+        assert args[0] == "persistent_notification"
+        assert args[1] == "create"
+        payload = args[2]
+        assert "Water Tank Empty" in payload["message"]
+        assert sw._dsn in payload["title"]
+
+    def test_multiple_blocking_alarms_listed(self, caplog):
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="custom_components.delonghi_coffee.switch")
+        sw = _make_switch()
+        hass = _make_hass()
+        hass.services = MagicMock()
+        hass.services.async_call = AsyncMock()
+        sw.hass = hass
+        sw.coordinator.data = {
+            "machine_state": "Off",
+            "alarms": [
+                {"bit": 0, "name": "Water Tank Empty"},
+                {"bit": 2, "name": "Descale Needed"},  # advisory
+                {"bit": 12, "name": "Hydraulic Problem"},
+            ],
+        }
+
+        async def _go():
+            sw._announce_blocking_alarms_for_power_on()
+            await asyncio.sleep(0)
+
+        asyncio.run(_go())
+
+        # Both blocking alarms named, advisory one not in the warning
+        assert "Water Tank Empty" in caplog.text
+        assert "Hydraulic Problem" in caplog.text
+        # Notification message listed both blocking alarms
+        payload = hass.services.async_call.call_args[0][2]
+        assert "Water Tank Empty" in payload["message"]
+        assert "Hydraulic Problem" in payload["message"]
+
+    def test_announce_never_aborts_turn_on(self, caplog):
+        """Even if the persistent_notification call raises, turn_on proceeds."""
+        sw = _make_switch()
+        hass = _make_hass()
+        hass.services = MagicMock()
+        hass.services.async_call = MagicMock(side_effect=RuntimeError("notify down"))
+        sw.hass = hass
+        sw.coordinator.data = {
+            "machine_state": "Off",
+            "alarms": [{"bit": 0, "name": "Water Tank Empty"}],
+        }
+
+        # Must not raise
+        sw._announce_blocking_alarms_for_power_on()

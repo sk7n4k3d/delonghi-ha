@@ -17,6 +17,7 @@ from custom_components.delonghi_coffee.const import ALARMS
 from custom_components.delonghi_coffee.sensor import (
     COUNTER_SENSORS,
     DeLonghiBeanSensor,
+    DeLonghiBlockingAlarmsSensor,
     DeLonghiCounterSensor,
     DeLonghiProfileSensor,
     DeLonghiStatusSensor,
@@ -402,10 +403,15 @@ class TestSetupEntry:
         async_add = MagicMock(side_effect=lambda ents: added.extend(ents))
         asyncio.run(sensor_mod.async_setup_entry(hass, entry, async_add))
 
-        # 3 named sensors + every counter
-        assert len(added) == 3 + len(COUNTER_SENSORS)
+        # 4 named sensors (Status, Profile, Bean, BlockingAlarms) + every counter
+        assert len(added) == 4 + len(COUNTER_SENSORS)
         kinds = {type(e).__name__ for e in added}
-        assert {"DeLonghiStatusSensor", "DeLonghiProfileSensor", "DeLonghiBeanSensor"} <= kinds
+        assert {
+            "DeLonghiStatusSensor",
+            "DeLonghiProfileSensor",
+            "DeLonghiBeanSensor",
+            "DeLonghiBlockingAlarmsSensor",
+        } <= kinds
         assert sum(1 for e in added if isinstance(e, DeLonghiCounterSensor)) == len(COUNTER_SENSORS)
 
     def test_setup_entry_handles_missing_sw_version(self):
@@ -476,3 +482,72 @@ class TestAlarmSensorIsOn:
         coord.seen_alarm_bits = set()
         sensor = _make_alarm_sensor(coord, bit=0)
         assert sensor.is_on is None
+
+
+class TestBlockingAlarmsSensor:
+    """Aggregator that surfaces *blocking* alarms — the ones that prevent
+    the machine from completing Turning On → Ready."""
+
+    def _sensor(self, alarms_data):
+        coord = MagicMock()
+        coord.data = {"alarms": alarms_data}
+        return DeLonghiBlockingAlarmsSensor(coord, "DSN-B", "Eletta Explore", "Coffee", "1.0")
+
+    def test_zero_when_no_alarms(self):
+        s = self._sensor([])
+        assert s.native_value == 0
+        attrs = s.extra_state_attributes
+        assert attrs["blocking_alarms"] == []
+        assert attrs["blocking_bits"] == []
+        assert attrs["is_blocking_power_on"] is False
+        assert attrs["all_active_alarms"] == []
+
+    def test_zero_when_only_non_blocking_alarms(self):
+        # Descale Needed (bit 2) + Cleaning Needed (bit 16) — both informative
+        s = self._sensor(
+            [
+                {"bit": 2, "name": "Descale Needed"},
+                {"bit": 16, "name": "Cleaning Needed"},
+            ]
+        )
+        assert s.native_value == 0
+        attrs = s.extra_state_attributes
+        assert attrs["blocking_alarms"] == []
+        assert attrs["is_blocking_power_on"] is False
+        # All alarms still surface for context
+        assert attrs["all_active_alarms"] == ["Descale Needed", "Cleaning Needed"]
+
+    def test_counts_blocking_alarms(self):
+        s = self._sensor(
+            [
+                {"bit": 0, "name": "Water Tank Empty"},
+                {"bit": 2, "name": "Descale Needed"},  # not blocking
+                {"bit": 12, "name": "Hydraulic Problem"},
+            ]
+        )
+        assert s.native_value == 2
+        attrs = s.extra_state_attributes
+        assert attrs["blocking_alarms"] == ["Water Tank Empty", "Hydraulic Problem"]
+        assert attrs["blocking_bits"] == [0, 12]
+        assert attrs["is_blocking_power_on"] is True
+        assert "Descale Needed" in attrs["all_active_alarms"]
+
+    def test_handles_missing_alarms_key(self):
+        coord = MagicMock()
+        coord.data = {}  # no 'alarms' key at all
+        s = DeLonghiBlockingAlarmsSensor(coord, "DSN-B", "Eletta Explore", "Coffee", "1.0")
+        assert s.native_value == 0
+        assert s.extra_state_attributes["blocking_alarms"] == []
+
+    def test_handles_alarm_without_name_falls_back_to_bit(self):
+        s = self._sensor(
+            [
+                {"bit": 0},  # no name field — must not crash
+                {"bit": 99, "name": ""},  # empty name — same fallback
+            ]
+        )
+        attrs = s.extra_state_attributes
+        # Bit 0 (Water Tank Empty) is blocking, label fallback "bit0"
+        assert "bit0" in attrs["blocking_alarms"]
+        # Bit 99 unknown alarm, surfaces in all_active with "bit99" label
+        assert "bit99" in attrs["all_active_alarms"]
