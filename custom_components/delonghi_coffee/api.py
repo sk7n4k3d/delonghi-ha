@@ -44,6 +44,14 @@ def _decode_utf16(data: bytes) -> str:
     De'Longhi stores names in UTF-16 but the endianness varies between
     properties (profile names vs custom recipe names). This detects
     whether null bytes sit at even positions (BE) or odd positions (LE).
+
+    The decoder also stops at the first UTF-16 NUL terminator (two zero
+    bytes aligned on a 2-byte boundary), so calling code can safely pass
+    a fixed-size buffer that may contain trailing garbage from an
+    adjacent struct field. Without this, fixed-width name slots leak into
+    each other and produce concatenated strings like ``Bean1Bean2…``
+    (observed 2026-05-01 on Bastien's machine: ``"PrédéfiniDémarrer\\x01Ā"``,
+    ``"Grains 1ఁ̀ā"``, ``"Grains café 6Φλιτζά"``).
     """
     if len(data) < 2:
         return ""
@@ -55,7 +63,24 @@ def _decode_utf16(data: bytes) -> str:
     nulls_even = sum(1 for i in range(0, sample_len, 2) if data[i] == 0)
     nulls_odd = sum(1 for i in range(1, sample_len, 2) if data[i] == 0)
     encoding = "utf-16-be" if nulls_even >= nulls_odd else "utf-16-le"
-    return data.decode(encoding, errors="replace").replace("\x00", "").strip()
+
+    # Truncate at the first 2-byte-aligned UTF-16 NUL terminator.
+    # We work pairwise: a pair of zero bytes ends the string regardless of
+    # endianness, since UTF-16 surrogates and characters never have both
+    # halves at zero (other than U+0000 itself).
+    cutoff = len(data) - (len(data) % 2)
+    for i in range(0, cutoff - 1, 2):
+        if data[i] == 0 and data[i + 1] == 0:
+            cutoff = i
+            break
+    truncated = data[:cutoff]
+
+    decoded = truncated.decode(encoding, errors="replace")
+    # Strip control chars in the C0 range (0x00-0x1F except \t and \n) which
+    # leak from sentinel/length-prefix bytes some firmwares place between
+    # struct fields. Keep printable + whitespace.
+    cleaned = "".join(ch for ch in decoded if ch == "\t" or ch == "\n" or ord(ch) >= 0x20)
+    return cleaned.strip()
 
 
 class DeLonghiAuthError(Exception):
