@@ -250,11 +250,15 @@ class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
 
     @property
     def native_value(self) -> str:
-        """Return active profile name."""
-        # Use monitor profile (updated every 60s), fall back to cloud property (10min)
-        active = self.coordinator.data.get("profile", 0)
-        if active == 0:
-            active = self.coordinator.data.get("active_profile", 1)
+        """Return active profile name.
+
+        Authoritative source is the cloud property `active_profile` (refreshed
+        every 10min in the full refresh cycle). The monitor `profile` byte is
+        used only as a stale fallback when the cloud value is absent — it can
+        report the *last brewed* profile instead of the *currently selected*
+        one, leading to drift between the sensor state and the attributes.
+        """
+        active = self._resolve_active_profile_id()
         profiles = self.coordinator.data.get("profiles", {})
         profile = profiles.get(active, {})
         return profile.get("name", f"Profile {active}")
@@ -262,14 +266,29 @@ class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return all profiles as attributes."""
-        active = self.coordinator.data.get("active_profile", 1)
+        active = self._resolve_active_profile_id()
         profiles = self.coordinator.data.get("profiles", {})
-        attrs: dict[str, Any] = {"active_profile_id": active}
+        attrs: dict[str, Any] = {
+            "active_profile_id": active,
+            # Surface the monitor byte too so debug can see when cloud / monitor
+            # diverge (a non-issue normally, but useful for support reports).
+            "monitor_profile_id": self.coordinator.data.get("profile", 0),
+        }
         for pid, pdata in profiles.items():
             attrs[f"profile_{pid}_name"] = pdata.get("name", "")
             attrs[f"profile_{pid}_color"] = pdata.get("color", "")
             attrs[f"profile_{pid}_figure"] = pdata.get("figure", "")
         return attrs
+
+    def _resolve_active_profile_id(self) -> int:
+        """Cloud `active_profile` first, monitor `profile` as fallback."""
+        cloud = self.coordinator.data.get("active_profile")
+        if isinstance(cloud, int) and cloud > 0:
+            return cloud
+        monitor = self.coordinator.data.get("profile")
+        if isinstance(monitor, int) and monitor > 0:
+            return monitor
+        return 1
 
 
 class DeLonghiBeanSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):

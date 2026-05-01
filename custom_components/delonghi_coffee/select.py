@@ -59,11 +59,30 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
 
     @property
     def current_option(self) -> str | None:
-        """Return the currently selected profile."""
+        """Return the currently selected profile.
+
+        Authoritative ordering:
+          1. ``coordinator.selected_profile`` — explicit user click on this
+             dropdown overrides everything until next refresh.
+          2. ``data["active_profile"]`` — cloud property (10min refresh),
+             reflects what the *machine UI* currently shows as active.
+          3. ``data["profile"]`` — monitor byte (60s polling), can lag and
+             report the *last brewed* profile. Last-resort fallback only.
+        """
+        profiles = self.coordinator.data.get("profiles", {})
+
         active = self.coordinator.selected_profile
         if active is None:
+            cloud = self.coordinator.data.get("active_profile")
+            if isinstance(cloud, int) and cloud > 0:
+                active = cloud
+            else:
+                monitor = self.coordinator.data.get("profile")
+                if isinstance(monitor, int) and monitor > 0:
+                    active = monitor
+
+        if active is None:
             return None
-        profiles = self.coordinator.data.get("profiles", {})
         return profiles.get(active, {}).get("name", f"Profile {active}")
 
     async def async_select_option(self, option: str) -> None:
