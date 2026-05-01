@@ -5,6 +5,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.14] — 2026-05-01
+
+### Fixed
+
+- **Profile sensor & select reported the wrong active profile**.
+  `sensor.<dsn>_active_profile` previously preferred the monitor `profile`
+  byte (60s polling) over the cloud `active_profile` property (10min
+  refresh). The monitor byte can lag the user's selection because it
+  tracks the *last brewed* profile, not the *currently selected* one;
+  observed on Bastien's machine 2026-05-01 with `state="sk7n4k3d"` while
+  `active_profile_id=3` ("fuck claud") was the actual selection on the
+  machine UI. Both the sensor and `select.<dsn>_profile` now resolve the
+  active profile id with priority `active_profile` (cloud, authoritative)
+  → `profile` (monitor, fallback) → `1` (default), and the sensor
+  exposes `monitor_profile_id` as a separate attribute so support reports
+  can detect drift between the two sources.
+
+- **UTF-16 decoder leaked adjacent struct fields into name strings**.
+  `_decode_utf16` stripped null bytes globally instead of stopping at the
+  first 2-byte-aligned NUL terminator, so fixed-width name slots
+  containing `name1\\x00\\x00name2…` decoded as `name1name2…`. Bastien's
+  bean profile names landed as `'PrédéfiniDémarrer\\x01Ā'`,
+  `'Grains 1ఁ̀ā'`, `'Grains café 6Φλιτζά'` (Greek leaking into a French
+  name). The decoder now truncates at the first aligned NUL pair before
+  decoding and strips C0 control characters that leak from length-prefix
+  bytes between fields. Locked by 7 regression tests in
+  `TestDecodeUTF16FixedWidthBuffer`, including the exact pattern observed
+  on the machine.
+
+- **Brew button presses left automations blind during the cycle**.
+  The 60s default poll interval missed every transient `machine_state`
+  value (Pre-brewing, Brewing, Frothing milk, Rinsing, Steaming) because
+  each lasts ~10-30s. The coordinator now exposes
+  `request_fast_poll(duration_s, interval_s)` and `DeLonghiBrewButton`
+  invokes it (`90s` window @ `5s` interval) immediately after sending the
+  brew command, so watchers actually see the state flow. The fast-poll
+  window expires automatically on the next cycle past its deadline,
+  reverting to 60s. 5 tests in `TestFastPollWindow`.
+
+- **`DeLonghiPowerSwitch._retry_task` polluted HA stage 2 boot**.
+  `hass.async_create_task(self._retry_power_on())` registered the
+  background sleeper in HA's "wait-for-this-to-finish" set, producing
+  `Setup timed out for stage 2 waiting on …_retry_power_on()` warnings
+  on every restart. Switched to `async_create_background_task` with the
+  explicit name `delonghi_power_retry_<dsn>` so HA recognises it as a
+  long-running background task and stops blocking boot on it.
+
 ## [1.6.0-beta.13] — 2026-05-01
 
 ### Fixed
