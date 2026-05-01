@@ -174,8 +174,18 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             self._retry_task = self.hass.async_create_task(self._retry_power_on())
 
     async def _retry_power_on(self) -> None:
-        """Retry power on if monitor hasn't confirmed within 3 minutes."""
+        """Retry power on if monitor hasn't confirmed within 3 minutes.
+
+        Aborts silently if the user issued a turn_off in the interval — the
+        machine being Off is then the desired state, not a wake failure.
+        Without this guard the retry would re-allume the machine three minutes
+        after every quick turn_on → turn_off sequence (observed 2026-05-01).
+        """
         await asyncio.sleep(_RETRY_DELAY)
+
+        if self._last_commanded_on is not True:
+            _LOGGER.debug("Power ON retry aborted: user turned off in between")
+            return
 
         state = self.coordinator.data.get("machine_state", "Unknown")
         if state in ("Off", "Unknown", "Going to sleep"):
@@ -204,6 +214,14 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
 
         async with self._cmd_lock:
             _LOGGER.info("Powering off %s", self._dsn)
+
+            # Cancel any pending power-on retry — the user just changed their
+            # mind. Without this, the retry would fire 3 min later, see
+            # machine_state=Off (because we just turned it off), and renvoie
+            # POWER_ON_CMD, re-allumant la machine contre la volonté du user.
+            if self._retry_task is not None and not self._retry_task.done():
+                self._retry_task.cancel()
+
             try:
                 if not await self.coordinator.send_command_lan(POWER_OFF_CMD):
                     await self.hass.async_add_executor_job(self._api.send_command, self._dsn, POWER_OFF_CMD)
