@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -146,6 +147,16 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
             await self.hass.async_add_executor_job(self._api.brew_beverage, self._dsn, self._beverage_key, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to brew {self._beverage_key}: {err}") from err
+
+        # Brew cycles last ~10-30s. Switch the coordinator to a 5s polling
+        # interval for the next 90s so machine_state transitions through
+        # Pre-brewing → Brewing → Frothing milk → Rinsing → Ready actually
+        # surface to automations. Without this the default 60s poll misses
+        # them and watchers never see anything happen.
+        # Older coordinator stubs (test harness without request_fast_poll)
+        # are tolerated by the AttributeError suppression.
+        with contextlib.suppress(AttributeError):
+            self.coordinator.request_fast_poll(duration_s=90.0, interval_s=5.0)
 
 
 class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):

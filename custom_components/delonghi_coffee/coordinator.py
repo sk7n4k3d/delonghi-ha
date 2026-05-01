@@ -73,11 +73,52 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lan_active: bool = False
         self._lan_start_attempted: bool = False
         self._lan_properties: dict[str, Any] = {}
+        # Fast-poll window: when a brew button is pressed the cloud Ayla
+        # 60s polling rate misses the transient Brewing / Pre-brewing /
+        # Frothing milk / Rinsing / Steaming states (each lasts ~10-30s).
+        # Callers may invoke request_fast_poll() to shorten the interval
+        # for a bounded window (default 60s window @ 5s interval) so
+        # automations that watch machine_state actually see the brew flow.
+        self._fast_poll_until: float | None = None
+        # Cache the canonical normal interval so we can revert from a
+        # fast-poll window even if the test harness stubs out
+        # DataUpdateCoordinator.__init__ (where update_interval lives).
+        self._normal_update_interval: timedelta = timedelta(seconds=SCAN_INTERVAL_SECONDS)
+
+    def request_fast_poll(self, duration_s: float = 60.0, interval_s: float = 5.0) -> None:
+        """Shorten the polling interval for a bounded window.
+
+        Idempotent: a second call within the existing window extends the
+        deadline to ``monotonic() + duration_s`` (does not stack). The
+        normal 60s interval is restored automatically by the next
+        ``_async_update_data`` after the deadline.
+        """
+        if duration_s <= 0 or interval_s <= 0:
+            return
+        deadline = monotonic() + duration_s
+        # Extend or arm the window
+        self._fast_poll_until = max(self._fast_poll_until or 0.0, deadline)
+        self.update_interval = timedelta(seconds=interval_s)
+        _LOGGER.debug(
+            "Fast poll requested: interval=%ds for %.0fs (until monotonic=%.1f)",
+            interval_s,
+            duration_s,
+            deadline,
+        )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
         try:
             now = monotonic()
+
+            # Revert to the normal interval once the fast-poll window has
+            # elapsed. We do it here (top of the cycle) so the deadline
+            # check naturally aligns with refresh boundaries.
+            if self._fast_poll_until is not None and now > self._fast_poll_until:
+                _LOGGER.debug("Fast poll window expired, reverting to %ds interval", SCAN_INTERVAL_SECONDS)
+                self.update_interval = self._normal_update_interval
+                self._fast_poll_until = None
+
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 
             # Read status (monitor property from cloud cache)
