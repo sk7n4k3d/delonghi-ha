@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.13] — 2026-05-01
+
+### Fixed
+- **Blocking alarms sensor — translation key rendered as `_3` suffix**.
+  In beta.12 the new `DeLonghiBlockingAlarmsSensor` shipped with
+  `_attr_translation_key = "blocking_alarms"` but no translation entry
+  in any of the 16 language files, so HA fell back to the device name
+  ("De'Longhi Eletta Explore") for friendly_name and produced
+  `sensor.de_longhi_eletta_explore_3` because the device name was
+  already taken. The 16 translation files now all carry an explicit
+  `blocking_alarms.name` key, giving the sensor a stable
+  `sensor.<dsn>_blocking_alarms` entity_id and a localized friendly
+  name (en: Blocking Alarms, fr: Alarmes bloquantes, de: Blockierende
+  Alarme, es: Alarmas bloqueantes, it: Allarmi bloccanti, nl: Blokkerende
+  alarmen, pt: Alarmes de bloqueio, ru: Блокирующие тревоги, ja:
+  ブロッキングアラーム, ko: 차단 알람, zh-Hans: 阻止性警报, pl: Alarmy
+  blokujące, sv: Blockerande larm, da: Blokerende alarmer, nb:
+  Blokkerende alarmer, uk: Блокувальні тривоги).
+
 ## [1.6.0-beta.12] — 2026-05-01
 
 ### Added
