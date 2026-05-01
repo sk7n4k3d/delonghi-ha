@@ -241,27 +241,40 @@ OPCODE_WRITE_BEAN_SYSTEM: Final = 0xBB
 BEAN_NAME_MAX_BYTES: Final = 40
 
 # Monitor V2 alarm bit definitions (32-bit word from bytes[7], [8], [12], [13])
+#
+# `blocking: True` marks alarms that prevent the machine from completing
+# Turning On → Ready, or that prevent any brew. The switch entity logs a
+# warning + raises a persistent_notification when async_turn_on is called
+# with one of these active, so the user sees what's wrong instead of
+# wondering why the cafetière stays "Turning On" indefinitely. Non-blocking
+# alarms (Descale, Cleaning, Replace Filter…) are advisories — the machine
+# still operates.
 ALARMS: Final[dict[int, dict[str, Any]]] = {
-    0: {"name": "Water Tank Empty", "icon": "mdi:water-off"},
-    1: {"name": "Grounds Container Full", "icon": "mdi:delete-alert"},
+    0: {"name": "Water Tank Empty", "icon": "mdi:water-off", "blocking": True},
+    1: {"name": "Grounds Container Full", "icon": "mdi:delete-alert", "blocking": True},
     2: {"name": "Descale Needed", "icon": "mdi:water-alert"},
     3: {"name": "Replace Water Filter", "icon": "mdi:filter-remove"},
     4: {"name": "Coffee Ground Too Fine", "icon": "mdi:grain"},
     5: {"name": "Coffee Beans Empty", "icon": "mdi:seed-off"},
-    6: {"name": "Machine Service Required", "icon": "mdi:wrench-clock"},
-    7: {"name": "Heater Probe Failure", "icon": "mdi:thermometer-alert"},
+    6: {"name": "Machine Service Required", "icon": "mdi:wrench-clock", "blocking": True},
+    7: {"name": "Heater Probe Failure", "icon": "mdi:thermometer-alert", "blocking": True},
     8: {"name": "Too Much Coffee", "icon": "mdi:coffee-off"},
-    9: {"name": "Infuser Motor Failure", "icon": "mdi:engine-off"},
-    10: {"name": "Steamer Probe Failure", "icon": "mdi:thermometer-alert"},
-    11: {"name": "Drip Tray Missing", "icon": "mdi:tray-alert"},
-    12: {"name": "Hydraulic Problem", "icon": "mdi:pipe-leak"},
-    13: {"name": "Water Tank Missing", "icon": "mdi:water-off", "inverted": True},
+    9: {"name": "Infuser Motor Failure", "icon": "mdi:engine-off", "blocking": True},
+    10: {"name": "Steamer Probe Failure", "icon": "mdi:thermometer-alert", "blocking": True},
+    11: {"name": "Drip Tray Missing", "icon": "mdi:tray-alert", "blocking": True},
+    12: {"name": "Hydraulic Problem", "icon": "mdi:pipe-leak", "blocking": True},
+    13: {"name": "Water Tank Missing", "icon": "mdi:water-off", "inverted": True, "blocking": True},
     14: {"name": "Clean Milk Knob", "icon": "mdi:broom"},
     15: {"name": "Coffee Beans Empty 2", "icon": "mdi:seed-off"},
     16: {"name": "Cleaning Needed", "icon": "mdi:spray-bottle"},
-    17: {"name": "Bean Hopper Absent", "icon": "mdi:tray-remove"},
-    18: {"name": "Grid Missing", "icon": "mdi:grid", "inverted": True},
+    17: {"name": "Bean Hopper Absent", "icon": "mdi:tray-remove", "blocking": True},
+    18: {"name": "Grid Missing", "icon": "mdi:grid", "inverted": True, "blocking": True},
 }
+
+# Bits flagged as blocking — derived once from ALARMS to avoid repeated dict scans.
+BLOCKING_ALARM_BITS: Final[frozenset[int]] = frozenset(
+    bit for bit, meta in ALARMS.items() if meta.get("blocking") is True
+)
 
 # Machine state values (from MonitorDataV2.f() -> byte[9])
 # OEM model → friendly name mapping (from MachinesModels.json in Coffee Link APK)

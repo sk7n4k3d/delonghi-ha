@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import BLOCKING_ALARM_BITS, DOMAIN
 from .coordinator import DeLonghiCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,6 +107,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # Bean system sensor
     entities.append(DeLonghiBeanSensor(coordinator, dsn, model, device_name, sw_version))
+
+    # Blocking alarms aggregator — surfaces *why* the machine refuses to
+    # complete Turning On (or to brew) instead of leaving the user guessing.
+    entities.append(DeLonghiBlockingAlarmsSensor(coordinator, dsn, model, device_name, sw_version))
 
     # Counter sensors — always create all; unsupported ones show as "unavailable"
     for key, meta in COUNTER_SENSORS.items():
@@ -335,3 +339,58 @@ class DeLonghiBeanSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
 
         attrs["coffee_beans_catalog_count"] = self.coordinator.data.get("coffee_beans_count", 0)
         return attrs
+
+
+class DeLonghiBlockingAlarmsSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
+    """Aggregator sensor for *blocking* alarms — those that prevent the
+    machine from completing Turning On → Ready, or that prevent any brew.
+
+    State = number of blocking alarms currently active.
+    Attributes:
+      - blocking_alarms (list[str]) — human-readable names
+      - blocking_bits   (list[int]) — raw alarm bits, useful for automations
+      - is_blocking_power_on (bool) — True iff at least one blocking alarm is set
+      - all_active_alarms (list[str]) — every active alarm, blocking or not
+    """
+
+    _attr_icon = "mdi:alert-circle"
+
+    def __init__(
+        self,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_blocking_alarms"
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "blocking_alarms"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def native_value(self) -> int:
+        alarms: list[dict[str, Any]] = self.coordinator.data.get("alarms", []) or []
+        return sum(1 for a in alarms if a.get("bit") in BLOCKING_ALARM_BITS)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        alarms: list[dict[str, Any]] = self.coordinator.data.get("alarms", []) or []
+        blocking = [a for a in alarms if a.get("bit") in BLOCKING_ALARM_BITS]
+        return {
+            "blocking_alarms": [_alarm_label(a) for a in blocking],
+            "blocking_bits": [a.get("bit") for a in blocking],
+            "is_blocking_power_on": bool(blocking),
+            "all_active_alarms": [_alarm_label(a) for a in alarms],
+        }
+
+
+def _alarm_label(alarm: dict[str, Any]) -> str:
+    """Resolve a human-readable label for an alarm dict."""
+    name = alarm.get("name")
+    if isinstance(name, str) and name:
+        return name
+    bit = alarm.get("bit")
+    return f"bit{bit}" if bit is not None else "unknown"
