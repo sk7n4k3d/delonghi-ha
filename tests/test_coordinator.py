@@ -823,3 +823,54 @@ def _ensure_event_loop():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     yield
+
+
+class TestFastPollWindow:
+    """v1.6.0-beta.14: brew button presses must trigger a temporary 5s
+    polling interval so transient machine_state values (Brewing,
+    Frothing milk, Rinsing) are observable. Without this the default
+    60s polling misses every brew cycle entirely."""
+
+    def test_default_interval_is_normal(self):
+        coord, _, _ = _make_coord()
+        # The cached "normal" interval is the 60s baseline. update_interval
+        # itself lives on DataUpdateCoordinator and may be stubbed in tests.
+        assert coord._normal_update_interval.total_seconds() == 60
+        assert coord._fast_poll_until is None
+
+    def test_request_fast_poll_shrinks_interval(self):
+        coord, _, _ = _make_coord()
+        coord.request_fast_poll(duration_s=90.0, interval_s=5.0)
+        assert coord.update_interval.total_seconds() == 5
+        assert coord._fast_poll_until is not None
+
+    def test_request_fast_poll_extends_existing_window(self):
+        coord, _, _ = _make_coord()
+        coord.request_fast_poll(duration_s=30.0, interval_s=5.0)
+        first_deadline = coord._fast_poll_until
+        coord.request_fast_poll(duration_s=120.0, interval_s=5.0)
+        second_deadline = coord._fast_poll_until
+        assert second_deadline > first_deadline
+        # Interval still 5s
+        assert coord.update_interval.total_seconds() == 5
+
+    def test_request_fast_poll_rejects_zero_or_negative(self):
+        coord, _, _ = _make_coord()
+        coord.request_fast_poll(duration_s=0, interval_s=5)
+        assert coord._fast_poll_until is None
+        coord.request_fast_poll(duration_s=10, interval_s=0)
+        assert coord._fast_poll_until is None
+
+    def test_window_expiry_reverts_interval(self):
+        coord, _, api = _make_coord()
+        # Arm a tiny window then force-expire it
+        coord.request_fast_poll(duration_s=1.0, interval_s=5.0)
+        # Stub the expiry by pushing the deadline into the past
+        coord._fast_poll_until = monotonic() - 1.0
+
+        # Run one update cycle — the cleanup branch must restore 60s
+        from custom_components.delonghi_coffee.const import SCAN_INTERVAL_SECONDS
+
+        _run(coord._async_update_data())
+        assert coord.update_interval.total_seconds() == SCAN_INTERVAL_SECONDS
+        assert coord._fast_poll_until is None

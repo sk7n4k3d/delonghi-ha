@@ -220,15 +220,33 @@ class TestProfileSensor:
         assert s._attr_translation_key == "active_profile"
         assert s._attr_icon == "mdi:account"
 
-    def test_native_value_uses_monitor_profile_first(self):
+    def test_native_value_uses_cloud_active_profile_first(self):
+        """Cloud `active_profile` is authoritative; monitor `profile` can lag.
+
+        Regression: the sensor previously preferred the monitor byte and
+        produced "Sasha" on Bastien's machine while the user-selected profile
+        on the machine UI was actually #3 ("fuck claud"), because the monitor
+        kept reporting the last *brewed* profile."""
         s = self._make(
             {
-                "profile": 2,
-                "active_profile": 3,
+                "profile": 2,  # monitor stale (last brew)
+                "active_profile": 3,  # cloud current selection
                 "profiles": {2: {"name": "Sasha"}, 3: {"name": "Anna"}},
             }
         )
-        # profile (monitor) wins over active_profile (cloud)
+        # Cloud wins — monitor byte is ignored when cloud has a real value.
+        assert s.native_value == "Anna"
+
+    def test_native_value_falls_back_to_monitor_when_cloud_missing(self):
+        """If the cloud property hasn't refreshed yet (cold start), the
+        monitor byte is the next-best signal."""
+        s = self._make(
+            {
+                "profile": 2,
+                "active_profile": 0,  # cloud not yet populated
+                "profiles": {2: {"name": "Sasha"}},
+            }
+        )
         assert s.native_value == "Sasha"
 
     def test_native_value_falls_back_to_cloud_when_monitor_zero(self):
@@ -242,7 +260,8 @@ class TestProfileSensor:
         assert s.native_value == "Anna"
 
     def test_native_value_default_label_when_unnamed(self):
-        s = self._make({"profile": 4, "profiles": {4: {}}})
+        # profiles dict has the entry but no name → labeled fallback
+        s = self._make({"active_profile": 4, "profiles": {4: {}}})
         assert s.native_value == "Profile 4"
 
     def test_native_value_default_label_when_unknown_profile(self):
@@ -253,6 +272,7 @@ class TestProfileSensor:
         s = self._make(
             {
                 "active_profile": 2,
+                "profile": 1,  # monitor surfaced for support diagnostics
                 "profiles": {
                     1: {"name": "A", "color": "red", "figure": "1"},
                     2: {"name": "B", "color": "blue", "figure": "2"},
@@ -261,10 +281,32 @@ class TestProfileSensor:
         )
         attrs = s.extra_state_attributes
         assert attrs["active_profile_id"] == 2
+        # Monitor byte is also exposed so users / support can detect drift
+        assert attrs["monitor_profile_id"] == 1
         assert attrs["profile_1_name"] == "A"
         assert attrs["profile_1_color"] == "red"
         assert attrs["profile_1_figure"] == "1"
         assert attrs["profile_2_name"] == "B"
+
+    def test_state_and_attributes_use_same_source(self):
+        """Regression: state and attributes were diverging — state read
+        monitor byte, attributes read cloud, leading to UI showing one
+        profile while attributes claimed another."""
+        s = self._make(
+            {
+                "profile": 1,  # monitor stale
+                "active_profile": 3,  # cloud authoritative
+                "profiles": {1: {"name": "Old"}, 3: {"name": "Current"}},
+            }
+        )
+        state = s.native_value
+        attrs = s.extra_state_attributes
+        # Both surfaces must agree on the same profile (id 3 = "Current")
+        assert state == "Current"
+        assert attrs["active_profile_id"] == 3
+        assert attrs["profile_3_name"] == "Current"
+        # And the monitor drift is surfaced separately for diagnostics
+        assert attrs["monitor_profile_id"] == 1
 
 
 class TestBeanSensor:

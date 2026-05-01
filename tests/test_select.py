@@ -72,6 +72,31 @@ class TestProfileSelectCurrentOption:
         entity = _entity(_make_coord(profiles={2: {}}, selected=2))
         assert entity.current_option == "Profile 2"
 
+    def test_current_option_falls_back_to_cloud_active_profile(self):
+        """When no manual selection has been made, derive current_option
+        from the cloud `active_profile` so the dropdown reflects the
+        machine UI state."""
+        coord = _make_coord(profiles={3: {"name": "Anna"}}, selected=None)
+        coord.data["active_profile"] = 3
+        entity = _entity(coord)
+        assert entity.current_option == "Anna"
+
+    def test_current_option_falls_back_to_monitor_when_cloud_zero(self):
+        """If cloud value is missing or zero, the monitor byte is the
+        next-best signal — better than None."""
+        coord = _make_coord(profiles={2: {"name": "Sasha"}}, selected=None)
+        coord.data["active_profile"] = 0
+        coord.data["profile"] = 2
+        entity = _entity(coord)
+        assert entity.current_option == "Sasha"
+
+    def test_explicit_selected_profile_overrides_cloud(self):
+        """User-clicked selection beats cloud reading until next refresh."""
+        coord = _make_coord(profiles={1: {"name": "X"}, 3: {"name": "Y"}}, selected=1)
+        coord.data["active_profile"] = 3
+        entity = _entity(coord)
+        assert entity.current_option == "X"
+
 
 class TestProfileSelectSelectOption:
     def test_select_option_by_profile_name_updates_coordinator(self):

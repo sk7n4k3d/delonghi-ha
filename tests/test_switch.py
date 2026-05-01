@@ -96,11 +96,14 @@ def _make_hass():
 
     hass.async_add_executor_job = _run_executor
 
-    def _create_task(coro):
+    def _create_task(coro, *args, **kwargs):
         loop = asyncio.get_event_loop()
         return loop.create_task(coro)
 
     hass.async_create_task = _create_task
+    # async_create_background_task accepts a `name` kwarg in HA core; the tests
+    # only need the task scheduler semantics so we route both to the same stub.
+    hass.async_create_background_task = _create_task
     return hass
 
 
