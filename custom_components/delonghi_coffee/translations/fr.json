@@ -183,6 +183,9 @@
       },
       "computed_total": {
         "name": "Total toutes boissons"
+      },
+      "blocking_alarms": {
+        "name": "Alarmes bloquantes"
       }
     },
     "binary_sensor": {

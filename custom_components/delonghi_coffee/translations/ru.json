@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "Дорожные кружки"
+      },
+      "blocking_alarms": {
+        "name": "Блокирующие тревоги"
       }
     },
     "binary_sensor": {

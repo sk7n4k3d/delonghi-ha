@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "여행용 머그"
+      },
+      "blocking_alarms": {
+        "name": "차단 알람"
       }
     },
     "binary_sensor": {

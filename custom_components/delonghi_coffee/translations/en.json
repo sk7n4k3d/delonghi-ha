@@ -193,6 +193,9 @@
       },
       "computed_total": {
         "name": "Total All Beverages"
+      },
+      "blocking_alarms": {
+        "name": "Blocking Alarms"
       }
     },
     "binary_sensor": {

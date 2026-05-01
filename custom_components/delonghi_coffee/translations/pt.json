@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "Canecas de viagem"
+      },
+      "blocking_alarms": {
+        "name": "Alarmes de bloqueio"
       }
     },
     "binary_sensor": {

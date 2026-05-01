@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "Reisekopper"
+      },
+      "blocking_alarms": {
+        "name": "Blokkerende alarmer"
       }
     },
     "binary_sensor": {

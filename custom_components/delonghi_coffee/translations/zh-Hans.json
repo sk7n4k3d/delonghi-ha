@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "旅行杯"
+      },
+      "blocking_alarms": {
+        "name": "阻止性警报"
       }
     },
     "binary_sensor": {

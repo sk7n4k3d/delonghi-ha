@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "Tazas de viaje"
+      },
+      "blocking_alarms": {
+        "name": "Alarmas bloqueantes"
       }
     },
     "binary_sensor": {

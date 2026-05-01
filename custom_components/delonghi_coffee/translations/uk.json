@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "Дорожні чашки"
+      },
+      "blocking_alarms": {
+        "name": "Блокувальні тривоги"
       }
     },
     "binary_sensor": {

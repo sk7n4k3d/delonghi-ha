@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "トラベルマグ"
+      },
+      "blocking_alarms": {
+        "name": "ブロッキングアラーム"
       }
     },
     "binary_sensor": {

@@ -183,6 +183,9 @@
       },
       "travel_mug": {
         "name": "Reisebecher"
+      },
+      "blocking_alarms": {
+        "name": "Blockierende Alarme"
       }
     },
     "binary_sensor": {
