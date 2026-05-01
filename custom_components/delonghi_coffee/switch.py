@@ -178,7 +178,10 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             # we never have two retries racing against the machine.
             if self._retry_task is not None and not self._retry_task.done():
                 self._retry_task.cancel()
-            self._retry_task = self.hass.async_create_task(self._retry_power_on())
+            self._retry_task = self.hass.async_create_background_task(
+                self._retry_power_on(),
+                name=f"delonghi_power_retry_{self._dsn}",
+            )
 
     def _announce_blocking_alarms_for_power_on(self) -> None:
         """Surface blocking alarms before sending POWER_ON_CMD.
