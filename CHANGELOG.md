@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.11] — 2026-05-01
+
+### Fixed
+- **Power switch — turn_off cancels pending power-on retry, retry guards on
+  user intent**. Sequence reproduced 2026-05-01 11:18→11:21 in HA log: a quick
+  `turn_on` followed ~4s later by `turn_off` left the background `_retry_task`
+  scheduled by `turn_on` armed. Three minutes after the original `turn_on`,
+  the retry observed `machine_state=Off` (because `turn_off` had since
+  succeeded), classified the original wake as failed, and re-sent
+  `POWER_ON_CMD`. The machine, dutifully, switched back on against the user's
+  explicit intent. Two complementary guards now prevent the regression:
+  - `async_turn_off` cancels `_retry_task` if pending — the user just changed
+    their mind, no point in racing them.
+  - `_retry_power_on` aborts early when `_last_commanded_on is not True` — if
+    a `turn_off` slipped through between the `turn_on` and the retry firing,
+    the desired state is Off, not "wake again".
+  Locked by `test_turn_off_cancels_pending_power_on_retry`,
+  `test_turn_off_handles_no_pending_retry`,
+  `test_retry_aborts_after_user_turned_off`,
+  `test_retry_proceeds_when_last_commanded_still_on` (4 tests, all green).
+
 ## [1.6.0-beta.10] — 2026-04-29
 
 ### Fixed
