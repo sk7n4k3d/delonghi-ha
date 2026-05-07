@@ -31,6 +31,7 @@ from .const import (
     REQUEST_TIMEOUT,
     RETRY_COUNT,
     RETRY_DELAY,
+    TEMPLATE_BEVERAGE_KEYS,
     TRANSCODE_TABLE_URL,
 )
 from .logger import ApiTimer, RateLimitTracker, sanitize
@@ -1891,7 +1892,12 @@ class DeLonghiApi:
                 # PrimaDonna format: rest is just the key (profile is before _rec_)
                 bev = rest
 
-            if bev and not bev.isdigit() and not bev.startswith("custom_"):
+            if (
+                bev
+                and not bev.isdigit()
+                and not bev.startswith("custom_")
+                and bev not in TEMPLATE_BEVERAGE_KEYS
+            ):
                 beverages.add(bev)
 
         _LOGGER.debug("parse_available_beverages: found %d beverages: %s", len(beverages), sorted(beverages))

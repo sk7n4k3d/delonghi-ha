@@ -186,6 +186,15 @@ BEVERAGES: Final[dict[str, dict[str, str]]] = {
     "custom_6": {"name": "Custom Drink 6", "icon": "mdi:star-outline", "drink_id": "235"},
 }
 
+# Firmware-side recipe template keys exposed under the same `dXXX_rec_<key>`
+# naming as real drinks. They carry parameter ranges (default*) or the Bean
+# System current-grain template (bs_recipe) — pressing a brew packet against
+# them triggers undefined behaviour on the machine. Filtered out at discovery
+# so they never reach the button platform.
+TEMPLATE_BEVERAGE_KEYS: Final[frozenset[str]] = frozenset(
+    {"default", "bs_recipe", *(f"default_{n}" for n in range(1, 8))}
+)
+
 # ContentStack drink_id → recipe key reverse mapping (for beverage discovery)
 DRINK_ID_TO_KEY: Final[dict[int, str]] = {
     int(meta["drink_id"]): key for key, meta in BEVERAGES.items() if "drink_id" in meta

@@ -148,3 +148,101 @@ class TestBeverageEdgeCases:
         bevs = self.api.parse_available_beverages(props)
         assert "a_cb_coffee" in bevs
         assert "d_cb_latte" in bevs
+
+
+class TestFirmwareTemplateKeysFiltered:
+    """Firmware template recipes (`default`, `default_1..7`, `bs_recipe`) are
+    template carriers, not brewable beverages.
+
+    The cloud surfaces them under the same `dXXX_rec_<key>` naming as real
+    drinks, so without filtering they ended up in `coordinator.beverages` and
+    bled into the button platform — creating buttons that, if pressed, would
+    fire `brew_beverage` against a template payload (undefined firmware
+    behaviour: silent reject, weird brew, or service mode).
+
+    These tests lock the contract that template keys never leak through
+    discovery, regardless of profile / naming convention.
+    """
+
+    def setup_method(self):
+        self.api = DeLonghiApi.__new__(DeLonghiApi)
+        self.api._custom_recipe_names = {}
+
+    def test_bare_default_key_is_filtered(self):
+        """d{num}_rec_default → 'default' must not surface as a beverage."""
+        props = {"d302_rec_2_default": {"value": "base64data"}}
+        bevs = self.api.parse_available_beverages(props)
+        assert "default" not in bevs
+
+    def test_numbered_default_keys_are_filtered(self):
+        """default_1 .. default_7 are firmware-side parameter ranges, not drinks."""
+        props = {f"d302_rec_2_default_{n}": {"value": "base64data"} for n in range(1, 8)}
+        bevs = self.api.parse_available_beverages(props)
+        for n in range(1, 8):
+            assert f"default_{n}" not in bevs, f"default_{n} leaked into discovery"
+
+    def test_bs_recipe_is_filtered(self):
+        """`bs_recipe` is the Bean System current-grain template, not a brew target."""
+        props = {"d302_rec_2_bs_recipe": {"value": "base64data"}}
+        bevs = self.api.parse_available_beverages(props)
+        assert "bs_recipe" not in bevs
+
+    def test_template_filter_applies_to_primadonna_naming(self):
+        """PrimaDonna `d{num}_{profile}_rec_{key}` layout is filtered too."""
+        props = {
+            "d060_2_rec_default": {"value": "base64data"},
+            "d061_2_rec_default_1": {"value": "base64data"},
+            "d062_2_rec_bs_recipe": {"value": "base64data"},
+        }
+        bevs = self.api.parse_available_beverages(props)
+        assert "default" not in bevs
+        assert "default_1" not in bevs
+        assert "bs_recipe" not in bevs
+
+    def test_template_filter_applies_to_default_profile_layout(self):
+        """`d{num}_rec_{key}` layout (profile-less) is filtered too."""
+        props = {
+            "d060_rec_default": {"value": "base64data"},
+            "d061_rec_default_3": {"value": "base64data"},
+            "d062_rec_bs_recipe": {"value": "base64data"},
+        }
+        bevs = self.api.parse_available_beverages(props)
+        assert bevs == []
+
+    def test_real_drinks_alongside_templates_pass_through(self):
+        """Templates dropped, real drinks kept in the same payload."""
+        props = {
+            "d302_rec_2_espresso": {"value": "base64data"},
+            "d302_rec_2_default": {"value": "base64data"},
+            "d302_rec_2_default_1": {"value": "base64data"},
+            "d302_rec_2_bs_recipe": {"value": "base64data"},
+            "d302_rec_2_cappuccino": {"value": "base64data"},
+        }
+        bevs = self.api.parse_available_beverages(props)
+        assert "espresso" in bevs
+        assert "cappuccino" in bevs
+        assert "default" not in bevs
+        assert "default_1" not in bevs
+        assert "bs_recipe" not in bevs
+
+    def test_keys_starting_with_default_but_not_template_pass(self):
+        """A real drink whose key happens to start with 'default' (none today)
+        is not falsely matched. The filter is exact-match against the constant set."""
+        props = {"d302_rec_2_defaulted": {"value": "base64data"}}
+        bevs = self.api.parse_available_beverages(props)
+        # 'defaulted' is not in TEMPLATE_BEVERAGE_KEYS, so it stays.
+        assert "defaulted" in bevs
+
+    def test_template_constant_set_locks_membership(self):
+        """const.TEMPLATE_BEVERAGE_KEYS exposes the canonical set so other
+        modules (button.py warnings, diagnostics) can reuse it."""
+        from custom_components.delonghi_coffee.const import TEMPLATE_BEVERAGE_KEYS
+
+        assert "default" in TEMPLATE_BEVERAGE_KEYS
+        assert "bs_recipe" in TEMPLATE_BEVERAGE_KEYS
+        for n in range(1, 8):
+            assert f"default_{n}" in TEMPLATE_BEVERAGE_KEYS
+        # The set is the exact contract — no surprise members.
+        assert frozenset(
+            {"default", "bs_recipe", *(f"default_{n}" for n in range(1, 8))}
+        ) == TEMPLATE_BEVERAGE_KEYS
