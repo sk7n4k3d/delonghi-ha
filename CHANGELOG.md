@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.15] — 2026-05-08
+
+### Fixed
+
+- **Firmware recipe templates leaked into beverage discovery**. The cloud
+  surfaces `default`, `default_1..7` and `bs_recipe` under the same
+  `dXXX_rec_<key>` naming as real drinks, so `parse_available_beverages`
+  added them to `coordinator.beverages` and the button platform created
+  phantom brew buttons for them. Pressing one would fire `brew_beverage`
+  against a template payload — undefined firmware behaviour (silent
+  reject, off-recipe brew, or service mode entry). Side effect: removes
+  the recurring `Unknown beverage keys [...]` log warning several testers
+  (Bastien on Eletta Explore, @JanKraslice on ECAM610.74) hit on every
+  full refresh. New `const.TEMPLATE_BEVERAGE_KEYS` exposes the canonical
+  set so other surfaces (diagnostics, button platform warnings) can
+  reuse it without duplicating the list. Filter is exact-match — a real
+  drink starting with `default` (none today, hedging) is not falsely
+  excluded. Locked by 7 regression tests in
+  `TestFirmwareTemplateKeysFiltered`, covering Eletta `dXXX_rec_<P>_<K>`,
+  PrimaDonna Soul `dXXX_<P>_rec_<K>` and the profile-less `dXXX_rec_<K>`
+  layouts.
+
+### Internals
+
+- `cryptography` minimum bumped from `>=47.0.0` to `>=48.0.0`
+  (Dependabot #26, automated tests green).
+
 ## [1.6.0-beta.14] — 2026-05-01
 
 ### Fixed
