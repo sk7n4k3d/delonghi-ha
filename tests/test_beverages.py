@@ -243,6 +243,4 @@ class TestFirmwareTemplateKeysFiltered:
         for n in range(1, 8):
             assert f"default_{n}" in TEMPLATE_BEVERAGE_KEYS
         # The set is the exact contract — no surprise members.
-        assert frozenset(
-            {"default", "bs_recipe", *(f"default_{n}" for n in range(1, 8))}
-        ) == TEMPLATE_BEVERAGE_KEYS
+        assert frozenset({"default", "bs_recipe", *(f"default_{n}" for n in range(1, 8))}) == TEMPLATE_BEVERAGE_KEYS
