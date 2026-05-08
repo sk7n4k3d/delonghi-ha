@@ -150,32 +150,102 @@ class TestAssumedAndIsOn:
         assert sw._monitor_stale_count == 0
 
     def test_stale_monitor_falls_back_to_assumed(self):
-        """3+ consecutive contradictions from monitor → trust assumed state."""
+        """3+ consecutive contradictions from monitor → trust assumed state.
+
+        A "tick" is one coordinator refresh: HA invokes
+        ``_handle_coordinator_update`` once per refresh and the staleness
+        machine should advance exactly once. ``is_on`` is a *property* and
+        can be read many times by HA (state-class evaluation, automations,
+        renderers) — those repeated reads must NOT advance the counter.
+        """
         sw = _make_switch()
         sw._assumed_on = True
         sw._last_commanded_on = True
         # Monitor keeps saying Off — contradicts our command
         sw.coordinator.data = {"machine_state": "Off"}
         # Tick 1: contradiction starts
-        _ = sw.is_on
+        sw._handle_coordinator_update()
         assert sw._monitor_stale_count == 1
         # Tick 2
-        _ = sw.is_on
+        sw._handle_coordinator_update()
         assert sw._monitor_stale_count == 2
         # Tick 3: stale threshold reached, assumed state takes over
-        result = sw.is_on
+        sw._handle_coordinator_update()
         assert sw._monitor_stale_count == 3
-        assert result is True  # assumed_on=True wins
+        assert sw.is_on is True  # assumed_on=True wins
 
     def test_monitor_state_change_resets_stale_count(self):
         """If monitor state changes, the stale counter resets."""
         sw = _make_switch()
         sw._last_commanded_on = True
         sw.coordinator.data = {"machine_state": "Off"}
-        _ = sw.is_on  # count=1
+        sw._handle_coordinator_update()  # tick 1, count=1
         sw.coordinator.data = {"machine_state": "Going to sleep"}
-        _ = sw.is_on  # state changed, count resets to 1
+        sw._handle_coordinator_update()  # state changed, count resets to 1
         assert sw._monitor_stale_count == 1
+
+
+class TestIsOnIdempotency:
+    """B1 regression: reading the ``is_on`` property must not mutate state.
+
+    HA reads ``is_on`` multiple times per coordinator refresh (renderers,
+    state-class evaluation, automations referencing the entity). Before
+    this fix, each read advanced ``_monitor_stale_count`` and could clear
+    ``_last_commanded_on`` prematurely, breaking the staleness machine.
+    """
+
+    def test_is_on_property_does_not_advance_stale_counter(self):
+        """Multiple is_on reads in a single update cycle must keep count stable."""
+        sw = _make_switch()
+        sw._assumed_on = True
+        sw._last_commanded_on = True
+        sw.coordinator.data = {"machine_state": "Off"}
+        # Simulate one HA refresh cycle
+        sw._handle_coordinator_update()
+        assert sw._monitor_stale_count == 1
+        # HA renders the entity 5 times — none must advance the counter
+        for _ in range(5):
+            _ = sw.is_on
+        assert sw._monitor_stale_count == 1, "is_on read mutated _monitor_stale_count — should be a pure read"
+
+    def test_is_on_does_not_clear_last_commanded_on_on_repeated_reads(self):
+        """Once the monitor confirms the command, repeated reads must not
+        re-trigger the confirm log path nor reset state spuriously."""
+        sw = _make_switch()
+        sw._last_commanded_on = True
+        sw.coordinator.data = {"machine_state": "Ready"}
+        sw._handle_coordinator_update()
+        # First update clears the commanded flag
+        assert sw._last_commanded_on is None
+        # Setting it back must not be re-cleared by reads alone — only by a
+        # subsequent _handle_coordinator_update with a confirming state.
+        sw._last_commanded_on = True
+        for _ in range(3):
+            _ = sw.is_on
+        assert sw._last_commanded_on is True
+
+    def test_handle_coordinator_update_advances_state_machine(self):
+        """The state machine advances once per coordinator refresh."""
+        sw = _make_switch()
+        sw._last_commanded_on = True
+        sw.coordinator.data = {"machine_state": "Off"}
+        sw._handle_coordinator_update()
+        assert sw._monitor_stale_count == 1
+        sw._handle_coordinator_update()
+        assert sw._monitor_stale_count == 2
+
+    def test_is_on_triggers_reconcile_when_data_changes_outside_handle(self):
+        """If coordinator.data is replaced without _handle_coordinator_update
+        (e.g. test fixtures), the next is_on read still produces the right
+        answer for the new state — backstop for anything bypassing the hook.
+        """
+        sw = _make_switch()
+        sw._last_commanded_on = None
+        sw.coordinator.data = {"machine_state": "Ready"}
+        assert sw.is_on is True
+        # Swap the data dict identity — is_on must reflect the new state.
+        sw.coordinator.data = {"machine_state": "Off"}
+        assert sw.is_on is False
 
     def test_no_command_pending_assumed_tracks_monitor(self):
         sw = _make_switch()
@@ -282,22 +352,37 @@ class TestAsyncTurnOffFlow:
         assert sw._assumed_on is False
         assert sw._last_commanded_on is False
 
-    def test_off_concurrent_call_skipped(self):
+    def test_off_signals_cancel_and_waits_when_lock_held(self):
+        """H-logic-2 follow-up: turn_off no longer silently skips when the
+        lock is already held. It sets the cancel event (so any in-flight
+        wake aborts) and then awaits the lock to send POWER_OFF.
+
+        Earlier behaviour silently dropped the off command — confusing UX.
+        """
         sw = _make_switch()
         hass = _make_hass()
         sw.hass = hass
         sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
         sw._api.send_command = MagicMock()
 
         async def _go():
             await sw._cmd_lock.acquire()
-            try:
-                await sw.async_turn_off()
-            finally:
-                sw._cmd_lock.release()
+            # Schedule turn_off; it will set the cancel event immediately,
+            # then park on lock.acquire(). We release shortly after.
+            off_task = asyncio.create_task(sw.async_turn_off())
+            await asyncio.sleep(0)
+            assert sw._cancel_turn_on.is_set(), "turn_off must set the cancel event before parking on the lock"
+            sw._cmd_lock.release()
+            await asyncio.wait_for(off_task, timeout=2)
 
         asyncio.run(_go())
-        sw._api.send_command.assert_not_called()
+        # POWER_OFF was sent once the lock was free.
+        sw._api.send_command.assert_called_once()
+        from custom_components.delonghi_coffee.const import POWER_OFF_CMD
+
+        called_off = any(POWER_OFF_CMD in args for _, args, _ in sw._api.send_command.mock_calls)
+        assert called_off
 
     def test_off_send_command_failure_raises(self):
         from homeassistant.exceptions import HomeAssistantError
@@ -341,6 +426,59 @@ class TestAsyncTurnOffFlow:
             assert sw._retry_task.cancelled()
 
         asyncio.run(_go())
+
+    def test_turn_off_aborts_in_progress_turn_on_wake(self):
+        """H-logic-2: a turn_off issued during turn_on's wake delay must abort
+        the wake and proceed to send POWER_OFF.
+
+        Before this fix, both turn_on and turn_off shared a single
+        ``_cmd_lock``: turn_on held it for ~15 s during the wake delay, and
+        turn_off would observe ``_cmd_lock.locked() → True`` and return
+        silently with the warning ``Power command already in progress``. The
+        machine warmed up uselessly, and the 3-min retry then re-fired
+        POWER_ON. UX bug observed in real life: "oops, off" within 15 s of
+        "on" was silently ignored.
+        """
+        sw = _make_switch()
+        hass = _make_hass()
+        sw.hass = hass
+        sw.async_write_ha_state = MagicMock()
+        sw._api.ping_connected = MagicMock(return_value=True)
+        sw._api.send_command = MagicMock()
+
+        async def _go():
+            # Schedule turn_on; it will reach the cancellable wake-delay
+            # (asyncio.wait_for on the cancel event with a long timeout)
+            # within microseconds — the executor stubs make ping_connected
+            # synchronous.
+            on_task = asyncio.create_task(sw.async_turn_on())
+            # Yield enough times to let turn_on enter its wait_for park.
+            for _ in range(5):
+                await asyncio.sleep(0)
+            # Now issue turn_off — it must set the cancel event, unblock
+            # turn_on so it returns early, then acquire the lock and send
+            # POWER_OFF.
+            await asyncio.wait_for(sw.async_turn_off(), timeout=2)
+            # Let turn_on finish (it should have aborted before sending POWER_ON)
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.wait_for(on_task, timeout=2)
+
+            # Cleanup any pending retry
+            if sw._retry_task is not None:
+                sw._retry_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await sw._retry_task
+
+        asyncio.run(_go())
+
+        # POWER_OFF must have been sent (the user's intent prevailed).
+        # In current buggy code, turn_off short-circuits → send_command is
+        # called once for POWER_ON only. Fix sends POWER_OFF.
+        from custom_components.delonghi_coffee.const import POWER_OFF_CMD
+
+        sent_off = any(POWER_OFF_CMD in args for _, args, _ in sw._api.send_command.mock_calls)
+        assert sent_off, f"async_turn_off was silently ignored. send_command calls: {sw._api.send_command.mock_calls}"
+        assert sw._last_commanded_on is False
 
     def test_turn_off_handles_no_pending_retry(self):
         """turn_off without a prior turn_on (no _retry_task) must not crash."""

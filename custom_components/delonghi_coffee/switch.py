@@ -70,6 +70,20 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         self._monitor_stale_count: int = 0
         self._last_monitor_state: str | None = None
         self._cmd_lock = asyncio.Lock()
+        # Cooperative cancel signal for the wake-delay window in
+        # ``async_turn_on``. ``async_turn_off`` sets this to abort an
+        # in-progress turn_on before POWER_ON is even sent (H-logic-2).
+        self._cancel_turn_on = asyncio.Event()
+        # Cached state (B1): the staleness machine advances exactly once
+        # per coordinator refresh in ``_handle_coordinator_update``; the
+        # ``is_on`` property reads ``_cached_is_on`` and does NOT mutate
+        # any of ``_monitor_stale_count`` / ``_last_commanded_on`` /
+        # ``_assumed_on`` / ``_last_monitor_state``. Sentinel below tracks
+        # which ``coordinator.data`` identity has been processed so that
+        # a test (or any caller) that swaps the data dict without firing
+        # the coordinator hook still produces a consistent answer.
+        self._cached_is_on: bool = False
+        self._processed_data_id: int | None = None
         # Track the background retry coroutine so it can be cancelled on
         # entity removal — otherwise it survives reloads as an orphan task.
         self._retry_task: asyncio.Task | None = None
@@ -84,17 +98,38 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         """Always True — cloud monitor is unreliable and can show stale state."""
         return True
 
-    @property
-    def is_on(self) -> bool:
-        """Return True if machine is on.
+    def _handle_coordinator_update(self) -> None:
+        """Called once per coordinator refresh. Advance the staleness
+        machine and write the cached ``is_on`` value the property reads.
 
-        Trust the monitor when available. After a power command, detect
-        staleness if the monitor contradicts for 3+ consecutive polls.
+        Bug history (B1, fixed 2026-05-08): the staleness logic used to
+        live inside the ``is_on`` property body and mutated counters on
+        every read. HA reads ``is_on`` multiple times per refresh — the
+        counter advanced too fast, ``_last_commanded_on`` was cleared
+        prematurely, and ``Switch: monitor confirmed`` could fire on
+        spurious reads.
+        """
+        self._reconcile_monitor_state()
+        # CoordinatorEntity's hook calls async_write_ha_state(); replicate
+        # that explicitly so the test harness (which stubs base classes)
+        # exercises the same signal flow as production.
+        self.async_write_ha_state()
+
+    def _reconcile_monitor_state(self) -> None:
+        """Advance the staleness state machine for one update cycle and
+        write the resulting on/off into ``_cached_is_on``.
+
+        Idempotency contract: callers may invoke this at most once per
+        coordinator refresh. The ``is_on`` property uses
+        ``_processed_data_id`` to guarantee that property reads do not
+        re-enter the machine within the same cycle.
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
+        self._processed_data_id = id(self.coordinator.data)
 
         if state == "Unknown":
-            return self._assumed_on
+            self._cached_is_on = self._assumed_on
+            return
 
         if self._last_commanded_on is not None:
             monitor_says_on = state not in ("Off", "Going to sleep")
@@ -112,12 +147,37 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         self._last_monitor_state = state
 
         if self._monitor_stale_count >= _STALE_THRESHOLD and self._last_commanded_on is not None:
-            return self._assumed_on
+            self._cached_is_on = self._assumed_on
+            return
 
         result = state not in ("Off", "Going to sleep")
         if self._last_commanded_on is None:
             self._assumed_on = result
-        return result
+        self._cached_is_on = result
+
+    @property
+    def is_on(self) -> bool:
+        """Return cached on/off computed by ``_reconcile_monitor_state``.
+
+        Reading is *pure*: no state mutation. If a caller swaps
+        ``coordinator.data`` without going through
+        ``_handle_coordinator_update`` (test fixtures, manual harness),
+        a single reconcile pass runs lazily so the answer reflects the
+        new data — but subsequent reads against the same data identity
+        return the cached value with zero side effects.
+
+        Special case: when the coordinator state is ``Unknown`` we have
+        no monitor signal at all, so we return the live ``_assumed_on``
+        value (which a turn_on/turn_off updates synchronously). Caching
+        the assumed value would lag behind a state change applied
+        between two refreshes.
+        """
+        state = self.coordinator.data.get("machine_state", "Unknown")
+        if state == "Unknown":
+            return self._assumed_on
+        if self._processed_data_id != id(self.coordinator.data):
+            self._reconcile_monitor_state()
+        return self._cached_is_on
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Power on the machine.
@@ -139,19 +199,34 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         # while the user wonders why nothing happens.
         self._announce_blocking_alarms_for_power_on()
 
+        # Arm the cooperative cancel signal so async_turn_off can abort
+        # this turn_on if the user changes their mind during the wake delay.
+        self._cancel_turn_on.clear()
+
         async with self._cmd_lock:
             _LOGGER.info("Powering on %s", self._dsn)
             try:
-                # Phase 1: Wake ping + delay (like app: ping → 15s wait)
+                # Phase 1: Wake ping + cancellable delay (like app: ping → 15s wait)
                 # Fallback to request_monitor if ping unsupported (PrimaDonna Soul et al.)
                 try:
                     ping_ok = await self.hass.async_add_executor_job(self._api.ping_connected, self._dsn)
                     if not ping_ok:
                         await self.hass.async_add_executor_job(self._api.request_monitor, self._dsn)
                     _LOGGER.debug("Wake sent, waiting %.0fs", _WAKE_DELAY)
-                    await asyncio.sleep(_WAKE_DELAY)
                 except (DeLonghiApiError, DeLonghiAuthError):
                     _LOGGER.debug("Wake failed, sending power ON anyway")
+
+                # Cancellable wake delay (H-logic-2): wait_for returns when
+                # the cancel event fires (user issued turn_off), and times out
+                # normally otherwise. Either path proceeds — but the
+                # event-fire path aborts the rest of turn_on so POWER_ON is
+                # never sent against the user's intent.
+                try:
+                    await asyncio.wait_for(self._cancel_turn_on.wait(), timeout=_WAKE_DELAY)
+                    _LOGGER.info("Power ON aborted by user during wake delay")
+                    return
+                except TimeoutError:
+                    pass  # wake delay completed normally (asyncio.TimeoutError aliased since 3.11)
 
                 # Phase 2: Power ON command
                 if not await self.coordinator.send_command_lan(POWER_ON_CMD):
@@ -267,10 +342,15 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             _LOGGER.debug("Power ON confirmed by monitor (%s), no retry needed", state)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Power off the machine (standby)."""
-        if self._cmd_lock.locked():
-            _LOGGER.warning("Power command already in progress, ignoring")
-            return
+        """Power off the machine (standby).
+
+        H-logic-2: if a turn_on is in progress (parked in its 15 s wake
+        delay), set the cooperative cancel event so the wake aborts and
+        POWER_ON is never sent. Then acquire the lock and send POWER_OFF.
+        """
+        # Signal any in-flight turn_on to abort its wake delay. If no
+        # turn_on is in flight this is a no-op.
+        self._cancel_turn_on.set()
 
         async with self._cmd_lock:
             _LOGGER.info("Powering off %s", self._dsn)
