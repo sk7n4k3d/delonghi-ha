@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+import aiohttp
 import pytest
 from aiohttp import web
 
@@ -128,5 +129,93 @@ def test_login_uses_custom_api_key_when_pool_is_eu_us() -> None:
         finally:
             await api.close()
             await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+# -- H-daedalus-1 + H-daedalus-2 (audit 2026-05-08) --------------------------
+
+
+def test_400093_message_includes_apikey_fingerprint() -> None:
+    """When Gigya rejects an apiKey with errorCode 400093, the raised
+    ``DaedalusAuthError`` must include the apiKey fingerprint (non-secret,
+    public OAuth-client-id-equivalent) so a remote bug reporter can
+    confirm whether their installed const matches the source-of-truth.
+    Live ticket: Issue #18 (stivxgamer, Eletta Ultra)."""
+
+    async def _run() -> None:
+        async def login(request: web.Request) -> web.Response:
+            return web.json_response({"errorCode": 400093, "errorMessage": "Invalid ApiKey parameter"})
+
+        runner, base = await _start_gigya({"/accounts.login": login})
+        try:
+            api = DaedalusApi(gigya_base_url=base)
+            with pytest.raises(DaedalusAuthError) as excinfo:
+                # Pass a known-truncated apiKey so the test asserts the
+                # exact length the helper surfaces.
+                await api.login_and_get_jwt(email="u", password="p", api_key="4_truncated")
+        finally:
+            await api.close()
+            await runner.cleanup()
+
+        msg = str(excinfo.value)
+        assert "400093" in msg
+        assert "len:11" in msg
+        assert "sha1[:8]=" in msg
+
+    asyncio.run(_run())
+
+
+def test_send_command_raises_daedalus_error_on_reserved_param_key() -> None:
+    """H-daedalus-1: build_command_frame guards against caller-supplied
+    params overriding Message/ConnectionId/RequestId. send_command must
+    surface that as DaedalusError (caller bug, not transport failure),
+    so a future service handler can distinguish wire-format violations
+    from network blips.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from custom_components.delonghi_daedalus.api import DaedalusError, DaedalusLanConnection
+
+    async def _run() -> None:
+        ws = MagicMock()
+        ws.send_str = AsyncMock()
+        conn = DaedalusLanConnection(ws=ws, connection_id=1)
+        with pytest.raises(DaedalusError, match="LAN command frame build rejected"):
+            # ``Message`` is a reserved key — caller cannot override it.
+            await conn.send_command(message="Brew", params={"Message": "Hijack"})
+        # And the malformed call must NOT have hit the WebSocket.
+        ws.send_str.assert_not_called()
+
+    asyncio.run(_run())
+
+
+def test_connect_lan_transport_error_does_not_raise_auth_error() -> None:
+    """H-daedalus-2: a network-level failure during the AUTH handshake
+    (TLS abort, peer reset, read timeout) must surface as
+    ``DaedalusConnectionError`` — NOT ``DaedalusAuthError`` — so the
+    coordinator does not interpret it as "JWT stale, refresh via Gigya".
+    Earlier behaviour turned a flaky Wi-Fi link into an unbounded Gigya
+    refresh storm.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from custom_components.delonghi_daedalus.api import DaedalusConnectionError
+
+    async def _run() -> None:
+        api = DaedalusApi()
+        try:
+            ws = MagicMock()
+            ws.send_str = AsyncMock(side_effect=aiohttp.ClientConnectionError("peer reset"))
+            ws.close = AsyncMock()
+
+            session = MagicMock()
+            session.ws_connect = AsyncMock(return_value=ws)
+            with patch.object(api, "_get_session", return_value=session):
+                with pytest.raises(DaedalusConnectionError, match="transport failed"):
+                    await api.connect_lan(host="192.168.1.42", serial_number="SN1", jwt="eyJ.eyJ.x")
+                ws.close.assert_awaited()
+        finally:
+            await api.close()
 
     asyncio.run(_run())

@@ -14,6 +14,7 @@ frame on the LAN WebSocket (wss://<ip>/ws/lan2lan).
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 GIGYA_BASE_URL = "https://accounts.eu1.gigya.com"
@@ -90,3 +91,23 @@ def _check_gigya_error(payload: dict[str, Any]) -> None:
     if error_code:
         message = payload.get("errorMessage") or payload.get("errorDetails") or "unknown"
         raise GigyaAuthError(f"Gigya error {error_code}: {message}")
+
+
+def apikey_fingerprint(api_key: str) -> str:
+    """Return a non-secret fingerprint identifying an apiKey.
+
+    Format: ``len:<N> sha1[:8]=<hex>``. Safe to log because:
+
+    - apiKey is a public OAuth-client-id-equivalent (extracted verbatim from
+      the My Coffee Lounge APK manifest, ships in every install of the app).
+    - The fingerprint adds nothing beyond what a hash of the public string
+      would, but makes truncation / typos / wrong-pool selection visible
+      from a remote bug report without asking the user to paste the key.
+
+    Used for the H-daedalus-4 diagnostics surface — when Gigya rejects an
+    apiKey with errorCode 400093, the fingerprint disambiguates between
+    "the source const is wrong" (length differs from known pools) and
+    "the user's install has a corrupted copy".
+    """
+    digest = hashlib.sha1(api_key.encode("ascii"), usedforsecurity=False).hexdigest()[:8]
+    return f"len:{len(api_key)} sha1[:8]={digest}"

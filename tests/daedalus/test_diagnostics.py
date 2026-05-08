@@ -85,13 +85,29 @@ def test_jwt_session_token_redacted() -> None:
 
 
 def test_non_secret_fields_pass_through() -> None:
-    """Pool, machine_name, version, etc. must remain visible for triage."""
+    """Pool and version must remain visible for triage."""
     entry = _make_entry(data=_full_data())
     hass = _make_hass_with(entry.entry_id, None)
     result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
     assert result["entry"]["data"]["pool"] == "EU"
-    assert result["entry"]["data"]["machine_name"] == "SN1234567890"
     assert result["entry"]["version"] == 1
+
+
+def test_machine_name_is_redacted_because_it_holds_serial_number() -> None:
+    """H-daedalus-3: ``machine_name`` is set to the serial number at
+    config-entry creation (config_flow.py:179: ``CONF_MACHINE_NAME: serial``).
+    The audit caught this — ``serial_number`` and ``SerialNo`` were
+    redacted but the same value also lived under ``machine_name`` and
+    leaked verbatim into uploaded diag dumps. Combined with a known
+    cloud bug, the SN is what De'Longhi needs to issue an OTA / target
+    a device on AWS IoT Core, so it qualifies as PII for support
+    posts on a public tracker.
+    """
+    entry = _make_entry(data=_full_data())
+    hass = _make_hass_with(entry.entry_id, None)
+    result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+    assert result["entry"]["data"]["machine_name"] == "**REDACTED**"
+    assert result["entry"]["data"]["serial_number"] == "**REDACTED**"
 
 
 def test_coordinator_state_included_when_present() -> None:
@@ -152,7 +168,15 @@ def test_device_diagnostics_returns_same_payload() -> None:
 
 def test_redact_keys_covers_high_value_secrets() -> None:
     """Sanity check on the REDACT_KEYS set — guard against accidental removals."""
-    must_be_redacted = {"password", "jwt", "session_token", "session_secret", "AuthToken", "apiKey"}
+    must_be_redacted = {
+        "password",
+        "jwt",
+        "session_token",
+        "session_secret",
+        "AuthToken",
+        "apiKey",
+        "machine_name",  # H-daedalus-3: holds the SN by default
+    }
     missing = must_be_redacted - diagnostics.REDACT_KEYS
     assert not missing, f"REDACT_KEYS missing high-value secrets: {missing}"
 

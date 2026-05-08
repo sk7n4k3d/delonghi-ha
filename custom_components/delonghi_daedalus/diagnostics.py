@@ -34,6 +34,11 @@ REDACT_KEYS: set[str] = {
     "signatureTimestamp",
     "serial_number",
     "SerialNo",
+    # H-daedalus-3 (audit 2026-05-08): config_flow stores the serial number
+    # under CONF_MACHINE_NAME too (see config_flow.py:179). Without this
+    # entry the SN leaked verbatim into uploaded diag dumps via the
+    # ``machine_name`` field even though ``serial_number`` was scrubbed.
+    "machine_name",
     "host",
     "lan_ip",
 }

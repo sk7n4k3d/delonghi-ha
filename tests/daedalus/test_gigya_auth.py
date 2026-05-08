@@ -87,3 +87,34 @@ def test_parse_jwt_response_raises_when_token_missing() -> None:
     payload = {"errorCode": 0}
     with pytest.raises(GigyaAuthError):
         parse_jwt_response(payload)
+
+
+# -- H-daedalus-4 (audit 2026-05-08) -----------------------------------------
+
+
+def test_apikey_fingerprint_format() -> None:
+    """``apikey_fingerprint`` returns ``len:N sha1[:8]=<hex>`` — a non-secret
+    handle that survives log scrubbing and lets a remote bug reporter
+    confirm whether their installed apiKey matches the source-of-truth.
+    """
+    from custom_components.delonghi_daedalus.gigya_auth import apikey_fingerprint
+
+    fp = apikey_fingerprint("4_mXSplGaqrFT0H88TAjqJuA")
+    assert fp.startswith("len:24 ")
+    assert "sha1[:8]=" in fp
+    # 8 hex chars after the prefix
+    suffix = fp.split("sha1[:8]=", 1)[1]
+    assert len(suffix) == 8
+    assert all(c in "0123456789abcdef" for c in suffix)
+
+
+def test_apikey_fingerprint_changes_on_truncation() -> None:
+    """A truncated key gets a different fingerprint — proves the helper
+    can flag the live H-daedalus-4 hypothesis (HACS mirror corruption)."""
+    from custom_components.delonghi_daedalus.gigya_auth import apikey_fingerprint
+
+    full = apikey_fingerprint("4_mXSplGaqrFT0H88TAjqJuA")
+    truncated = apikey_fingerprint("4_mXSplGaqrFT0H88")
+    assert full != truncated
+    assert "len:24" in full
+    assert "len:17" in truncated

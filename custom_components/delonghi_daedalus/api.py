@@ -19,6 +19,7 @@ import aiohttp
 from .const import GIGYA_API_KEY_PROD, GIGYA_BASE_URL
 from .gigya_auth import (
     GigyaAuthError,
+    apikey_fingerprint,
     build_jwt_request_params,
     build_login_params,
     parse_jwt_response,
@@ -38,6 +39,21 @@ from .lan_protocol import (
 _LOGGER = logging.getLogger(__name__)
 
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+
+def _augment_400093(message: str, api_key: str) -> str:
+    """Append apiKey fingerprint when Gigya reports 400093 Invalid ApiKey.
+
+    H-daedalus-4 (audit 2026-05-08): the live ticket on Issue #18 had no
+    way to disambiguate "config corrupted at the install side" from
+    "Gigya transient blip" — the only log line was the bare error message.
+    The fingerprint is non-secret (apiKey is a public OAuth-client-id
+    extracted from the APK manifest) but tells us at a glance whether
+    the user's install ships a truncated key vs. the canonical 24/66/66.
+    """
+    if "400093" not in message:
+        return message
+    return f"{message} ({apikey_fingerprint(api_key)})"
 
 
 class DaedalusError(RuntimeError):
@@ -107,7 +123,7 @@ class DaedalusApi:
         try:
             return parse_login_response(payload)
         except GigyaAuthError as exc:
-            raise DaedalusAuthError(str(exc)) from exc
+            raise DaedalusAuthError(_augment_400093(str(exc), api_key)) from exc
 
     async def _gigya_get_jwt(self, session_token: str, api_key: str) -> str:
         payload = await self._post_gigya(
@@ -117,7 +133,7 @@ class DaedalusApi:
         try:
             return parse_jwt_response(payload)
         except GigyaAuthError as exc:
-            raise DaedalusAuthError(str(exc)) from exc
+            raise DaedalusAuthError(_augment_400093(str(exc), api_key)) from exc
 
     async def _post_gigya(self, path: str, data: dict[str, str]) -> dict[str, Any]:
         session = self._get_session()
@@ -154,16 +170,34 @@ class DaedalusApi:
         except aiohttp.ClientError as exc:
             raise DaedalusConnectionError(f"LAN WS connect to {url} failed: {exc}") from exc
 
+        # H-daedalus-2 (audit 2026-05-08): split network failures from auth
+        # failures during the AUTH handshake. The earlier code wrapped
+        # *both* aiohttp.ClientError (transport-level: TLS handshake aborted,
+        # TCP reset, read timeout) AND LanProtocolError (the device
+        # explicitly rejected our AuthToken) as DaedalusAuthError. The
+        # coordinator then interpreted any DaedalusAuthError as "JWT
+        # expired, rotate it via Gigya getJWT" — turning a flaky Wi-Fi
+        # link into an unbounded Gigya refresh storm. Now: transport
+        # errors map to DaedalusConnectionError (transient, no Gigya
+        # call), and only an explicit device-side rejection raises
+        # DaedalusAuthError.
         try:
             await ws.send_str(build_auth_frame(serial_number=serial_number, jwt=jwt))
             raw = await ws.receive(timeout=10)
             if raw.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                await ws.close()
                 raise DaedalusConnectionError(f"LAN AUTH: unexpected WS frame type {raw.type!r}")
             response = parse_message(raw.data)
             connection_id = parse_auth_response(response)
-        except (LanProtocolError, aiohttp.ClientError) as exc:
+        except aiohttp.ClientError as exc:
             await ws.close()
-            raise DaedalusAuthError(f"LAN AUTH handshake failed: {exc}") from exc
+            raise DaedalusConnectionError(f"LAN AUTH transport failed: {exc}") from exc
+        except LanProtocolError as exc:
+            # The device parsed our frame and rejected it (or sent a
+            # malformed reply). This is the only path that genuinely
+            # signals an auth problem — let the coordinator reauth.
+            await ws.close()
+            raise DaedalusAuthError(f"LAN AUTH handshake rejected: {exc}") from exc
 
         return DaedalusLanConnection(ws=ws, connection_id=connection_id)
 
@@ -188,14 +222,28 @@ class DaedalusLanConnection:
         message: str,
         params: dict[str, Any] | None = None,
     ) -> str:
-        """Send a command and return its generated RequestId."""
+        """Send a command and return its generated RequestId.
+
+        H-daedalus-1 (audit 2026-05-08): ``build_command_frame`` enforces
+        a reserved-key guard against caller-supplied params overriding
+        ``Message`` / ``ConnectionId`` / ``RequestId`` and raises
+        ``LanProtocolError`` when violated. This wrapper used to catch
+        only ``aiohttp.ClientError`` so a malformed-param call from a
+        future service handler (e.g. ``delonghi_daedalus.send_raw``)
+        bubbled an opaque error AND lost the request_id mapping. We now
+        distinguish wire-format violations (``DaedalusError`` — caller
+        bug) from transport failures (``DaedalusConnectionError``).
+        """
         request_id = generate_request_id()
-        frame = build_command_frame(
-            message=message,
-            connection_id=self.connection_id,
-            request_id=request_id,
-            params=params,
-        )
+        try:
+            frame = build_command_frame(
+                message=message,
+                connection_id=self.connection_id,
+                request_id=request_id,
+                params=params,
+            )
+        except LanProtocolError as exc:
+            raise DaedalusError(f"LAN command frame build rejected: {exc}") from exc
         try:
             await self._ws.send_str(frame)
         except aiohttp.ClientError as exc:
