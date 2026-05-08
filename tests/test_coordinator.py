@@ -603,6 +603,65 @@ class TestMonitorStaleness:
         assert result["alarm_word"] is None
         assert result["monitor_stale"] is True
 
+    def test_stale_monitor_with_cloud_sync_does_not_force_off(self):
+        """Cloud session in SYNC = MQTT keep-alive dead. The coordinator must NOT
+        rebrand machine_state="Ready" → "Off" in that branch — there is *no
+        evidence either way* about the physical machine. Pretending to know
+        misleads the switch entity, which then logs a fake "monitor confirmed
+        Off state" right after a turn_off and the user thinks the command went
+        through (it didn't, the cloud accepted but never relayed).
+
+        Live trace 2026-05-08 on Bastien's machine: cloud=SYNC, monitor stale
+        961 min, monitor raw `d012750f0101000400070000010000000097d169fb9d12`
+        with `machine_state=Ready`. Coordinator was overriding to "Off" and
+        the user was told it's off — physically it was still on.
+
+        Off-rebrand is only safe when cloud=RUN (live MQTT, idle = plausible).
+        """
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = monotonic()
+        coord._last_keepalive = monotonic()
+        coord._last_monitor_raw = "same"
+        coord._monitor_last_changed = monotonic() - 9999
+        api.get_status.return_value = {
+            "machine_state": "Ready",
+            "profile": 1,
+            "monitor_raw": "same",
+            "status": "SYNC",  # ← MQTT zombie, cloud doesn't have fresh state
+            "alarms": [{"name": "Descale Needed"}],
+            "alarm_word": 0x10004,
+        }
+        result = _run(coord._async_update_data())
+        # state preserved — the stale monitor still says Ready, cloud can't
+        # disprove it. Do not invent an "Off" claim.
+        assert result["machine_state"] == "Ready"
+        assert result["monitor_stale"] is True
+        # Alarms still suppressed — they're stale data, can't be trusted —
+        # but that's the existing alarm suppression branch (already covered).
+        assert result["alarms"] == []
+
+    def test_stale_monitor_with_cloud_run_still_forces_off(self):
+        """Regression guard for the existing heuristic — cloud=RUN + stale =
+        idle machine, "Off" rebrand stays safe. Mirrors the earlier
+        test_monitor_timeout_forces_state_off_and_suppresses_alarms but is
+        kept here as the explicit positive case for the cloud_status gate."""
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = monotonic()
+        coord._last_keepalive = monotonic()
+        coord._last_monitor_raw = "same"
+        coord._monitor_last_changed = monotonic() - 9999
+        api.get_status.return_value = {
+            "machine_state": "Ready",
+            "profile": 1,
+            "monitor_raw": "same",
+            "status": "RUN",  # ← live cloud session, monitor idle = machine off
+            "alarms": [],
+            "alarm_word": 0,
+        }
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Off"
+        assert result["monitor_stale"] is True
+
     def test_no_cloud_suppresses_alarms(self):
         coord, _, api = _make_coord()
         coord._last_full_refresh = monotonic()

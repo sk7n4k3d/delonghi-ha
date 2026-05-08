@@ -253,11 +253,19 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 alarms = []
                 alarm_word = None
 
-            # Override machine state to Off if monitor hasn't changed in 30+ min
+            # Override machine state to Off only when the cloud session is live
+            # (RUN) and the monitor has been idle past the timeout. With cloud=RUN
+            # we trust that an idle monitor = idle machine. With cloud=SYNC the
+            # MQTT keep-alive is dead and we have *no evidence* about the physical
+            # state — last known monitor wins (likely "Ready" frozen from before
+            # the session died). Pretending to know "Off" here misleads the
+            # switch entity into logging fake "monitor confirmed Off state"
+            # right after a turn_off, even though the command never reached the
+            # machine (cloud accepted, MQTT never relayed).
             machine_state = status.get("machine_state", "Unknown")
-            if monitor_timed_out and machine_state not in ("Unknown", "Off"):
+            if monitor_timed_out and cloud_status == "RUN" and machine_state not in ("Unknown", "Off"):
                 _LOGGER.debug(
-                    "Monitor unchanged for %.0f min, assuming machine is Off",
+                    "Monitor unchanged for %.0f min (cloud=RUN), assuming machine is Off",
                     stale_duration / 60,
                 )
                 machine_state = "Off"
