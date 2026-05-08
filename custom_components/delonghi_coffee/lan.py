@@ -408,9 +408,16 @@ class DeLonghiLanServer:
         self._site: Any | None = None
         self._lock = asyncio.Lock()
         # Anti-replay / anti-clobber state: track the highest handshake
-        # time_1 we've accepted so a stale re-play of an earlier key
-        # exchange can't roll the session back to its nonces.
-        self._last_handshake_time1: int = 0
+        # time_1 we've accepted PER PEER so a stale re-play of an earlier
+        # key exchange can't roll the session back to its nonces.
+        # H-coffee-4 (audit 2026-05-08): a single global counter let one
+        # rogue handshake (from any IP that matched the allowlist, e.g.
+        # via ARP spoofing the device) pin the floor at 2^31-1 and
+        # permanently reject the legitimate device's smaller time_1
+        # until the integration reloaded. Per-peer state localises the
+        # blast radius — a rogue peer's bad floor only locks itself out,
+        # the real device keeps its own ratchet.
+        self._last_handshake_time1: dict[str, int] = {}
         # Loopback is always trusted so the in-process diagnostic works
         # regardless of what the caller passed in ``allowed_peers``.
         peers = set(config.allowed_peers)
@@ -517,12 +524,14 @@ class DeLonghiLanServer:
         # regardless of whether time_1 is wall-clock seconds (cremalink)
         # or a monotonic uptime counter (PD Soul "millcore", issue #10).
         now = int(time.time())
-        if self._last_handshake_time1 and time_1 < self._last_handshake_time1:
+        peer_norm = peer.split("%", 1)[0]  # strip IPv6 zone for stable key
+        peer_floor = self._last_handshake_time1.get(peer_norm, 0)
+        if peer_floor and time_1 < peer_floor:
             _LAN_LOGGER.warning(
-                "handshake: reject peer=%s time_1=%d older than last accepted %d",
+                "handshake: reject peer=%s time_1=%d older than last accepted %d for that peer",
                 peer,
                 time_1,
-                self._last_handshake_time1,
+                peer_floor,
             )
             return web.json_response({"error": "stale"}, status=400)
 
@@ -569,7 +578,7 @@ class DeLonghiLanServer:
         async with self._lock:
             self._session = session
             self._seq = 0
-            self._last_handshake_time1 = time_1
+            self._last_handshake_time1[peer_norm] = time_1
 
         _LAN_LOGGER.info(
             "handshake ok (dsn=%s peer=%s time_1=%d time_2=%d)",
@@ -592,6 +601,15 @@ class DeLonghiLanServer:
         if not self._is_peer_allowed(peer):
             _LAN_LOGGER.debug("command_poll: reject peer=%s (not in allowlist)", peer)
             return web.json_response({"error": "forbidden"}, status=403)
+        # H-coffee-1 (audit 2026-05-08): keep the encrypt call INSIDE the
+        # lock alongside the seq/queue mutation. Earlier behaviour released
+        # the lock before encrypt_app_to_device, which mutates session.app_iv
+        # — two concurrent polls could each capture the same IV, encrypt
+        # different plaintexts under the same key+IV (CBC IV reuse leaks
+        # plaintext XOR for block-coincident prefixes), and the IV chain
+        # would desync from the device until the next handshake. Encrypt
+        # is microsecond-level on small payloads so holding the lock is
+        # cheap. The response build is outside since it touches no state.
         async with self._lock:
             session = self._session
             if session is None:
@@ -603,16 +621,16 @@ class DeLonghiLanServer:
             self._seq += 1
             current_seq = self._seq
 
-        if data is None:
-            payload = build_heartbeat_payload(current_seq)
-        else:
-            payload = build_command_payload(current_seq, data)
+            if data is None:
+                payload = build_heartbeat_payload(current_seq)
+            else:
+                payload = build_command_payload(current_seq, data)
 
-        try:
-            enc, sign = encrypt_app_to_device(session, payload)
-        except Exception as err:  # noqa: BLE001 — never 500 the device
-            _LOGGER.error("LAN command poll: encrypt failed: %s", err)
-            return web.json_response({"enc": "", "sign": "", "seq": current_seq})
+            try:
+                enc, sign = encrypt_app_to_device(session, payload)
+            except Exception as err:  # noqa: BLE001 — never 500 the device
+                _LOGGER.error("LAN command poll: encrypt failed: %s", err)
+                return web.json_response({"enc": "", "sign": "", "seq": current_seq})
 
         return web.json_response({"enc": enc, "sign": sign, "seq": current_seq})
 
@@ -627,21 +645,32 @@ class DeLonghiLanServer:
         if not self._is_peer_allowed(peer):
             _LAN_LOGGER.debug("property_push: reject peer=%s (not in allowlist)", peer)
             return web.json_response({"error": "forbidden"}, status=403)
-        session = self._session
-        if session is None:
-            return web.json_response({}, status=200)
 
+        # Read the body BEFORE taking the lock — request.json() involves
+        # async I/O and we must not stall the rest of the LAN server while
+        # waiting for it.
         try:
             envelope = await request.json()
             enc = envelope["enc"]
         except (KeyError, ValueError, TypeError):
             return web.json_response({}, status=200)
 
-        try:
-            plaintext = decrypt_device_to_app(session, enc)
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("LAN datapoint: decrypt failed: %s", err)
-            return web.json_response({}, status=200)
+        # H-coffee-1 (audit 2026-05-08): decrypt INSIDE the lock so two
+        # concurrent property pushes don't race on session.dev_iv. Earlier
+        # behaviour: each handler captured `session = self._session`,
+        # released, then mutated dev_iv outside any lock — second handler
+        # to finish overwrote dev_iv last and the IV chain desynced from
+        # the device on subsequent decrypts. JSON parse + handler
+        # invocation stay outside since they touch no session state.
+        async with self._lock:
+            session = self._session
+            if session is None:
+                return web.json_response({}, status=200)
+            try:
+                plaintext = decrypt_device_to_app(session, enc)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("LAN datapoint: decrypt failed: %s", err)
+                return web.json_response({}, status=200)
 
         try:
             data = json.loads(plaintext.decode("utf-8"))
