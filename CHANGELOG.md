@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.16] — 2026-05-08
+
+### Fixed
+
+- **`Switch: monitor confirmed Off state` logged after a turn_off that
+  never reached the machine**. Live trace 2026-05-08 on Bastien's Eletta
+  Explore: `cloud=SYNC` (MQTT keepalive dead, machine WiFi module
+  zombie), monitor frozen 961 min on `machine_state="Ready"`. Coordinator
+  was rebranding `Ready → Off` purely on monitor staleness, regardless of
+  cloud session health. A `turn_off` request fired POWER_OFF (HTTP 201
+  accepted by Ayla cloud, never relayed via MQTT), the next refresh
+  matched the fabricated "Off" against `_last_commanded_on=False`, and
+  the switch logged `monitor confirmed Off state` — a flat lie, the
+  machine was still physically running. Fix gates the "Off" rebrand on
+  `cloud_status == "RUN"`. With `cloud=SYNC` the last known monitor
+  ("Ready" frozen pre-zombie) wins, and the switch's existing
+  `_monitor_stale_count` machinery correctly flips to `assumed_state`
+  after 3 polls instead of inventing a confirmation. Locked by 2 new
+  regression tests in `TestMonitorStaleness`:
+  `test_stale_monitor_with_cloud_sync_does_not_force_off` (the fix, with
+  the quoted live monitor raw for traceability) +
+  `test_stale_monitor_with_cloud_run_still_forces_off` (explicit
+  positive case for the gate).
+
 ## [1.6.0-beta.15] — 2026-05-08
 
 ### Fixed
