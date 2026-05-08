@@ -5,6 +5,144 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.17] — 2026-05-08
+
+Fixes the most impactful HIGH findings from the multi-agent security +
+correctness audit run on master @ 0a0e557. Six audit agents in parallel
+returned 1 critical bug + 16 HIGH + ~35 MEDIUM + ~52 LOW; this release
+ships the four fix clusters that affect real users: switch state machine
+correctness, brew-recipe coverage, daedalus auth surface, and LAN crypto
+hardening.
+
+### Fixed (delonghi_coffee)
+
+- **Power switch state machine — `is_on` was not a pure read** (B1, the
+  one critical bug from the audit). HA reads ``is_on`` multiple times
+  per coordinator refresh (renderers, state-class evaluation, automations)
+  and the original property body advanced ``_monitor_stale_count``,
+  cleared ``_last_commanded_on``, and emitted the
+  ``Switch: monitor confirmed Off state`` log line on every spurious
+  read. Move the staleness state machine into a new
+  ``_reconcile_monitor_state()`` helper invoked exactly once per refresh
+  by ``_handle_coordinator_update()``. The property now reads a cached
+  ``_cached_is_on`` with zero side effects. A sentinel
+  (``id(coordinator.data)``) protects against test fixtures that swap
+  the data dict without firing the coordinator hook.
+
+- **`async_turn_off` could not abort an in-progress `async_turn_on`
+  during the 15s wake delay** (H-logic-2). Both methods shared a single
+  ``_cmd_lock``: turn_off saw ``_cmd_lock.locked() → True`` and returned
+  silently with the misleading log ``Power command already in progress,
+  ignoring``. The machine warmed up uselessly and the 3-min retry then
+  fired POWER_ON. Fix: the wake now awaits a cooperative
+  ``self._cancel_turn_on`` event with the same timeout; turn_off sets
+  the event before awaiting the lock, turn_on returns early without
+  sending POWER_ON, lock releases, turn_off proceeds with POWER_OFF.
+
+- **Iced beverage detection missed `brew_over_ice` AND the entire
+  `mug_i_*` family** (H-logic-3). The original ``startswith(("i_",
+  "mi_", "over_ice"))`` did not match ``brew_over_ice`` (drink_id 27 —
+  starts with ``brew_``) nor the Mug Cold family (drink_ids 100-107 —
+  starts with ``mug_i_``). The recipe-to-brew path then dropped the
+  ICED(31)=0 marker for those drinks and kept the hot-recipe
+  coffee/milk/hot-water quantities — the machine brewed hot drinks
+  instead of pouring over ice.
+
+- **Bean Adapt parser silently collapsed local + English names**
+  (H-logic-1). The two 20-byte UTF-16-BE name slots in
+  ``d{N}_beansystem_{i}`` were decoded by passing the whole 40+ byte
+  blob to ``_decode_utf16``, which (correctly hardened in beta.14)
+  truncated at the first 2-byte NUL pair. The consumer's
+  ``text.split('\\x00')`` then never split, so the English variant
+  always equalled the local one. Fix slices the two halves explicitly
+  and decodes each. Issue #7's intended UX (local + English alongside)
+  was silently broken since beta.14.
+
+- **`_retry` decorator suppressed re-auth failures** (H-coffee-3). When
+  re-authentication itself raised ``DeLonghiAuthError`` (Gigya rejected
+  the credential — e.g. password actually wrong) or
+  ``DeLonghiApiError`` (Gigya transient 502), the decorator's
+  ``contextlib.suppress(DeLonghiAuthError, DeLonghiApiError)`` ate the
+  signal silently, the loop fell through, retried two more times
+  against the same dead credentials, and surfaced the generic
+  ``"function failed after 3 attempts"`` message. The coordinator
+  mapped that to ``UpdateFailed`` (transient) and HA never prompted
+  the user for reauth despite the password being wrong. Fix
+  re-raises the auth/api error so the coordinator can translate to
+  ``ConfigEntryAuthFailed`` and trigger the reauth flow.
+
+### Fixed (delonghi_daedalus)
+
+- **Diagnostics dump leaked the serial number through `machine_name`**
+  (H-daedalus-3). The config flow stores the SN under both
+  ``serial_number`` AND ``CONF_MACHINE_NAME``; only the former was in
+  ``REDACT_KEYS``. Added ``machine_name`` to the redaction list.
+
+- **Network failures during LAN AUTH were misclassified as auth
+  failures** (H-daedalus-2). ``connect_lan`` wrapped both
+  ``aiohttp.ClientError`` (transport: TLS abort, peer reset, read
+  timeout) and ``LanProtocolError`` (device explicitly rejected our
+  frame) as ``DaedalusAuthError``. The coordinator interpreted any
+  ``DaedalusAuthError`` as "JWT stale, refresh via Gigya" — turning a
+  flaky Wi-Fi link into an unbounded Gigya ``getJWT`` storm. Fix
+  splits transport errors (now ``DaedalusConnectionError``, no Gigya
+  call) from auth-side rejections (still ``DaedalusAuthError``).
+
+- **`send_command` did not catch the reserved-key guard** (H-daedalus-1,
+  defense-in-depth). ``build_command_frame`` raises
+  ``LanProtocolError`` when caller-supplied ``params`` collide with
+  ``Message`` / ``ConnectionId`` / ``RequestId``; the wrapper only
+  caught ``aiohttp.ClientError`` so a future service handler that
+  accepts user input could surface an opaque error and lose the
+  request_id mapping. Wire-format violations now raise
+  ``DaedalusError`` distinct from ``DaedalusConnectionError``.
+
+### Added (delonghi_daedalus)
+
+- **Startup self-check on Gigya apiKey lengths**
+  (``entry._validate_apikey_lengths``). Logs an ERROR if any pool's
+  ``GIGYA_API_KEYS[pool]`` value differs from the canonical length
+  extracted from the My Coffee Lounge APK manifest (24/66/66). Live
+  ticket Issue #18 (stivxgamer): apiKey truncation on the HACS mirror
+  side is the working hypothesis; this check turns the corruption from
+  silent into actionable.
+
+- **400093 error messages now include the apiKey fingerprint**
+  (``len:N sha1[:8]=<hex>`` — non-secret, the apiKey itself ships in
+  the public APK manifest). Lets a remote bug report disambiguate
+  "config corrupted on this install" from "Gigya transient blip"
+  without asking the user to paste their apiKey verbatim.
+
+### Fixed (LAN protocol hardening, delonghi_coffee/lan.py)
+
+- **Anti-replay handshake ratchet is now per-peer** (H-coffee-4).
+  ``_last_handshake_time1`` was a single global integer; a rogue peer
+  inside the allowlist (ARP spoofing, misconfigured 2nd HA install)
+  could send ``time_1 = 2**31 - 1`` to pin the floor at int max —
+  the legitimate device's smaller ``time_1`` was permanently rejected
+  as 'stale'. Per-peer dict (keyed by IP) localises the blast radius.
+
+- **CBC IV mutations now serialised under the server lock** (H-coffee-1).
+  ``_handle_command_poll`` and ``_handle_property_push`` released the
+  lock before ``encrypt_app_to_device`` / ``decrypt_device_to_app``,
+  which mutate ``session.app_iv`` / ``session.dev_iv`` in-place. Two
+  concurrent polls/pushes could capture the same IV, encrypt
+  different plaintexts under the same key+IV (CBC IV reuse leaks
+  plaintext XOR for block-coincident prefixes), and the chain
+  desynced from the device. Encrypt/decrypt now stay inside the
+  ``async with self._lock`` block.
+
+### Internals
+
+- ``manifest.json`` (delonghi_coffee): cryptography minimum bumped
+  ``>=41.0.0 → >=42.0.0`` to dodge CVE-2023-50782 (un-exploitable in
+  this codebase but hygiene).
+- ``manifest.json`` (delonghi_daedalus): aiohttp minimum bumped
+  ``>=3.9.0 → >=3.10.0`` to dodge CVE-2024-23334 (path traversal,
+  fixed in 3.9.2; 3.10+ further hardening).
+- delonghi_daedalus version bumped ``0.2.0 → 0.2.1`` to mirror the
+  fixes shipped to the mirror repo.
+
 ## [1.6.0-beta.16] — 2026-05-08
 
 ### Fixed
