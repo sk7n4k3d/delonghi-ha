@@ -125,8 +125,24 @@ def _retry(func):  # noqa: ANN001, ANN202
                     _LOGGER.warning("Got 401, re-authenticating")
                     self_obj._reauthenticating = True
                     try:
-                        with contextlib.suppress(DeLonghiAuthError, DeLonghiApiError):
+                        # H-coffee-3 (2026-05-08): do NOT suppress auth/api
+                        # errors raised by authenticate() itself. The earlier
+                        # ``contextlib.suppress(DeLonghiAuthError,
+                        # DeLonghiApiError)`` swallowed the real reason (bad
+                        # password, Gigya 502, etc.), let the loop retry the
+                        # SAME call two more times — wasting Gigya quota —
+                        # and surfaced the generic ``function failed after
+                        # N attempts`` message. The coordinator then mapped
+                        # that to UpdateFailed (transient) and HA never
+                        # prompted the user for reauth. Propagating the
+                        # original error lets the coordinator translate it
+                        # into ConfigEntryAuthFailed (auth) or UpdateFailed
+                        # (api) with the actual reason.
+                        try:
                             self_obj.authenticate()
+                        except (DeLonghiAuthError, DeLonghiApiError):
+                            self_obj._reauthenticating = False
+                            raise
                     finally:
                         self_obj._reauthenticating = False
                 # Rate limited — longer backoff
@@ -1251,7 +1267,14 @@ class DeLonghiApi:
         except (DeLonghiApiError, DeLonghiAuthError):
             _LOGGER.debug("brew_beverage: pre-brew ping failed, sending command anyway")
 
-        is_iced = beverage_key.startswith(("i_", "mi_", "over_ice"))
+        # Detect iced beverages by name prefix. Coverage:
+        # - ``i_*``                 — Eletta Iced family (drink_ids 50-57)
+        # - ``mi_*``                — legacy mug-iced prefix kept for safety
+        # - ``over_ice*``           — ``over_ice_espr`` (drink_id 57)
+        # - ``mug_i_*``             — Mug Cold family (drink_ids 100-107)
+        # - ``brew_over_ice``       — drink_id 27, lone exception (key starts
+        #                             with ``brew_`` so prefix tuples miss it)
+        is_iced = beverage_key.startswith(("i_", "mi_", "over_ice", "mug_i_")) or beverage_key == "brew_over_ice"
         is_cold_brew = "_cb_" in beverage_key
         brew_cmd = self._recipe_to_brew_command(
             recipe_data, is_iced=is_iced, is_cold_brew=is_cold_brew, profile=profile
@@ -1771,10 +1794,26 @@ class DeLonghiApi:
             try:
                 raw = base64.b64decode(val)
                 data = raw[5:-2]
-                text = _decode_utf16(data)
-                parts = [p for p in text.split("\x00") if p.strip()]
-                local_name = parts[0] if parts else f"Bean {i}"
-                english_name = parts[1] if len(parts) > 1 else local_name
+                # H-logic-1 (2026-05-08): decode each 20-byte name slot
+                # explicitly. ``_decode_utf16`` was hardened in beta.14 to
+                # truncate at the first 2-byte NUL pair (good — protects
+                # adjacent struct fields from leaking into the name), so
+                # decoding the whole ``data`` blob and then split-on-NUL
+                # never yielded the second slot. Slice deliberately.
+                if len(data) >= 20:
+                    local_name = _decode_utf16(data[:20])
+                elif data:
+                    # Truncated firmware payload (real machines pad to 40+
+                    # bytes; this branch keeps the parser tolerant for the
+                    # test fixtures that ship a single short name).
+                    local_name = _decode_utf16(data)
+                else:
+                    local_name = f"Bean {i}"
+                english_name = _decode_utf16(data[20:40]) if len(data) >= 40 else local_name
+                if not local_name:
+                    local_name = f"Bean {i}"
+                if not english_name:
+                    english_name = local_name
                 # The first 40 bytes of ``data`` are the two UTF-16-BE names
                 # (20 bytes each). Everything after that belongs to the Bean
                 # Adapt parameter block — temperature, intensity, grinder,

@@ -121,6 +121,42 @@ class TestBeanSystemParsing:
         result = self.api.parse_bean_systems(props)
         assert result[0]["raw_params_hex"] == ""
 
+    def test_parse_bean_systems_returns_distinct_local_and_english(self):
+        """H-logic-1: the bean payload has TWO 20-byte UTF-16-BE names —
+        local and English. The decoder must surface them separately.
+
+        Before this fix, ``_decode_utf16(data)`` truncated at the first
+        NUL pair (correct hardening from beta.14) so the consumer's
+        ``text.split('\\x00')`` only ever saw one segment, and the
+        English variant fell back to the local name. Bean 0 was
+        decoded as ``'Predefini'`` for both fields — Issue #7's intended
+        UX (local + English alongside) was silently broken.
+
+        Fix: slice the 20-byte halves explicitly and decode each.
+        """
+        local = "Predefini".encode("utf-16-be").ljust(20, b"\x00")
+        english = "Default".encode("utf-16-be").ljust(20, b"\x00")
+        data = local + english
+        raw = bytes([0xD0, 0x20, 0x00, 0xF0, 0x00]) + data + bytes([0x00, 0x00])
+        props = {"d250_beansystem_0": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_bean_systems(props)
+        assert result[0]["name"] == "Predefini"
+        assert result[0]["english_name"] == "Default"
+        assert result[0]["name"] != result[0]["english_name"]
+
+    def test_parse_bean_systems_english_falls_back_when_payload_short(self):
+        """If the payload is shorter than 40 bytes (no English slot), the
+        English name mirrors the local one — no IndexError, no garbage.
+        """
+        local = "Arabica".encode("utf-16-be").ljust(20, b"\x00")
+        # Only the local 20-byte slot, no English half present.
+        data = local
+        raw = bytes([0xD0, 0x20, 0x00, 0xF0, 0x00]) + data + bytes([0x00, 0x00])
+        props = {"d250_beansystem_0": {"value": base64.b64encode(raw).decode()}}
+        result = self.api.parse_bean_systems(props)
+        assert result[0]["name"] == "Arabica"
+        assert result[0]["english_name"] == "Arabica"
+
     def test_raw_params_hex_captures_bean_adapt_tail(self):
         """Bean Adapt tail bytes after the 40-byte name block are exposed as hex.
 

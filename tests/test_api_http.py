@@ -602,6 +602,64 @@ class TestRetryDecorator:
         # the flag was already set — we short-circuited instead.
         reauth_spy.assert_not_called()
 
+    def test_401_propagates_when_reauth_itself_fails(self):
+        """H-coffee-3: when re-auth itself raises ``DeLonghiAuthError`` the
+        ``_retry`` decorator MUST propagate it so the coordinator can map
+        it to ``ConfigEntryAuthFailed`` and HA can surface a reauth flow.
+
+        Before this fix the suppression block (``contextlib.suppress``)
+        ate the auth failure silently, the loop fell through to a
+        generic-retry branch with the ORIGINAL 401 as ``last_err``, the
+        same call retried two more times — wasting Gigya quota — and
+        eventually surfaced as the misleading
+        ``UpdateFailed("function failed after 3 attempts")``. HA never
+        prompted the user for credentials.
+        """
+        api = DeLonghiApi("test@example.com", "password", region="EU")
+        api._ayla_token = "fake"
+        api._token_expires = time.time() + 86400
+        api._session = MagicMock()
+
+        resp401 = MagicMock(spec=requests.Response)
+        resp401.status_code = 401
+        resp401.raise_for_status.side_effect = requests.HTTPError(response=resp401)
+        api._session.get.side_effect = requests.HTTPError(response=resp401)
+
+        # The _retry decorator clears _reauthenticating so authenticate()
+        # is invoked. We make authenticate() itself fail with a hard auth
+        # error (Gigya rejected the credential, password actually wrong).
+        with (
+            patch.object(api, "authenticate", side_effect=DeLonghiAuthError("password rejected")),
+            pytest.raises(DeLonghiAuthError, match="password rejected"),
+        ):
+            api.get_properties("DSN")
+
+        # Critical: the call chain must abort on auth failure — the
+        # generic "3 attempts" exhaustion path must NOT swallow this
+        # signal. We assert the exception bubbles unchanged.
+
+    def test_401_then_reauth_api_error_also_propagates(self):
+        """H-coffee-3 follow-up: a network-level failure during re-auth
+        (DNS, transient 5xx from Gigya) must also bubble up so the
+        coordinator sees a meaningful error, not the generic
+        ``function failed after 3 attempts`` message.
+        """
+        api = DeLonghiApi("test@example.com", "password", region="EU")
+        api._ayla_token = "fake"
+        api._token_expires = time.time() + 86400
+        api._session = MagicMock()
+
+        resp401 = MagicMock(spec=requests.Response)
+        resp401.status_code = 401
+        resp401.raise_for_status.side_effect = requests.HTTPError(response=resp401)
+        api._session.get.side_effect = requests.HTTPError(response=resp401)
+
+        with (
+            patch.object(api, "authenticate", side_effect=DeLonghiApiError("Gigya 502")),
+            pytest.raises(DeLonghiApiError, match="Gigya 502"),
+        ):
+            api.get_properties("DSN")
+
 
 class TestRegionConfig:
     """Test multi-region configuration."""

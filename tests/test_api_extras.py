@@ -264,6 +264,67 @@ class TestBrewBeverage:
         assert captured["is_iced"] is True
         assert captured["is_cold_brew"] is False
 
+    def test_brew_over_ice_marked_as_iced(self):
+        """H-logic-3: ``brew_over_ice`` (drink_id 27) is an iced drink but
+        the original detection ``startswith(("i_", "mi_", "over_ice"))``
+        missed it because the key starts with ``brew_``. The recipe-to-brew
+        path then dropped the ICED(31)=0 marker and kept the hot-recipe
+        coffee/milk/hot-water quantities — the machine brewed regular
+        coffee instead of pouring it over ice.
+        """
+        api = _make_api()
+        props = {"d302_rec_2_brew_over_ice": {"value": _fake_recipe_prop()}}
+        captured: dict[str, bool] = {}
+
+        def _capture(recipe, *, is_iced, is_cold_brew, profile):
+            captured["is_iced"] = is_iced
+            return bytes([0x0D, 0x0A, 0x83]) + b"\x00" * 7 + b"\xab\xcd"
+
+        with (
+            patch.object(api, "get_properties", return_value=props),
+            patch.object(api, "ping_connected", return_value=True),
+            patch.object(api, "_pre_brew_check"),
+            patch.object(api, "send_command", return_value=True),
+            patch.object(api, "_recipe_to_brew_command", side_effect=_capture),
+        ):
+            api.brew_beverage("DSN", "brew_over_ice", profile=2)
+
+        assert captured["is_iced"] is True
+
+    def test_mug_iced_family_marked_as_iced(self):
+        """H-logic-3: the ``mug_i_*`` family (drink_ids 100-107) is iced too
+        but the original detection only recognised ``i_`` / ``mi_`` /
+        ``over_ice`` prefixes — ``mug_i_cappuccino`` etc. fell through.
+        """
+        api = _make_api()
+        for key in (
+            "mug_i_brew_over_ice",
+            "mug_i_americano",
+            "mug_i_cappuccino",
+            "mug_i_latte_macch",
+            "mug_i_caffelatte",
+            "mug_i_capp_mix",
+            "mug_i_flat_white",
+            "mug_i_cold_milk",
+        ):
+            props = {f"d302_rec_2_{key}": {"value": _fake_recipe_prop()}}
+            captured: dict[str, bool] = {}
+
+            def _capture(recipe, *, is_iced, is_cold_brew, profile, _cap=captured):
+                _cap["is_iced"] = is_iced
+                return bytes([0x0D, 0x0A, 0x83]) + b"\x00" * 7 + b"\xab\xcd"
+
+            with (
+                patch.object(api, "get_properties", return_value=props),
+                patch.object(api, "ping_connected", return_value=True),
+                patch.object(api, "_pre_brew_check"),
+                patch.object(api, "send_command", return_value=True),
+                patch.object(api, "_recipe_to_brew_command", side_effect=_capture),
+            ):
+                api.brew_beverage("DSN", key, profile=2)
+
+            assert captured["is_iced"] is True, f"{key} should be detected as iced"
+
     def test_brew_beverage_cold_brew_flag_detection(self):
         """`_cb_` substring triggers cold-brew branch."""
         api = _make_api()
