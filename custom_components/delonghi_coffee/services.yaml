@@ -195,3 +195,152 @@ write_bean_profile:
           min: 0
           max: 1
           step: 1
+
+set_baseline_from_screen:
+  name: Set counter baseline (from machine UI)
+  description: >
+    Override counter sensors with values read off the touchscreen — works around
+    the Eletta Explore firmware bug where d5XX/d7XX stats are only pushed to the
+    Ayla cloud on rare boot-time events. Each field is optional; only set what
+    you see on screen. Sensors will expose max(cloud, baseline) so the cloud
+    automatically reclaims them as soon as it pushes a higher value.
+  fields:
+    total_beverages:
+      name: Tot. seulement café
+      description: Total coffee-only beverages shown on the machine's Statistics screen.
+      example: 1476
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    total_espressos:
+      name: Tot. espressos (alt naming)
+      description: Some firmwares expose total_espressos instead of total_beverages — set the same UI number here.
+      example: 1476
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    espresso:
+      name: Espressos
+      example: 1303
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    coffee:
+      name: Coffees
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    long_coffee:
+      name: Long Coffees
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    doppio:
+      name: Doppios
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    americano:
+      name: Americanos
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    cappuccino:
+      name: Cappuccinos
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    tea:
+      name: Tot. thés
+      example: 35
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    hot_water:
+      name: Tot. eaux chaudes
+      example: 35
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    descale_count:
+      name: Tot. détartrages
+      example: 3
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 1
+          unit_of_measurement: times
+    filter_replacements:
+      name: Tot. filtres
+      example: 1
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 1
+          unit_of_measurement: times
+    beverages_since_descale:
+      name: Boissons depuis détartrage
+      description: Useful after a descale cycle the cloud didn't see.
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: cups
+    grounds_count:
+      name: Marcs éjectés
+      selector:
+        number:
+          min: 0
+          max: 100000
+          step: 1
+          unit_of_measurement: pucks
+    total_water_liters:
+      name: Tot. litres eau
+      description: Litres on screen. Stored internally as ml.
+      example: 167
+      selector:
+        number:
+          min: 0
+          max: 10000
+          step: 0.1
+          unit_of_measurement: L
+
+reset_local_baseline:
+  name: Reset counter baselines
+  description: >
+    Drop every locally-stored baseline override and revert sensors to whatever
+    the cloud reports. Useful if the firmware finally catches up or you set a
+    wrong value.

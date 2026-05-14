@@ -5,6 +5,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.18] — 2026-05-14
+
+Ships a fallback for the Eletta Explore firmware bug where the cumulative
+counter family (``d5XX``/``d7XX``) stops being pushed to the Ayla cloud
+after the boot that follows a re-provision event. Diagnosed live on
+AC000W038925641: counters frozen at ``2026-04-08T04:17:30Z`` (post
+WAN-swap re-provision) while the touchscreen showed +140 brews,
++1 descale and +1 filter replacement. None of LAN mode, output-property
+writes, or BLE-catalogue ECAM opcodes (``ParameterRead`` 0x95,
+``ParameterReadExt`` 0xA1, ``StatisticsRead`` 0xA2) brought the firmware
+back to life on this build — confirmed with the machine awake at
+``state=Ready``.
+
+### Added (delonghi_coffee)
+
+- **``LocalBaselineStore``** (new ``local_baseline.py``) — per-DSN
+  persistent override for counter sensors backed by HA's ``Store`` helper.
+  Stores integer counter values keyed by ``parse_counters()`` names
+  (``total_espressos``, ``descale_count``, ``filter_replacements``,
+  ``total_water_ml``, …). Loaded lazily on the first coordinator refresh.
+
+- **Counter sensors expose ``max(cloud, baseline)``**
+  (``DeLonghiCounterSensor.native_value``). The cloud wins as soon as
+  it pushes a higher value, preserving ``TOTAL_INCREASING`` semantics —
+  the baseline is invisible until the user opts in. New
+  ``extra_state_attributes`` (``cloud_value``, ``baseline_value``,
+  ``source``) appear only when an override is in effect, keeping the
+  entity card clean for everyone else.
+
+- **Service ``delonghi_coffee.set_baseline_from_screen``** — maps the
+  touchscreen field labels (``Tot. seulement café``, ``Tot. détartrages``,
+  ``Tot. filtres``, ``Tot. litres eau``, …) to counter keys, writes them
+  through the store and requests a coordinator refresh so sensors update
+  immediately instead of waiting for the 60s poll. Litres are converted
+  to internal ml (the sensor reapplies ``scale=0.001`` on read).
+
+- **Service ``delonghi_coffee.reset_local_baseline``** — drops every
+  override and reverts sensors to whatever the cloud reports. Useful
+  once the firmware finally pushes a fresh boot snapshot.
+
+### Investigation notes
+
+The full diagnostic trail (LAN port 10275 closed, ``lan_enabled=false``
+cloud-side, idempotent writes accepted by Ayla but ignored by firmware,
+BLE-catalogue read opcodes silently dropped, ``app_data_response``
+frozen) is captured in the module docstring of ``local_baseline.py`` so
+future contributors don't re-walk the same path.
+
 ## [1.6.0-beta.17] — 2026-05-08
 
 Fixes the most impactful HIGH findings from the multi-agent security +

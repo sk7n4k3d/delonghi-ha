@@ -205,11 +205,69 @@ def _register_services(hass: HomeAssistant) -> None:
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
+    # Counter baselines (firmware-freeze workaround — see local_baseline.py).
+    # Keys accepted on the screen → counter mapping. Values are entered in
+    # the same unit the counter is exposed in HA (cups for cup counters,
+    # litres for total_water_ml, raw ml for water_through_filter_ml).
+    _SCREEN_FIELD_TO_COUNTER: dict[str, tuple[str, float]] = {
+        # field_name → (counter_key, multiplier_to_storage_unit)
+        # total_beverages and total_espressos are the two big "Tot. seulement café"
+        # values shown on the touchscreen — Eletta exposes both, set whichever
+        # matches your firmware's naming on the cloud side.
+        "total_beverages": ("total_beverages", 1.0),
+        "total_espressos": ("total_espressos", 1.0),
+        "espresso": ("espresso", 1.0),
+        "coffee": ("coffee", 1.0),
+        "long_coffee": ("long_coffee", 1.0),
+        "doppio": ("doppio", 1.0),
+        "americano": ("americano", 1.0),
+        "cappuccino": ("cappuccino", 1.0),
+        "tea": ("tea", 1.0),
+        "hot_water": ("hot_water", 1.0),
+        "descale_count": ("descale_count", 1.0),
+        "filter_replacements": ("filter_replacements", 1.0),
+        "beverages_since_descale": ("beverages_since_descale", 1.0),
+        "grounds_count": ("grounds_count", 1.0),
+        # Litres on the UI → ml internally (the sensor applies scale=0.001 back).
+        "total_water_liters": ("total_water_ml", 1000.0),
+    }
+
+    async def handle_set_baseline_from_screen(call) -> None:  # noqa: ANN001
+        _api, coord, _dsn = _resolve_target(hass, call)
+        await coord.local_baseline.async_load()
+        updates: dict[str, int] = {}
+        unknown: list[str] = []
+        for field, raw in call.data.items():
+            mapping = _SCREEN_FIELD_TO_COUNTER.get(field)
+            if mapping is None:
+                unknown.append(field)
+                continue
+            counter_key, mult = mapping
+            try:
+                updates[counter_key] = int(float(raw) * mult)
+            except (TypeError, ValueError) as err:
+                raise HAError(f"Invalid value for {field}: {raw!r}") from err
+        if unknown:
+            _LOGGER.warning("set_baseline_from_screen ignored unknown fields: %s", unknown)
+        if not updates:
+            raise HAError("No valid baseline fields provided")
+        await coord.local_baseline.async_set_many(updates)
+        # Trigger a coordinator refresh so sensors pick up the new values
+        # immediately instead of waiting for the next 60s poll.
+        await coord.async_request_refresh()
+
+    async def handle_reset_local_baseline(call) -> None:  # noqa: ANN001
+        _api, coord, _dsn = _resolve_target(hass, call)
+        await coord.local_baseline.async_clear()
+        await coord.async_request_refresh()
+
     hass.services.async_register(DOMAIN, "brew_custom", handle_brew_custom)
     hass.services.async_register(DOMAIN, "cancel_brew", handle_cancel_brew)
     hass.services.async_register(DOMAIN, "sync_recipes", handle_sync_recipes)
     hass.services.async_register(DOMAIN, "select_bean_profile", handle_select_bean_profile)
     hass.services.async_register(DOMAIN, "write_bean_profile", handle_write_bean_profile)
+    hass.services.async_register(DOMAIN, "set_baseline_from_screen", handle_set_baseline_from_screen)
+    hass.services.async_register(DOMAIN, "reset_local_baseline", handle_reset_local_baseline)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -229,4 +287,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, "sync_recipes")
             hass.services.async_remove(DOMAIN, "select_bean_profile")
             hass.services.async_remove(DOMAIN, "write_bean_profile")
+            hass.services.async_remove(DOMAIN, "set_baseline_from_screen")
+            hass.services.async_remove(DOMAIN, "reset_local_baseline")
     return unload_ok

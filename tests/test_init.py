@@ -206,7 +206,7 @@ class TestAsyncSetupEntryHappyPath:
         assert stored["sw_version"] == "2.5"
         # Platforms forwarded
         hass.config_entries.async_forward_entry_setups.assert_awaited_once_with(entry, init_mod.PLATFORMS)
-        # All 5 services registered
+        # All 7 services registered (5 original + 2 baseline override helpers)
         names = {c[0][1] for c in hass.services.async_register.call_args_list}
         assert names == {
             "brew_custom",
@@ -214,6 +214,8 @@ class TestAsyncSetupEntryHappyPath:
             "sync_recipes",
             "select_bean_profile",
             "write_bean_profile",
+            "set_baseline_from_screen",
+            "reset_local_baseline",
         }
 
     def test_device_name_and_sw_version_already_in_entry_skip_get_devices(self):
@@ -615,7 +617,7 @@ class TestAsyncUnloadEntry:
         ok = _run(init_mod.async_unload_entry(hass, entry))
         assert ok is True
         assert "e1" not in hass.data[DOMAIN]
-        # All 5 services removed
+        # All 7 services removed (5 original + 2 baseline override helpers)
         removed_names = {c[0][1] for c in hass.services.async_remove.call_args_list}
         assert removed_names == {
             "brew_custom",
@@ -623,6 +625,8 @@ class TestAsyncUnloadEntry:
             "sync_recipes",
             "select_bean_profile",
             "write_bean_profile",
+            "set_baseline_from_screen",
+            "reset_local_baseline",
         }
 
     def test_unload_success_other_entries_remain_keeps_services(self):
