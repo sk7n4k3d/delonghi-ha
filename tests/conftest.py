@@ -19,6 +19,7 @@ _HA_MODULES = [
     "homeassistant.helpers",
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.update_coordinator",
+    "homeassistant.helpers.storage",
     "homeassistant.components",
     "homeassistant.components.sensor",
     "homeassistant.components.binary_sensor",
@@ -42,6 +43,29 @@ for mod_name in _HA_MODULES:
 
 # Diagnostics needs the real redacter, not a MagicMock that returns another MagicMock.
 sys.modules["homeassistant.components.diagnostics"].async_redact_data = _real_redact
+
+
+class _MockStore:
+    """In-memory stand-in for homeassistant.helpers.storage.Store.
+
+    The real Store is awaitable on load/save/remove. A MagicMock fails to
+    proxy that, so we ship a minimal cooperative double instead.
+    """
+
+    def __init__(self, *_args, **_kwargs) -> None:
+        self._data = None
+
+    async def async_load(self):
+        return self._data
+
+    async def async_save(self, data) -> None:
+        self._data = data
+
+    async def async_remove(self) -> None:
+        self._data = None
+
+
+sys.modules["homeassistant.helpers.storage"].Store = _MockStore
 
 
 def _wire_submodule(parent: str, child: str) -> None:

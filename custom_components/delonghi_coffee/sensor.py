@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import BLOCKING_ALARM_BITS, DOMAIN
 from .coordinator import DeLonghiCoordinator
+from .local_baseline import LocalBaselineStore
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -213,20 +214,73 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         ``unavailable`` instead of ``unknown`` and alerting rules skip
         it. A counter that exists but equals ``0`` remains available.
         See issue #3 (jostrasser).
+
+        A counter that only has a user-supplied baseline (cloud key
+        missing because firmware never pushed it) is also considered
+        available — that's the point of the override.
         """
         if not super().available:
             return False
         counters: dict[str, Any] = self.coordinator.data.get("counters", {})
-        return self._counter_key in counters
+        if self._counter_key in counters:
+            return True
+        baseline_store = getattr(self.coordinator, "local_baseline", None)
+        if isinstance(baseline_store, LocalBaselineStore) and baseline_store.get(self._counter_key) is not None:
+            return True
+        return False
 
     @property
     def native_value(self) -> float | int | None:
-        """Return current counter value."""
+        """Return current counter value, masked by the local baseline.
+
+        The cloud value (firmware → Ayla → HA) is the source of truth as
+        long as it keeps up. When the firmware stops pushing a counter
+        (Eletta Explore d5XX/d7XX silent freeze, see local_baseline.py)
+        users record the machine UI value via ``set_baseline_from_screen``
+        and we expose ``max(cloud, baseline)``. The cloud reclaims the
+        sensor automatically as soon as it pushes a higher value, so
+        TOTAL_INCREASING semantics are never violated.
+        """
         counters: dict[str, Any] = self.coordinator.data.get("counters", {})
         val = counters.get(self._counter_key)
+
+        baseline_store = getattr(self.coordinator, "local_baseline", None)
+        if isinstance(baseline_store, LocalBaselineStore):
+            val = baseline_store.merge(self._counter_key, val)
+
         if val is not None and self._scale:
             return round(val * self._scale, 1)
         return val
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose cloud value + baseline so the override is debuggable.
+
+        Only emit attrs when a baseline exists — keeps the entity card
+        clean for users who never touch this feature.
+        """
+        baseline_store = getattr(self.coordinator, "local_baseline", None)
+        if not isinstance(baseline_store, LocalBaselineStore):
+            return {}
+        baseline = baseline_store.get(self._counter_key)
+        if baseline is None:
+            return {}
+        counters: dict[str, Any] = self.coordinator.data.get("counters", {})
+        cloud_val = counters.get(self._counter_key)
+        if cloud_val is not None and self._scale:
+            cloud_display = round(cloud_val * self._scale, 1)
+        else:
+            cloud_display = cloud_val
+        if self._scale:
+            baseline_display = round(baseline * self._scale, 1)
+        else:
+            baseline_display = baseline
+        source = "baseline" if (cloud_val is None or cloud_val < baseline) else "cloud"
+        return {
+            "cloud_value": cloud_display,
+            "baseline_value": baseline_display,
+            "source": source,
+        }
 
 
 class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):

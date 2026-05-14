@@ -21,6 +21,7 @@ from .const import (
 )
 from .contentstack import fetch_bean_adapt, fetch_coffee_beans, fetch_drink_catalog
 from .lan import _LAN_LOGGER, DeLonghiLanServer, LanError, LanServerConfig, register_with_device
+from .local_baseline import LocalBaselineStore
 from .logger import get_diagnostic_dump
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,6 +85,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # fast-poll window even if the test harness stubs out
         # DataUpdateCoordinator.__init__ (where update_interval lives).
         self._normal_update_interval: timedelta = timedelta(seconds=SCAN_INTERVAL_SECONDS)
+        # User-supplied counter baselines persisted in .storage. Used to
+        # mask cloud counters that the firmware silently stops pushing.
+        # See local_baseline.py docstring for the full diagnostic trail.
+        self.local_baseline: LocalBaselineStore = LocalBaselineStore(hass, dsn)
+        self._baseline_loaded: bool = False
 
     def request_fast_poll(self, duration_s: float = 60.0, interval_s: float = 5.0) -> None:
         """Shorten the polling interval for a bounded window.
@@ -110,6 +116,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Fetch data from API."""
         try:
             now = monotonic()
+
+            # Lazy-load persisted local baselines on the first refresh.
+            # async_load is idempotent so this is safe to call every cycle,
+            # but the explicit flag avoids a no-op await in the hot path.
+            if not self._baseline_loaded:
+                await self.local_baseline.async_load()
+                self._baseline_loaded = True
 
             # Revert to the normal interval once the fast-poll window has
             # elapsed. We do it here (top of the cycle) so the deadline
