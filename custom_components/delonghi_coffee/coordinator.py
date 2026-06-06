@@ -137,9 +137,16 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Read status (monitor property from cloud cache)
             status: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_status, self.dsn)
 
-            # Sync selected_profile from monitor (actual active profile)
+            # Seed selected_profile from the monitor ONCE (first refresh only).
+            # After that, selected_profile is the authoritative user override
+            # (set by the profile select entity) and must NOT be stomped on
+            # every poll — the monitor byte lags and reports the last-brewed
+            # profile, which would silently revert the user's choice (F-COORD-01).
+            # select.py already falls back to data["active_profile"]/["profile"]
+            # when selected_profile is None, so live machine-side tracking is
+            # preserved without overwriting an explicit selection.
             monitor_profile = status.get("profile", 0)
-            if monitor_profile > 0:
+            if self.selected_profile is None and monitor_profile > 0:
                 self.selected_profile = monitor_profile
 
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.

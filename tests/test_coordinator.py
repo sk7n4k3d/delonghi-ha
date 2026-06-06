@@ -343,6 +343,7 @@ class TestAsyncUpdateDataLight:
         assert result["machine_state"] == "Ready"
         assert result["profile"] == 2
         assert result["status"] == "RUN"
+        # First refresh (selected_profile was None) → seeded from the monitor.
         assert coord.selected_profile == 2
         assert result["monitor_stale"] is False
         # Full-refresh cached dicts must be default empty
@@ -364,6 +365,22 @@ class TestAsyncUpdateDataLight:
         }
         _run(coord._async_update_data())
         assert coord.selected_profile == 3  # unchanged
+
+    def test_user_profile_choice_not_stomped_by_monitor(self):
+        """F-COORD-01: a user-selected profile must survive subsequent polls
+        even when the monitor reports a different (>0) active profile."""
+        coord, api = self._setup_light_poll()
+        coord.selected_profile = 3  # explicit user click via the select entity
+        api.get_status.return_value = {
+            "machine_state": "Ready",
+            "profile": 1,  # monitor lags / reports last-brewed profile
+            "monitor_raw": "xyz",
+            "status": "RUN",
+        }
+        result = _run(coord._async_update_data())
+        assert coord.selected_profile == 3  # user choice preserved
+        # the raw monitor value is still exposed in the data dict for fallbacks
+        assert result["profile"] == 1
 
 
 class TestAsyncUpdateDataKeepalive:

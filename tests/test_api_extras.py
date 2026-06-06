@@ -21,6 +21,8 @@ from custom_components.delonghi_coffee.api import (
     DeLonghiApi,
     DeLonghiApiError,
     DeLonghiAuthError,
+    DeLonghiUnsupportedError,
+    _clamp_token_ttl,
 )
 
 
@@ -748,9 +750,140 @@ class TestGetDevicesBackfill:
         assert api._cmd_property == "app_data_request"
 
 
+class TestGetDevicesCoffeeFilter:
+    """A single Ayla account may hold non-coffee appliances (Pinguino A/C,
+    oem_model DL-pac). get_devices must derive device_name/sw_version/backfill
+    from a *coffee* machine, never from the first arbitrary device (issue #30).
+    """
+
+    def test_picks_coffee_machine_when_ac_listed_first(self):
+        api = _make_api(oem_model="")
+        api._session.get.return_value = _mock_response(
+            200,
+            [
+                {
+                    "device": {
+                        "dsn": "AC000W028045723",
+                        "oem_model": "DL-pac",
+                        "product_name": "Pinguino",
+                        "sw_version": "ADA 1.8.1",
+                    }
+                },
+                {
+                    "device": {
+                        "dsn": "AC000W038925641",
+                        "oem_model": "DL-striker-cb",
+                        "product_name": "Eletta Explore",
+                        "sw_version": "ADA 1.6",
+                    }
+                },
+            ],
+        )
+        api.get_devices()
+        # device metadata + backfill must come from the Eletta, not the Pinguino
+        assert api._oem_model == "DL-striker-cb"
+        assert api._device_name == "Eletta Explore"
+        assert api._cmd_property == "app_data_request"
+
+    def test_coffee_devices_excludes_non_coffee(self):
+        api = _make_api(oem_model="")
+        api._session.get.return_value = _mock_response(
+            200,
+            [
+                {"device": {"dsn": "A", "oem_model": "DL-pac", "product_name": "Pinguino"}},
+                {"device": {"dsn": "B", "oem_model": "DL-striker-cb", "product_name": "Eletta"}},
+            ],
+        )
+        api.get_devices()
+        coffee = api.coffee_devices()
+        assert [d["dsn"] for d in coffee] == ["B"]
+
+    def test_missing_oem_model_kept_as_coffee(self):
+        """No oem_model at all → benefit of the doubt (don't drop a real maker)."""
+        api = _make_api(oem_model="")
+        api._session.get.return_value = _mock_response(
+            200,
+            [{"device": {"dsn": "Z", "product_name": "Mystery"}}],  # no oem_model/model
+        )
+        api.get_devices()
+        assert [d["dsn"] for d in api.coffee_devices()] == ["Z"]
+
+    def test_unknown_non_coffee_prefix_excluded(self):
+        """An explicit oem_model outside the coffee prefixes is excluded
+        (mirrors DL-pac and any future non-coffee appliance)."""
+        api = _make_api(oem_model="")
+        api._session.get.return_value = _mock_response(
+            200,
+            [
+                {"device": {"dsn": "AC", "oem_model": "DL-pac", "product_name": "Pinguino"}},
+                {"device": {"dsn": "X", "oem_model": "DL-future-9000", "product_name": "Mystery"}},
+                {"device": {"dsn": "C", "oem_model": "DL-dinamica-plus", "product_name": "Dinamica"}},
+            ],
+        )
+        api.get_devices()
+        # only the known coffee prefix survives
+        assert [d["dsn"] for d in api.coffee_devices()] == ["C"]
+
+
 # ---------------------------------------------------------------------------
 # send_command error path — lines 691-694
 # ---------------------------------------------------------------------------
+
+
+class TestSendCommandAll404:
+    """F-API-03: all endpoints 404 → DeLonghiUnsupportedError (no retry)."""
+
+    def test_all_404_raises_unsupported(self):
+        api = _make_api(oem_model="DL-striker-cb")
+        resp404 = MagicMock(spec=requests.Response)
+        resp404.status_code = 404
+        api._session.post.return_value = resp404
+        with pytest.raises(DeLonghiUnsupportedError):
+            api.send_command("DSN", bytes.fromhex("0d07840f02015512"))
+
+    def test_unsupported_is_apierror_subclass(self):
+        assert issubclass(DeLonghiUnsupportedError, DeLonghiApiError)
+
+    def test_unsupported_not_retried_by_decorator(self):
+        """A wrapper sees the unsupported error once, not RETRY_COUNT times."""
+        api = _make_api(oem_model="DL-striker-cb")
+        resp404 = MagicMock(spec=requests.Response)
+        resp404.status_code = 404
+        api._session.post.return_value = resp404
+        # cancel_brew delegates to send_command (which is @_retry). The
+        # all-404 path must surface immediately without the decorator retrying.
+        call_count = {"n": 0}
+        real_post = api._session.post
+
+        def _counting_post(*a, **k):
+            call_count["n"] += 1
+            return real_post(*a, **k)
+
+        api._session.post = _counting_post
+        with (
+            patch("custom_components.delonghi_coffee.api.time.sleep"),
+            pytest.raises(DeLonghiUnsupportedError),
+        ):
+            api.cancel_brew("DSN")
+        # striker → single endpoint attempt, one POST, no retry storm
+        assert call_count["n"] == 1
+
+
+class TestClampTokenTtl:
+    """F-API-08: clamp absurd/short expires_in to avoid refresh storms."""
+
+    def test_negative_clamped_to_floor(self):
+        assert _clamp_token_ttl(-100) == 600
+
+    def test_short_clamped_to_floor(self):
+        assert _clamp_token_ttl(120) == 600
+
+    def test_non_numeric_uses_default_then_floor(self):
+        assert _clamp_token_ttl(None) == 86400
+        assert _clamp_token_ttl("garbage") == 86400
+
+    def test_normal_value_preserved(self):
+        assert _clamp_token_ttl(3600) == 3600
 
 
 class TestSendCommandHttpError:

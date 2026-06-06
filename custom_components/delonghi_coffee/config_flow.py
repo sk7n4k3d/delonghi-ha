@@ -40,6 +40,22 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._reauth_entry: config_entries.ConfigEntry | None = None
+        # Carried between async_step_user and async_step_select_device when
+        # an account exposes more than one coffee machine.
+        self._pending_creds: dict[str, Any] = {}
+        self._coffee_devices: list[dict[str, Any]] = []
+
+    def _entry_data_for(self, device: dict[str, Any]) -> dict[str, Any]:
+        """Build the config-entry data payload for a chosen coffee device."""
+        return {
+            CONF_EMAIL: self._pending_creds[CONF_EMAIL],
+            CONF_PASSWORD: self._pending_creds[CONF_PASSWORD],
+            CONF_REGION: self._pending_creds[CONF_REGION],
+            "dsn": device["dsn"],
+            "model": device.get("oem_model") or device.get("model") or "unknown",
+            "device_name": device.get("product_name"),
+            "sw_version": device.get("sw_version"),
+        }
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the initial step."""
@@ -56,25 +72,32 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 await self.hass.async_add_executor_job(api.authenticate)
                 devices = await self.hass.async_add_executor_job(api.get_devices)
+                coffee = await self.hass.async_add_executor_job(api.coffee_devices)
 
                 if not devices:
                     errors["base"] = "no_devices"
+                elif not coffee:
+                    # Account has appliances but none look like a coffee
+                    # machine (e.g. only a Pinguino A/C) — issue #30.
+                    errors["base"] = "no_coffee_machine"
                 else:
                     await self.async_set_unique_id(user_input[CONF_EMAIL])
                     self._abort_if_unique_id_configured()
 
-                    device = devices[0]
+                    self._pending_creds = {
+                        CONF_EMAIL: user_input[CONF_EMAIL],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        CONF_REGION: region,
+                    }
+                    self._coffee_devices = coffee
+
+                    if len(coffee) > 1:
+                        return await self.async_step_select_device()
+
+                    device = coffee[0]
                     return self.async_create_entry(
                         title=f"De'Longhi {device.get('product_name', device['dsn'])}",
-                        data={
-                            CONF_EMAIL: user_input[CONF_EMAIL],
-                            CONF_PASSWORD: user_input[CONF_PASSWORD],
-                            CONF_REGION: region,
-                            "dsn": device["dsn"],
-                            "model": device.get("oem_model", "unknown"),
-                            "device_name": device.get("product_name"),
-                            "sw_version": device.get("sw_version"),
-                        },
+                        data=self._entry_data_for(device),
                     )
             except DeLonghiAuthError:
                 errors["base"] = "invalid_auth"
@@ -88,6 +111,23 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
+        )
+
+    async def async_step_select_device(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Let the user pick which coffee machine to add (multi-machine accounts)."""
+        if user_input is not None:
+            dsn = user_input["dsn"]
+            device = next((d for d in self._coffee_devices if d["dsn"] == dsn), None)
+            if device is not None:
+                return self.async_create_entry(
+                    title=f"De'Longhi {device.get('product_name', device['dsn'])}",
+                    data=self._entry_data_for(device),
+                )
+
+        choices = {d["dsn"]: f"{d.get('product_name') or d['dsn']} ({d['dsn']})" for d in self._coffee_devices}
+        return self.async_show_form(
+            step_id="select_device",
+            data_schema=vol.Schema({vol.Required("dsn"): vol.In(choices)}),
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:

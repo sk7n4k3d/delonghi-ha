@@ -5,6 +5,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.19] — 2026-06-06
+
+Audit-driven fixes. Headline: multi-appliance accounts (issue #30).
+
+### Fixed
+- **Device selection (#30):** the config flow no longer binds blindly to
+  `devices[0]`. Accounts that also hold a non-coffee De'Longhi appliance
+  (e.g. a Pinguino air conditioner, `oem_model=DL-pac`) were being bound to
+  the wrong DSN, so every command returned `HTTP 404` on
+  `app_data_request/datapoints.json`. The flow now filters on the known
+  coffee-machine OEM prefixes (`DL-striker-`, `DL-pd-`, `DL-dinamica-`,
+  `DL-maestosa-`, `DL-millcore`), shows a picker when an account has more
+  than one coffee machine, and reports `no_coffee_machine` when none is
+  found. `get_devices()` likewise derives device metadata / oem backfill
+  from a coffee device, not the first arbitrary one.
+- **Profile selection no longer reverts:** the coordinator was overwriting
+  the user-selected profile with the monitor's `profile` byte on every poll,
+  silently reverting the profile-select dropdown within 60s. It is now only
+  seeded once (first refresh).
+- **Fast-poll after brew:** pressing a brew button now forces an immediate
+  refresh so the 5s fast-poll window takes effect right away instead of after
+  the already-armed 60s timer — the transient Brewing/Frothing states are
+  actually captured.
+- **Retry storms:** `cancel_brew`, `sync_recipes` and the bean-system
+  commands no longer stack a second `@_retry` on top of `send_command`
+  (could fire up to 9 POSTs and replay commands). All-404 now raises a
+  dedicated `DeLonghiUnsupportedError` that the retry decorator treats as
+  definitive.
+- **Token TTL clamp:** a short/absurd `expires_in` from Ayla is clamped to a
+  600s floor to avoid a re-auth-on-every-request storm.
+- **Cancel / brew button availability:** cancel is now offered during all
+  cancellable busy states (Rinsing/Heating/Descaling/Turning On), not just
+  the narrow Brewing window; the dead `"Sleep"` guard now matches the real
+  `"Going to sleep"` state name.
+
+### Changed
+- Bumped `requests` floor to `>=2.32.0` (CVE-2023-32681, CVE-2024-35195).
+
 ## [1.6.0-beta.18] — 2026-05-14
 
 Ships a fallback for the Eletta Explore firmware bug where the cumulative

@@ -63,22 +63,28 @@ class TestUserStepInitial:
         assert result["errors"] == {}
 
 
+def _coffee_devices(devices):
+    """Mirror api.coffee_devices(): keep coffee machines (or unmapped models)."""
+    from custom_components.delonghi_coffee.const import is_coffee_oem_model
+
+    return [d for d in devices if is_coffee_oem_model(d.get("oem_model") or d.get("model"))]
+
+
 class TestUserStepHappyPath:
-    def test_creates_entry_with_first_device(self):
+    def test_creates_entry_with_single_coffee_device(self):
         flow = _make_flow()
         api = MagicMock()
         api.authenticate = MagicMock()
-        api.get_devices = MagicMock(
-            return_value=[
-                {
-                    "dsn": "DSN-A",
-                    "oem_model": "DL-striker-cb",
-                    "product_name": "Soul",
-                    "sw_version": "1.2.3",
-                },
-                {"dsn": "DSN-B"},  # ignored — only first kept
-            ]
-        )
+        devices = [
+            {
+                "dsn": "DSN-A",
+                "oem_model": "DL-striker-cb",
+                "product_name": "Soul",
+                "sw_version": "1.2.3",
+            },
+        ]
+        api.get_devices = MagicMock(return_value=devices)
+        api.coffee_devices = MagicMock(return_value=_coffee_devices(devices))
 
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
             result = _run(
@@ -101,11 +107,75 @@ class TestUserStepHappyPath:
         api.authenticate.assert_called_once()
         api.get_devices.assert_called_once()
 
+    def test_skips_non_coffee_appliance(self):
+        """Issue #30: account holds a Pinguino A/C (DL-pac) AND an Eletta.
+        The flow must pick the coffee machine, not devices[0]."""
+        flow = _make_flow()
+        api = MagicMock()
+        api.authenticate = MagicMock()
+        devices = [
+            {
+                "dsn": "AC000W028045723",
+                "oem_model": "DL-pac",
+                "product_name": "Pinguino",
+                "sw_version": "ADA 1.8.1",
+            },
+            {
+                "dsn": "AC000W038925641",
+                "oem_model": "DL-striker-cb",
+                "product_name": "Eletta Explore",
+                "sw_version": "ADA 1.6",
+            },
+        ]
+        api.get_devices = MagicMock(return_value=devices)
+        api.coffee_devices = MagicMock(return_value=_coffee_devices(devices))
+
+        with patch.object(cf_mod, "DeLonghiApi", return_value=api):
+            result = _run(flow.async_step_user({"email": "u@x.com", "password": "p", "region": "EU"}))
+
+        assert result["type"] == "create_entry"
+        assert result["data"]["dsn"] == "AC000W038925641"
+        assert result["data"]["model"] == "DL-striker-cb"
+        assert result["data"]["device_name"] == "Eletta Explore"
+
+    def test_no_coffee_machine_returns_error(self):
+        """Account with only non-coffee appliances → no_coffee_machine error."""
+        flow = _make_flow()
+        api = MagicMock()
+        api.authenticate = MagicMock()
+        devices = [
+            {"dsn": "AC1", "oem_model": "DL-pac", "product_name": "Pinguino"},
+        ]
+        api.get_devices = MagicMock(return_value=devices)
+        api.coffee_devices = MagicMock(return_value=_coffee_devices(devices))
+        with patch.object(cf_mod, "DeLonghiApi", return_value=api):
+            result = _run(flow.async_step_user({"email": "u@x.com", "password": "p", "region": "EU"}))
+        assert result["type"] == "form"
+        assert result["errors"] == {"base": "no_coffee_machine"}
+
+    def test_multiple_coffee_machines_shows_picker(self):
+        """Two coffee machines → a selection step instead of guessing."""
+        flow = _make_flow()
+        api = MagicMock()
+        api.authenticate = MagicMock()
+        devices = [
+            {"dsn": "DSN-1", "oem_model": "DL-striker-cb", "product_name": "Eletta"},
+            {"dsn": "DSN-2", "oem_model": "DL-pd-soul", "product_name": "PrimaDonna"},
+        ]
+        api.get_devices = MagicMock(return_value=devices)
+        api.coffee_devices = MagicMock(return_value=_coffee_devices(devices))
+        with patch.object(cf_mod, "DeLonghiApi", return_value=api):
+            result = _run(flow.async_step_user({"email": "u@x.com", "password": "p", "region": "EU"}))
+        assert result["type"] == "form"
+        assert result["step_id"] == "select_device"
+
     def test_uses_dsn_when_product_name_missing(self):
         flow = _make_flow()
         api = MagicMock()
         api.authenticate = MagicMock()
-        api.get_devices = MagicMock(return_value=[{"dsn": "DSN-X"}])
+        devices = [{"dsn": "DSN-X"}]  # no oem_model → benefit of the doubt (coffee)
+        api.get_devices = MagicMock(return_value=devices)
+        api.coffee_devices = MagicMock(return_value=_coffee_devices(devices))
         with patch.object(cf_mod, "DeLonghiApi", return_value=api):
             result = _run(
                 flow.async_step_user(

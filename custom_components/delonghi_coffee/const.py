@@ -340,6 +340,34 @@ SKU_TO_ECAM_PATTERN: Final[dict[str, str]] = {
     "217055": "ECAM61075",
 }
 
+# OEM model prefixes that identify a *coffee machine* (as opposed to other
+# De'Longhi connected appliances that live on the same Ayla/Coffee Link
+# account — e.g. the Pinguino air conditioner exposes oem_model "DL-pac").
+# A single account can hold several appliance types; commands like
+# app_data_request only exist on the coffee-machine devices, so anything
+# else must be filtered out before we pick a DSN (issue #30).
+COFFEE_OEM_PREFIXES: Final[tuple[str, ...]] = (
+    "DL-striker-",
+    "DL-pd-",
+    "DL-dinamica-",
+    "DL-maestosa-",
+    "DL-millcore",
+)
+
+
+def is_coffee_oem_model(oem_model: str | None) -> bool:
+    """Return True if the OEM model string denotes a De'Longhi coffee machine.
+
+    Unknown/empty models default to True: we'd rather attempt control of an
+    unrecognised machine than silently drop a genuine (but not-yet-mapped)
+    coffee maker. Non-coffee appliances advertise distinct prefixes
+    (``DL-pac`` = Pinguino A/C, etc.) and are excluded.
+    """
+    if not oem_model:
+        return True
+    return oem_model.startswith(COFFEE_OEM_PREFIXES)
+
+
 # TranscodeTable API endpoint (De'Longhi backend)
 TRANSCODE_TABLE_URL: Final = "https://delonghibe.reply.it/api/getTranscodeTable.sr"
 
