@@ -1,7 +1,7 @@
 """Test button.py — entity classes + async_setup_entry flow."""
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,6 +25,8 @@ def _make_coordinator(selected_profile=2, custom_recipe_names=None, beverages=No
     coord.beverages = beverages or []
     coord.data = {"machine_state": machine_state}
     coord.async_add_listener = MagicMock(return_value=lambda: None)
+    coord.request_fast_poll = MagicMock()
+    coord.async_request_refresh = AsyncMock()
     return coord
 
 
@@ -96,6 +98,22 @@ class TestBrewButtonInit:
         assert btn._attr_name == "Booster"
 
 
+class TestBrewButtonAvailability:
+    def _btn(self, machine_state):
+        coord = _make_coordinator(machine_state=machine_state)
+        return DeLonghiBrewButton(_make_api(), coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
+
+    def test_available_when_ready(self):
+        assert self._btn("Ready").available is True
+
+    def test_unavailable_when_off(self):
+        assert self._btn("Off").available is False
+
+    def test_unavailable_when_going_to_sleep(self):
+        """F-BTN-01: the dead 'Sleep' guard must match the real state name."""
+        assert self._btn("Going to sleep").available is False
+
+
 class TestBrewButtonPress:
     def test_uses_selected_profile(self):
         coord = _make_coordinator(selected_profile=3)
@@ -124,6 +142,32 @@ class TestBrewButtonPress:
         with pytest.raises(HomeAssistantError, match="Failed to brew espresso"):
             _run(btn.async_press())
 
+    def test_arms_fast_poll_and_kicks_immediate_refresh(self):
+        """F-COORD-02: after a successful brew the button both arms the fast
+        poll window AND forces an immediate refresh so the new 5s interval
+        takes effect now instead of after the already-armed 60s timer."""
+        coord = _make_coordinator(selected_profile=1)
+        api = _make_api()
+        btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
+        btn.hass = _make_hass_with_executor()
+        _run(btn.async_press())
+        coord.request_fast_poll.assert_called_once()
+        coord.async_request_refresh.assert_awaited_once()
+
+    def test_no_refresh_when_brew_fails(self):
+        """A failed brew must not arm fast-poll / refresh (command never sent)."""
+        coord = _make_coordinator(selected_profile=1)
+        api = _make_api()
+        api.brew_beverage.side_effect = DeLonghiApiError("boom")
+        btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
+        btn.hass = _make_hass_with_executor()
+        from homeassistant.exceptions import HomeAssistantError
+
+        with pytest.raises(HomeAssistantError):
+            _run(btn.async_press())
+        coord.request_fast_poll.assert_not_called()
+        coord.async_request_refresh.assert_not_awaited()
+
 
 class TestCancelButton:
     def test_init_attributes(self):
@@ -140,6 +184,19 @@ class TestCancelButton:
 
     def test_unavailable_when_idle(self):
         coord = _make_coordinator(machine_state="Ready")
+        btn = DeLonghiCancelButton(_make_api(), coord, "DSN", "m", "n", None)
+        assert btn.available is False
+
+    def test_available_during_other_busy_states(self):
+        """F-BTN-02: cancel must also be offered during Rinsing/Heating/etc.,
+        not only the narrow 'Brewing' window."""
+        for busy in ("Rinsing", "Heating", "Descaling", "Turning On"):
+            coord = _make_coordinator(machine_state=busy)
+            btn = DeLonghiCancelButton(_make_api(), coord, "DSN", "m", "n", None)
+            assert btn.available is True, f"cancel should be available during {busy}"
+
+    def test_unavailable_when_going_to_sleep(self):
+        coord = _make_coordinator(machine_state="Going to sleep")
         btn = DeLonghiCancelButton(_make_api(), coord, "DSN", "m", "n", None)
         assert btn.available is False
 

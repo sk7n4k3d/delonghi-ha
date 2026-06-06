@@ -16,12 +16,20 @@
         "data": {
           "password": "Password"
         }
+      },
+      "select_device": {
+        "title": "Select your coffee machine",
+        "description": "Your account has more than one coffee machine. Choose the one to add.",
+        "data": {
+          "dsn": "Coffee machine"
+        }
       }
     },
     "error": {
       "invalid_auth": "Invalid email or password",
       "cannot_connect": "Cannot connect to De'Longhi servers",
       "no_devices": "No coffee machines found on this account",
+      "no_coffee_machine": "This account has De'Longhi appliances but no coffee machine (e.g. only a Pinguino air conditioner). The integration only supports coffee machines.",
       "unknown": "Unexpected error"
     },
     "abort": {

@@ -150,7 +150,7 @@ class TestPrimaDonnaSoulButtonCoverage:
 # ─────────────────────────────────────────────────────────────────────────
 
 import asyncio  # noqa: E402
-from unittest.mock import MagicMock  # noqa: E402
+from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -173,6 +173,8 @@ def _make_coord(machine_state: str = "Ready", selected_profile: int = 1) -> Magi
     coord.selected_profile = selected_profile
     coord.custom_recipe_names = {}
     coord.beverages = []
+    coord.request_fast_poll = MagicMock()
+    coord.async_request_refresh = AsyncMock()
     return coord
 
 
@@ -223,7 +225,7 @@ class TestBrewButtonEntity:
         assert entity.available is False
 
     def test_unavailable_when_sleeping(self):
-        entity, _ = self._entity("Sleep")
+        entity, _ = self._entity("Going to sleep")
         assert entity.available is False
 
     def test_press_dispatches_brew_beverage(self):

@@ -137,7 +137,9 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
             return False
         data = self.coordinator.data or {}
         state = data.get("machine_state", "Unknown")
-        return state not in ("Off", "Sleep")
+        # "Going to sleep" is the real sleep state name (MACHINE_STATES[9]);
+        # the old "Sleep" literal never matched anything (F-BTN-01).
+        return state not in ("Off", "Going to sleep")
 
     async def async_press(self) -> None:
         """Brew the beverage using the selected profile's recipe."""
@@ -155,8 +157,15 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         # them and watchers never see anything happen.
         # Older coordinator stubs (test harness without request_fast_poll)
         # are tolerated by the AttributeError suppression.
+        #
+        # request_fast_poll only reassigns update_interval; HA re-reads it in
+        # _schedule_refresh, which runs AFTER the currently-armed 60s timer
+        # fires. So we also kick an immediate refresh: it forces _schedule_refresh
+        # to re-read the new 5s interval now, capturing the Pre-brewing/Brewing
+        # transitions instead of missing up to 60s of the brew (F-COORD-02 / #5).
         with contextlib.suppress(AttributeError):
             self.coordinator.request_fast_poll(duration_s=90.0, interval_s=5.0)
+            await self.coordinator.async_request_refresh()
 
 
 class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
@@ -180,11 +189,16 @@ class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity)
         self._attr_icon = "mdi:stop-circle-outline"
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
+    # States during which a brew/operation is in progress and can be cancelled.
+    # The cancel_brew service itself has no such gate, so this only governs
+    # button visibility (F-BTN-02).
+    _CANCELLABLE_STATES = ("Brewing", "Rinsing", "Heating", "Descaling", "Turning On")
+
     @property
     def available(self) -> bool:
-        """Only available when machine is actively brewing."""
+        """Available while the machine is in any cancellable busy state."""
         state = self.coordinator.data.get("machine_state", "Unknown")
-        return state == "Brewing"
+        return state in self._CANCELLABLE_STATES
 
     async def async_press(self) -> None:
         """Cancel current operation."""
@@ -222,7 +236,8 @@ class DeLonghiSyncButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
             return False
         data = self.coordinator.data or {}
         state = data.get("machine_state", "Unknown")
-        return state not in ("Off", "Sleep")
+        # Real sleep state name is "Going to sleep" (F-BTN-01).
+        return state not in ("Off", "Going to sleep")
 
     async def async_press(self) -> None:
         """Force sync recipes for the selected profile."""

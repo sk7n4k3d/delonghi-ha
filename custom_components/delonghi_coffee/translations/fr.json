@@ -16,13 +16,21 @@
         "data": {
           "password": "Mot de passe"
         }
+      },
+      "select_device": {
+        "title": "Choisissez votre machine à café",
+        "description": "Votre compte contient plusieurs machines à café. Choisissez celle à ajouter.",
+        "data": {
+          "dsn": "Machine à café"
+        }
       }
     },
     "error": {
       "invalid_auth": "Email ou mot de passe invalide",
       "cannot_connect": "Impossible de se connecter aux serveurs De'Longhi",
       "no_devices": "Aucune machine a cafe trouvee sur ce compte",
-      "unknown": "Erreur inattendue"
+      "unknown": "Erreur inattendue",
+      "no_coffee_machine": "Ce compte contient des appareils De'Longhi mais aucune machine à café (par ex. uniquement un climatiseur Pinguino). L'intégration ne gère que les machines à café."
     },
     "abort": {
       "already_configured": "Ce compte est deja configure",

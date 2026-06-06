@@ -33,6 +33,7 @@ from .const import (
     RETRY_DELAY,
     TEMPLATE_BEVERAGE_KEYS,
     TRANSCODE_TABLE_URL,
+    is_coffee_oem_model,
 )
 from .logger import ApiTimer, RateLimitTracker, sanitize
 
@@ -84,12 +85,42 @@ def _decode_utf16(data: bytes) -> str:
     return cleaned.strip()
 
 
+# _ensure_token refreshes when within 300s of expiry, so any TTL <= 300 would
+# trigger a refresh on every single request. Clamp the server-provided
+# expires_in to a sane floor to avoid a refresh storm on absurd/negative values.
+_MIN_TOKEN_TTL_SECONDS = 600
+
+
+def _clamp_token_ttl(expires_in: Any, default: int = 86400) -> float:
+    """Coerce an Ayla ``expires_in`` to a usable TTL in seconds.
+
+    Non-numeric → ``default``; numeric but below the refresh window floor →
+    clamped to :data:`_MIN_TOKEN_TTL_SECONDS` (F-API-08).
+    """
+    try:
+        ttl = float(expires_in)
+    except (TypeError, ValueError):
+        ttl = float(default)
+    return max(ttl, float(_MIN_TOKEN_TTL_SECONDS))
+
+
 class DeLonghiAuthError(Exception):
     """Authentication error."""
 
 
 class DeLonghiApiError(Exception):
     """API communication error."""
+
+
+class DeLonghiUnsupportedError(DeLonghiApiError):
+    """The targeted command/property does not exist on this device.
+
+    Raised when every candidate command endpoint returns 404 — the model
+    simply doesn't expose it. Subclass of :class:`DeLonghiApiError` so existing
+    ``except DeLonghiApiError`` handlers still catch it, but distinguished so
+    the retry decorator treats it as definitive (no point retrying a property
+    that will never exist).
+    """
 
 
 def _retry(func):  # noqa: ANN001, ANN202
@@ -110,7 +141,12 @@ def _retry(func):  # noqa: ANN001, ANN202
             except DeLonghiAuthError:
                 raise
             except (requests.RequestException, DeLonghiApiError) as err:
-                # Don't retry 404s — property doesn't exist, retrying won't help
+                # Don't retry 404s — property doesn't exist, retrying won't help.
+                # Same for DeLonghiUnsupportedError (all endpoints 404'd): the
+                # model doesn't expose this command, so retrying — including a
+                # second, outer @_retry wrapper — only wastes time and quota.
+                if isinstance(err, DeLonghiUnsupportedError):
+                    raise
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 404:
                     raise
                 # Re-authenticate on 401 (token revoked server-side).
@@ -541,7 +577,7 @@ class DeLonghiApi:
             ayla_data: dict[str, Any] = ayla_resp.json()
             self._ayla_token = ayla_data["access_token"]
             self._ayla_refresh = ayla_data.get("refresh_token")
-            self._token_expires = time.time() + ayla_data.get("expires_in", 86400)
+            self._token_expires = time.time() + _clamp_token_ttl(ayla_data.get("expires_in"))
 
             _LOGGER.info("De'Longhi auth successful")
             return True
@@ -578,7 +614,7 @@ class DeLonghiApi:
                         data: dict[str, Any] = resp.json()
                         self._ayla_token = data["access_token"]
                         self._ayla_refresh = data.get("refresh_token", self._ayla_refresh)
-                        self._token_expires = time.time() + data.get("expires_in", 86400)
+                        self._token_expires = time.time() + _clamp_token_ttl(data.get("expires_in"))
                         return
                 except (requests.RequestException, KeyError, ValueError) as err:
                     _LOGGER.debug("Token refresh failed, re-authenticating: %s", err)
@@ -592,6 +628,16 @@ class DeLonghiApi:
             "x-ayla-source": "Mobile",
         }
 
+    def coffee_devices(self) -> list[dict[str, Any]]:
+        """Return only the coffee-machine devices from the last get_devices().
+
+        Filters out non-coffee De'Longhi appliances that may share the Ayla
+        account (e.g. Pinguino air conditioners, oem_model ``DL-pac``).
+        Unmapped/empty models are kept (benefit of the doubt). See
+        :func:`const.is_coffee_oem_model` and issue #30.
+        """
+        return [d for d in self._devices if is_coffee_oem_model(d.get("oem_model") or d.get("model"))]
+
     @_retry
     def get_devices(self) -> list[dict[str, Any]]:
         """Get all De'Longhi devices."""
@@ -603,9 +649,13 @@ class DeLonghiApi:
         resp.raise_for_status()
         self._devices = [d["device"] for d in resp.json()]
 
-        # Store device info from first device for device_info
-        if self._devices:
-            dev = self._devices[0]
+        # Store device info from the first *coffee* device. A single Ayla
+        # account can also carry other De'Longhi appliances (Pinguino A/C =
+        # oem_model "DL-pac") which must never drive coffee-command routing
+        # or device metadata (issue #30).
+        coffee = self.coffee_devices()
+        if coffee:
+            dev = coffee[0]
             self._device_name = dev.get("product_name")
             self._sw_version = dev.get("sw_version")
             # Backfill oem_model from Ayla metadata if the config entry
@@ -832,7 +882,9 @@ class DeLonghiApi:
             )
             resp.raise_for_status()
 
-        raise DeLonghiApiError("No valid command property found (all endpoints returned 404)")
+        raise DeLonghiUnsupportedError(
+            "No valid command property found (all endpoints returned 404) — this model does not expose this command"
+        )
 
     def ping_connected(self, dsn: str) -> bool:
         """Send app_device_connected ping to force machine to push data updates.
@@ -1392,7 +1444,9 @@ class DeLonghiApi:
         _LOGGER.info("Brewing custom %s: %s", beverage, brew_cmd.hex())
         return self.send_command(dsn, brew_cmd)
 
-    @_retry
+    # No @_retry here: send_command already carries the retry/backoff logic.
+    # Stacking a second @_retry would multiply attempts (up to 9 POSTs) and
+    # could replay the command several times (F-API-02).
     def cancel_brew(self, dsn: str) -> bool:
         """Cancel the current brew/operation. Send ECAM 0x8F Cancel Command."""
         # len = total(5) - 1 = 4: [0x0D][0x04][0x8F] + CRC(2)
@@ -1401,8 +1455,7 @@ class DeLonghiApi:
         _LOGGER.info("Sending CANCEL command to %s", dsn)
         return self.send_command(dsn, cancel_cmd)
 
-    @_retry
-    def sync_recipes(self, dsn: str, profile: int = 1) -> bool:
+    def sync_recipes(self, dsn: str, profile: int = 1) -> bool:  # send_command retries (F-API-02)
         """Force machine to synchronize and upload recipes to the cloud.
 
         Sends ECAM 0xA9 (READ_RECIPES) for a specific profile.
@@ -1490,16 +1543,14 @@ class DeLonghiApi:
         # total = 1(0x0D) + 1(len) + 1(opcode) + 46(payload) + 2(crc) = 51
         return bytes([0x0D, len(payload) + 4, OPCODE_WRITE_BEAN_SYSTEM]) + payload
 
-    @_retry
-    def select_bean_system(self, dsn: str, slot: int) -> bool:
+    def select_bean_system(self, dsn: str, slot: int) -> bool:  # send_command retries (F-API-02)
         """Activate a bean profile on the machine (ECAM 0xB9)."""
         body = self._build_bean_select_body(slot)
         cmd = body + self._crc16(body)
         _LOGGER.info("Selecting bean system slot %d on %s", slot, dsn)
         return self.send_command(dsn, cmd)
 
-    @_retry
-    def read_bean_system(self, dsn: str, slot: int) -> bool:
+    def read_bean_system(self, dsn: str, slot: int) -> bool:  # send_command retries (F-API-02)
         """Ask the machine to publish a bean profile (ECAM 0xBA).
 
         The machine answers through the normal property push channel
@@ -1511,8 +1562,7 @@ class DeLonghiApi:
         _LOGGER.info("Reading bean system slot %d on %s", slot, dsn)
         return self.send_command(dsn, cmd)
 
-    @_retry
-    def write_bean_system(
+    def write_bean_system(  # send_command retries (F-API-02)
         self,
         dsn: str,
         slot: int,
