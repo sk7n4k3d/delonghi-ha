@@ -5,6 +5,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.20] — 2026-08-26
+
+Investigation pass on issue #23 (PrimaDonna Soul power/brew reported not
+working) + supply-chain hardening. The LAN fix below is a **candidate**
+root cause — not confirmed against real device logs, since no reporter has
+provided diagnostics yet.
+
+### Fixed
+- **LAN session zombie (candidate root cause for #23):** `send_command_lan`
+  trusted any LAN session ever established by a handshake, even if the
+  device had gone silent for hours (WiFi drop, reboot, falling back to
+  cloud-only). Commands were queued into a dead session, the queue never
+  drained, and the cloud fallback in `switch.py` never fired because
+  `send_command_lan` reported success — so power on/off could silently go
+  nowhere on models with LAN enabled (PrimaDonna Soul family). The LAN
+  server now tracks last device activity (handshake + command poll) and a
+  session must have been confirmed within 30s to be trusted; otherwise the
+  command falls back to cloud.
+- **Pre-brew safety-check visibility (F-API-05):** `_pre_brew_check` skipped
+  its machine-state/alarm checks silently when the cloud status couldn't be
+  read — either via a caught exception (logged at DEBUG) or, more often,
+  via `get_status()` swallowing its own errors and returning
+  `machine_state="Unknown"` without raising at all (the except branch never
+  saw it). Both paths now log at WARNING. Behaviour is unchanged (still
+  sends the command — the firmware remains the real last-resort guard),
+  only visibility improves. Targets the "nothing happens when I brew, no
+  useful logs" pattern reported in #23.
+- **Concurrent 401 re-authentication (F-API-04):** `_reauthenticating` was a
+  plain bool checked-then-set with no lock. Several executor threads (poll
+  + button press + switch toggle can all fire concurrently) hitting 401 on
+  the same stale token could all call `authenticate()` at once, racing on
+  session state. Now serialized on the existing token lock, with a 10s dedup
+  window so a thread that acquires the lock right after another just
+  refreshed doesn't redundantly re-authenticate and burn already
+  rate-limited Ayla/Gigya quota (issue #18).
+
+### Security
+- **CI supply chain (F-CI-03):** all GitHub Actions across the six
+  workflows are now pinned to commit SHA instead of mutable version tags
+  (`checkout`, `setup-python`, `upload-artifact`, `action-gh-release`,
+  `ruff-action`, `hacs/action`) — `hassfest` was already pinned this way.
+  Each pin keeps its resolved tag as a trailing comment.
+
 ## [1.6.0-beta.19] — 2026-06-06
 
 Audit-driven fixes. Headline: multi-appliance accounts (issue #30).
