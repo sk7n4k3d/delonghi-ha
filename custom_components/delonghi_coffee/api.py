@@ -27,6 +27,7 @@ from .const import (
     OPCODE_READ_BEAN_SYSTEM,
     OPCODE_SELECT_BEAN_SYSTEM,
     OPCODE_WRITE_BEAN_SYSTEM,
+    REAUTH_DEDUP_WINDOW,
     REGIONS,
     REQUEST_TIMEOUT,
     RETRY_COUNT,
@@ -155,32 +156,55 @@ def _retry(func):  # noqa: ANN001, ANN202
                 # auth path (which would just fail the same way).
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 401:
                     self_obj = args[0]
-                    if getattr(self_obj, "_reauthenticating", False):
-                        _LOGGER.error("Got 401 during re-authentication, aborting retry loop")
-                        raise DeLonghiAuthError("re-authentication itself returned 401") from err
-                    _LOGGER.warning("Got 401, re-authenticating")
-                    self_obj._reauthenticating = True
-                    try:
-                        # H-coffee-3 (2026-05-08): do NOT suppress auth/api
-                        # errors raised by authenticate() itself. The earlier
-                        # ``contextlib.suppress(DeLonghiAuthError,
-                        # DeLonghiApiError)`` swallowed the real reason (bad
-                        # password, Gigya 502, etc.), let the loop retry the
-                        # SAME call two more times — wasting Gigya quota —
-                        # and surfaced the generic ``function failed after
-                        # N attempts`` message. The coordinator then mapped
-                        # that to UpdateFailed (transient) and HA never
-                        # prompted the user for reauth. Propagating the
-                        # original error lets the coordinator translate it
-                        # into ConfigEntryAuthFailed (auth) or UpdateFailed
-                        # (api) with the actual reason.
-                        try:
-                            self_obj.authenticate()
-                        except (DeLonghiAuthError, DeLonghiApiError):
-                            self_obj._reauthenticating = False
-                            raise
-                    finally:
-                        self_obj._reauthenticating = False
+                    # F-API-04: serialize on the same lock _ensure_token()
+                    # uses for proactive refresh. Without it, several
+                    # executor threads hitting 401 on the same stale token
+                    # could all observe ``_reauthenticating is False``, all
+                    # flip it to True, and all call authenticate()
+                    # concurrently — racing on session/token state.
+                    with self_obj._token_lock:
+                        if getattr(self_obj, "_reauthenticating", False):
+                            _LOGGER.error("Got 401 during re-authentication, aborting retry loop")
+                            raise DeLonghiAuthError("re-authentication itself returned 401") from err
+                        # Another thread may have refreshed the token while
+                        # we were waiting for the lock. Re-authenticating
+                        # again immediately would waste already rate-limited
+                        # Ayla/Gigya quota (issue #18) for no benefit — skip
+                        # it and just retry with the now-fresh token.
+                        recently_reauthed = (
+                            self_obj._last_401_reauth_monotonic is not None
+                            and time.monotonic() - self_obj._last_401_reauth_monotonic < REAUTH_DEDUP_WINDOW
+                        )
+                        if recently_reauthed:
+                            _LOGGER.debug(
+                                "Got 401 but another call just re-authenticated < %.0fs ago, skipping redundant auth",
+                                REAUTH_DEDUP_WINDOW,
+                            )
+                        else:
+                            _LOGGER.warning("Got 401, re-authenticating")
+                            self_obj._reauthenticating = True
+                            try:
+                                # H-coffee-3 (2026-05-08): do NOT suppress auth/api
+                                # errors raised by authenticate() itself. The earlier
+                                # ``contextlib.suppress(DeLonghiAuthError,
+                                # DeLonghiApiError)`` swallowed the real reason (bad
+                                # password, Gigya 502, etc.), let the loop retry the
+                                # SAME call two more times — wasting Gigya quota —
+                                # and surfaced the generic ``function failed after
+                                # N attempts`` message. The coordinator then mapped
+                                # that to UpdateFailed (transient) and HA never
+                                # prompted the user for reauth. Propagating the
+                                # original error lets the coordinator translate it
+                                # into ConfigEntryAuthFailed (auth) or UpdateFailed
+                                # (api) with the actual reason.
+                                try:
+                                    self_obj.authenticate()
+                                    self_obj._last_401_reauth_monotonic = time.monotonic()
+                                except (DeLonghiAuthError, DeLonghiApiError):
+                                    self_obj._reauthenticating = False
+                                    raise
+                            finally:
+                                self_obj._reauthenticating = False
                 # Rate limited — longer backoff
                 if isinstance(err, requests.HTTPError) and err.response is not None and err.response.status_code == 429:
                     delay = RETRY_DELAY * (2**attempt)  # 4, 8, 16s for 429
@@ -256,6 +280,11 @@ class DeLonghiApi:
         # Guard flag used by the _retry decorator to prevent recursive
         # re-authentication when the auth endpoint itself returns 401.
         self._reauthenticating: bool = False
+        # Monotonic timestamp of the last 401-triggered re-authentication
+        # that succeeded. Lets a thread that acquires _token_lock shortly
+        # after another thread just refreshed skip a redundant authenticate()
+        # call (F-API-04) — see REAUTH_DEDUP_WINDOW.
+        self._last_401_reauth_monotonic: float | None = None
 
         # Rate limiting tracker
         self._rate_tracker = RateLimitTracker()

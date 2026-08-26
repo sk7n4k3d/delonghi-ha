@@ -84,6 +84,15 @@ POWER_STALE_THRESHOLD: Final = 3  # Consecutive polls before trusting assumed st
 # going nowhere (issue #23 candidate root cause).
 LAN_SESSION_STALE_SECONDS: Final = 30.0
 
+# 401-triggered re-authentication dedup window (F-API-04). Several threads
+# can hit 401 on the same stale token at nearly the same time; without a
+# lock + dedup window, each one would call authenticate() concurrently —
+# racing on session state — and redundantly, wasting Ayla/Gigya quota that
+# is already rate-limited (see issue #18 400093 fingerprinting). A thread
+# that acquires the lock shortly after another just refreshed the token
+# skips its own authenticate() and simply retries with the fresh token.
+REAUTH_DEDUP_WINDOW: Final = 10.0  # seconds
+
 # Beverage profiles — complete catalog from ContentStack + Ayla recipe keys
 # Keys match Ayla recipe property names; drink_id is the ContentStack/ECAM numeric ID
 BEVERAGES: Final[dict[str, dict[str, str]]] = {

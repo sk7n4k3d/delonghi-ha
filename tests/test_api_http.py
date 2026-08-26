@@ -545,6 +545,115 @@ class TestRetryDecorator:
         # Should only be called once (no retry)
         assert api._session.get.call_count == 1
 
+    def test_401_reauth_blocks_while_token_lock_held_elsewhere(self):
+        """A 401 handler must serialize on ``_token_lock`` (F-API-04).
+
+        Before this fix, ``_reauthenticating`` was a plain bool
+        checked-then-set with no lock — a thread hitting 401 would call
+        ``authenticate()`` immediately regardless of what any other thread
+        was doing. This test holds ``_token_lock`` from the main thread
+        (simulating another in-flight refresh) and proves the 401 handler
+        actually blocks on it instead of racing past.
+        """
+        import threading
+
+        api = DeLonghiApi("test@example.com", "password", region="EU")
+        api._ayla_token = "stale_token"
+        api._token_expires = time.time() + 86400
+        api._session = MagicMock()
+
+        auth_done = threading.Event()
+
+        def fake_get(*_args, **_kwargs):
+            if auth_done.is_set():
+                return _mock_response(200, [{"property": {"name": "test", "value": "ok"}}])
+            return _mock_response(401)
+
+        def fake_auth():
+            auth_done.set()
+
+        api._session.get.side_effect = fake_get
+        result = {}
+
+        def call() -> None:
+            result["props"] = api.get_properties("DSN")
+
+        with (
+            patch.object(api, "authenticate", side_effect=fake_auth) as mock_auth,
+            patch("custom_components.delonghi_coffee.api.time.sleep"),
+        ):
+            api._token_lock.acquire()
+            try:
+                thread = threading.Thread(target=call)
+                thread.start()
+                thread.join(timeout=0.2)
+                assert thread.is_alive(), "401 handler ran authenticate() without waiting for _token_lock"
+                assert mock_auth.call_count == 0
+            finally:
+                api._token_lock.release()
+
+            thread.join(timeout=2.0)
+            assert not thread.is_alive()
+            assert mock_auth.call_count == 1
+            assert "props" in result
+
+    def test_second_thread_skips_redundant_reauth_within_dedup_window(self):
+        """Two threads both hit 401 while the lock was held elsewhere.
+
+        The first to acquire ``_token_lock`` after release re-authenticates;
+        the second must NOT re-authenticate again within
+        ``REAUTH_DEDUP_WINDOW`` — it just retries with the token the first
+        thread already refreshed. Without dedup, both would call
+        authenticate() sequentially, wasting already-rate-limited Ayla/Gigya
+        quota (see issue #18).
+        """
+        import threading
+
+        api = DeLonghiApi("test@example.com", "password", region="EU")
+        api._ayla_token = "stale_token"
+        api._token_expires = time.time() + 86400
+        api._session = MagicMock()
+
+        auth_done = threading.Event()
+
+        def fake_get(*_args, **_kwargs):
+            if auth_done.is_set():
+                return _mock_response(200, [{"property": {"name": "test", "value": "ok"}}])
+            return _mock_response(401)
+
+        def fake_auth():
+            auth_done.set()
+
+        api._session.get.side_effect = fake_get
+        results = []
+
+        def call() -> None:
+            results.append(api.get_properties("DSN"))
+
+        with (
+            patch.object(api, "authenticate", side_effect=fake_auth) as mock_auth,
+            patch("custom_components.delonghi_coffee.api.time.sleep"),
+        ):
+            api._token_lock.acquire()
+            try:
+                t1 = threading.Thread(target=call)
+                t2 = threading.Thread(target=call)
+                t1.start()
+                t2.start()
+                # Give both threads time to block on acquiring _token_lock
+                # inside the 401 handler before we let either proceed.
+                time.sleep(0.05)
+            finally:
+                api._token_lock.release()
+
+            t1.join(timeout=2.0)
+            t2.join(timeout=2.0)
+
+        assert not t1.is_alive()
+        assert not t2.is_alive()
+        assert mock_auth.call_count == 1, f"expected exactly one authenticate() call, got {mock_auth.call_count}"
+        assert len(results) == 2
+
     def test_401_triggers_reauth(self):
         """401 triggers re-authentication then retry."""
         api = DeLonghiApi("test@example.com", "password", region="EU")
