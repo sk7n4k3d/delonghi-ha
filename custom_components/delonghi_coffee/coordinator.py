@@ -15,6 +15,7 @@ from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import (
     DOMAIN,
     FULL_REFRESH_INTERVAL,
+    LAN_SESSION_STALE_SECONDS,
     MONITOR_STALE_TIMEOUT,
     MQTT_KEEPALIVE_INTERVAL,
     SCAN_INTERVAL_SECONDS,
@@ -443,6 +444,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         server = self._lan_server
         if server is None or server.session is None:
+            return False
+        if not server.is_session_alive(LAN_SESSION_STALE_SECONDS):
+            _LAN_LOGGER.warning(
+                "LAN session stale (device silent for >%.0fs), falling back to cloud",
+                LAN_SESSION_STALE_SECONDS,
+            )
             return False
 
         include_app_id = self.api._cmd_property != "data_request"  # noqa: SLF001

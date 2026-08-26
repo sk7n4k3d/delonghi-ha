@@ -76,6 +76,14 @@ POWER_WAKE_DELAY: Final = 15.0  # Seconds between keepalive ping and power-on co
 POWER_RETRY_DELAY: Final = 180.0  # Seconds before re-sending power-on if machine didn't wake
 POWER_STALE_THRESHOLD: Final = 3  # Consecutive polls before trusting assumed state over monitor
 
+# LAN session freshness — a handshake is only trustworthy while the device
+# keeps polling /local_lan/commands.json. cremalink-compatible devices poll
+# every few seconds; 30s gives generous margin for jitter/GC pauses while
+# still detecting a silently-dropped device (WiFi reassociation, reboot,
+# firmware falling back to cloud-only) well before a user notices commands
+# going nowhere (issue #23 candidate root cause).
+LAN_SESSION_STALE_SECONDS: Final = 30.0
+
 # Beverage profiles — complete catalog from ContentStack + Ayla recipe keys
 # Keys match Ayla recipe property names; drink_id is the ContentStack/ECAM numeric ID
 BEVERAGES: Final[dict[str, dict[str, str]]] = {

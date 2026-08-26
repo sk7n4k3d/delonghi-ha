@@ -616,6 +616,25 @@ class TestCoordinatorSendCommandLan:
         coord._lan_server.session = None
         assert asyncio.run(coord.send_command_lan(b"\x0d\x07\x84")) is False
 
+    def test_returns_false_when_session_stale(self) -> None:
+        """A session the device stopped polling must not be trusted forever.
+
+        Without a freshness check, ``send_command_lan`` reports success as
+        soon as *any* handshake ever completed — even if the device has been
+        silent for hours (WiFi drop, reboot onto a new IP, etc.). The
+        command gets queued into a LAN server nobody is polling and the
+        cloud fallback in switch.py never fires, so the machine never
+        receives it (issue #23 candidate root cause on PrimaDonna Soul).
+        """
+        coord = _make_coordinator()
+        server = MagicMock()
+        server.session = MagicMock()
+        server.is_session_alive = MagicMock(return_value=False)
+        coord._lan_server = server
+
+        assert asyncio.run(coord.send_command_lan(b"\x0d\x07\x84")) is False
+        server.enqueue_command.assert_not_called()
+
     def test_enqueues_when_session_active(self) -> None:
         coord = _make_coordinator()
         coord.api._cmd_property = "data_request"
@@ -716,6 +735,85 @@ def _make_handshake_body(time_1: int | None = None) -> dict:
 
         time_1 = int(_time.time())
     return {"key_exchange": {"random_1": random_1, "time_1": time_1}}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Session freshness — a session must expire if the device stops polling.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_session_fresh_immediately_after_handshake() -> None:
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-FRESH",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    async def run() -> None:
+        await server._handle_handshake(_MockRequest(_make_handshake_body()))
+        assert server.is_session_alive(max_age=30.0) is True
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_session_stale_after_max_age_without_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    from custom_components.delonghi_coffee import lan as lan_module
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-STALE",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    fake_clock = [1000.0]
+    monkeypatch.setattr(lan_module.time, "monotonic", lambda: fake_clock[0])
+
+    async def run() -> None:
+        await server._handle_handshake(_MockRequest(_make_handshake_body()))
+        assert server.is_session_alive(max_age=30.0) is True
+
+        fake_clock[0] += 31.0  # device went silent past the freshness window
+        assert server.is_session_alive(max_age=30.0) is False
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_poll_refreshes_session_freshness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every command poll proves the device is alive and resets the clock."""
+    from custom_components.delonghi_coffee import lan as lan_module
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    config = LanServerConfig(
+        dsn="DSN-KEEPALIVE",
+        lan_key="0123456789abcdef0123456789abcdef",
+        advertised_ip="127.0.0.1",
+        bind_host="127.0.0.1",
+    )
+    server = DeLonghiLanServer(config)
+
+    fake_clock = [1000.0]
+    monkeypatch.setattr(lan_module.time, "monotonic", lambda: fake_clock[0])
+
+    async def run() -> None:
+        await server._handle_handshake(_MockRequest(_make_handshake_body()))
+
+        fake_clock[0] += 20.0  # well under max_age, then the device polls
+        await server._handle_command_poll(_MockRequest())
+
+        fake_clock[0] += 20.0  # 40s since handshake, but only 20s since the poll
+        assert server.is_session_alive(max_age=30.0) is True
+
+    asyncio.run(run())
 
 
 @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")

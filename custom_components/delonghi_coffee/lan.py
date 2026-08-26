@@ -401,6 +401,12 @@ class DeLonghiLanServer:
         self._config = config
         self._on_property = on_property
         self._session: LanSession | None = None
+        # Last time the device proved it's still there — either by
+        # completing a handshake or by polling for commands. A session
+        # that's merely "set" but never re-confirmed is indistinguishable
+        # from a device that silently dropped off the LAN (see
+        # is_session_alive).
+        self._last_activity: float | None = None
         self._seq = 0
         self._pending: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._app: Any | None = None
@@ -441,6 +447,18 @@ class DeLonghiLanServer:
     @property
     def session(self) -> LanSession | None:
         return self._session
+
+    def is_session_alive(self, max_age: float) -> bool:
+        """Return True when the session exists AND the device was seen
+        within the last ``max_age`` seconds (handshake or command poll).
+
+        A session that's set but hasn't been confirmed recently means the
+        device stopped talking to us — trusting it would silently drop
+        commands into a queue nobody drains.
+        """
+        if self._session is None or self._last_activity is None:
+            return False
+        return (time.monotonic() - self._last_activity) <= max_age
 
     @property
     def seq(self) -> int:
@@ -579,6 +597,7 @@ class DeLonghiLanServer:
             self._session = session
             self._seq = 0
             self._last_handshake_time1[peer_norm] = time_1
+            self._last_activity = time.monotonic()
 
         _LAN_LOGGER.info(
             "handshake ok (dsn=%s peer=%s time_1=%d time_2=%d)",
@@ -614,6 +633,7 @@ class DeLonghiLanServer:
             session = self._session
             if session is None:
                 return web.json_response({"enc": "", "sign": "", "seq": self._seq})
+            self._last_activity = time.monotonic()
             try:
                 data = self._pending.get_nowait()
             except asyncio.QueueEmpty:
