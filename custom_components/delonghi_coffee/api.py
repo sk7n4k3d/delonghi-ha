@@ -1594,11 +1594,28 @@ class DeLonghiApi:
         try:
             status = self.get_status(dsn)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
-            _LOGGER.debug("_pre_brew_check: status fetch failed (%s), skipping checks", err)
+            _LOGGER.warning(
+                "Pre-brew safety check skipped for %s: status fetch failed (%s). "
+                "Sending the command anyway — the firmware is the last-resort guard.",
+                beverage_key,
+                err,
+            )
             return
 
         # Check machine state
         machine_state = status.get("machine_state", "Unknown")
+        if machine_state == "Unknown":
+            # get_status() swallows its own transport/parse errors and
+            # returns this sentinel instead of raising — the except branch
+            # above never sees it. Same lenient behaviour (send anyway),
+            # but the skip needs to be visible without enabling debug logs
+            # (F-API-05) — this is exactly the "nothing happens" symptom
+            # users report with no trace in their logs.
+            _LOGGER.warning(
+                "Pre-brew safety check skipped for %s: machine state unknown "
+                "(cloud status unreadable). Sending the command anyway.",
+                beverage_key,
+            )
         if machine_state == "Off":
             raise DeLonghiApiError(f"Cannot brew {beverage_key}: machine is off. Power on first.")
         if machine_state == "Brewing":

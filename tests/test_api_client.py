@@ -1,6 +1,7 @@
 """Test API client methods — auth, send_command, packet building, rate tracking."""
 
 import base64
+import logging
 import struct
 import threading
 import time
@@ -197,6 +198,35 @@ class TestPreBrewCheck:
         recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
         with patch.object(self.api, "get_status", side_effect=DeLonghiApiError("network")):
             self.api._pre_brew_check("DSN", recipe, "espresso")  # Should not raise
+
+    def test_status_fetch_failure_logs_warning(self, caplog):
+        """The skip must be visible without enabling debug logs (F-API-05).
+
+        Before this fix, a status-fetch failure was only logged at DEBUG —
+        a user reporting "nothing happens when I brew" with default log
+        levels had zero trace that the safety pre-check never ran at all.
+        """
+        recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
+        with (
+            patch.object(self.api, "get_status", side_effect=DeLonghiApiError("network")),
+            caplog.at_level(logging.WARNING, logger="custom_components.delonghi_coffee.api"),
+        ):
+            self.api._pre_brew_check("DSN", recipe, "espresso")
+        assert any(r.levelno >= logging.WARNING and "espresso" in r.message for r in caplog.records)
+
+    def test_unknown_machine_state_logs_warning_but_does_not_block(self, caplog):
+        """get_status() swallows its own errors and returns machine_state
+        'Unknown' rather than raising — the exception-based skip log above
+        never fires for that path. Brewing is still allowed (the firmware
+        is the real last-resort guard), but the skip must be visible.
+        """
+        recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
+        with (
+            patch.object(self.api, "get_status", return_value={"machine_state": "Unknown", "alarms": []}),
+            caplog.at_level(logging.WARNING, logger="custom_components.delonghi_coffee.api"),
+        ):
+            self.api._pre_brew_check("DSN", recipe, "espresso")  # Should not raise
+        assert any(r.levelno >= logging.WARNING and "espresso" in r.message for r in caplog.records)
 
 
 class TestRecipeAccessory:
