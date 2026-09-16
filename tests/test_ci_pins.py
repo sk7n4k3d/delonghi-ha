@@ -39,8 +39,7 @@ def _required_version() -> str:
     assert isinstance(ruff_table, dict), "pyproject.toml has no [tool.ruff] section"
     version = ruff_table.get("required-version")
     assert isinstance(version, str) and version, (
-        "pyproject.toml [tool.ruff] is missing required-version — a mismatched "
-        "ruff would then run instead of refusing."
+        "pyproject.toml [tool.ruff] is missing required-version — a mismatched ruff would then run instead of refusing."
     )
     return version
 
