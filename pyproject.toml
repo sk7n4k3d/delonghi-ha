@@ -1,4 +1,9 @@
 [tool.ruff]
+# Pinned so a Ruff release cannot silently change formatting and turn CI
+# red without a code change. Keep in sync with the `version` input in
+# .github/workflows/lint.yaml — that is what actually drives the install;
+# this is the local guard so `ruff` refuses to run at a different version.
+required-version = "0.16.8"
 target-version = "py312"
 line-length = 120
 
