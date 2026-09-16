@@ -59,9 +59,7 @@ class LocalBaselineStore:
     def __init__(self, hass: HomeAssistant, dsn: str) -> None:
         self._hass = hass
         self._dsn = dsn
-        self._store: Store[dict[str, Any]] = Store(
-            hass, STORAGE_VERSION, f"delonghi_coffee_baseline_{dsn}"
-        )
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"delonghi_coffee_baseline_{dsn}")
         self._values: dict[str, int] = {}
         self._loaded = False
 
@@ -75,7 +73,9 @@ class LocalBaselineStore:
             self._values = {k: int(v) for k, v in data.items() if isinstance(v, (int, float))}
             _LOGGER.info(
                 "LocalBaselineStore[%s] loaded %d entries: %s",
-                self._dsn, len(self._values), sorted(self._values.keys()),
+                self._dsn,
+                len(self._values),
+                sorted(self._values.keys()),
             )
         self._loaded = True
 
@@ -102,7 +102,9 @@ class LocalBaselineStore:
             except (TypeError, ValueError):
                 _LOGGER.warning(
                     "LocalBaselineStore[%s] ignoring non-numeric value for %s: %r",
-                    self._dsn, k, v,
+                    self._dsn,
+                    k,
+                    v,
                 )
         if not accepted:
             return
@@ -139,6 +141,9 @@ class LocalBaselineStore:
         except TypeError:
             _LOGGER.debug(
                 "LocalBaselineStore[%s] cannot compare %s: baseline=%r cloud=%r",
-                self._dsn, counter_key, baseline, cloud_value,
+                self._dsn,
+                counter_key,
+                baseline,
+                cloud_value,
             )
             return cloud_value
