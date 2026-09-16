@@ -207,7 +207,7 @@ def crc16(data: bytes) -> bytes:
             else:
                 crc = crc << 1
     crc &= 0xFFFF
-    return crc.to_bytes(2, byteorder='big')
+    return crc.to_bytes(2, byteorder="big")
 ```
 
 ### ECAM Commands

@@ -225,10 +225,7 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         if self._counter_key in counters:
             return True
         baseline_store = getattr(self.coordinator, "local_baseline", None)
-        return (
-            isinstance(baseline_store, LocalBaselineStore)
-            and baseline_store.get(self._counter_key) is not None
-        )
+        return isinstance(baseline_store, LocalBaselineStore) and baseline_store.get(self._counter_key) is not None
 
     @property
     def native_value(self) -> float | int | None:
