@@ -850,11 +850,13 @@ class TestDiagnosticMode:
 
 class TestErrorPaths:
     def test_auth_error_raises_update_failed(self):
-        from homeassistant.helpers.update_coordinator import UpdateFailed
+        # Audit C1: auth errors now surface as ConfigEntryAuthFailed so HA
+        # opens the reauth flow instead of looping on UpdateFailed.
+        from homeassistant.exceptions import ConfigEntryAuthFailed
 
         coord, _, api = _make_coord()
         api.get_status.side_effect = DeLonghiAuthError("bad")
-        with pytest.raises(UpdateFailed, match="Authentication error"):
+        with pytest.raises(ConfigEntryAuthFailed, match="Authentication error"):
             _run(coord._async_update_data())
 
     def test_api_error_raises_update_failed(self):

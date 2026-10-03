@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -159,9 +160,11 @@ def _register_services(hass: HomeAssistant) -> None:
             raise HAError(str(err)) from err
 
     async def handle_cancel_brew(call) -> None:  # noqa: ANN001
-        api, _coord, dsn = _resolve_target(hass, call)
+        api, coord, dsn = _resolve_target(hass, call)
         try:
             await hass.async_add_executor_job(api.cancel_brew, dsn)
+            with contextlib.suppress(AttributeError):
+                await coord.async_refresh_after_command(duration_s=60.0)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
@@ -174,10 +177,12 @@ def _register_services(hass: HomeAssistant) -> None:
             raise HAError(str(err)) from err
 
     async def handle_select_bean_profile(call) -> None:  # noqa: ANN001
-        api, _coord, dsn = _resolve_target(hass, call)
+        api, coord, dsn = _resolve_target(hass, call)
         slot = int(call.data["slot"])
         try:
             await hass.async_add_executor_job(api.select_bean_system, dsn, slot)
+            with contextlib.suppress(AttributeError):
+                await coord.async_refresh_after_command(duration_s=90.0)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HAError(str(err)) from err
 
@@ -238,6 +243,10 @@ def _register_services(hass: HomeAssistant) -> None:
         updates: dict[str, int] = {}
         unknown: list[str] = []
         for field, raw in call.data.items():
+            if field == "config_entry_id":
+                # HA injects the target entry id when the service call targets
+                # a specific machine — not a baseline field (audit m9).
+                continue
             mapping = _SCREEN_FIELD_TO_COUNTER.get(field)
             if mapping is None:
                 unknown.append(field)
@@ -277,6 +286,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = entry_data.get("coordinator")
     if coordinator is not None:
         await coordinator.async_stop_lan()
+    # Close the cloud HTTP session — reload must not leak sockets (audit M3).
+    api = entry_data.get("api")
+    if api is not None:
+        await hass.async_add_executor_job(api.close)
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)

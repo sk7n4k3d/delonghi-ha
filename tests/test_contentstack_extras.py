@@ -70,7 +70,7 @@ class TestCsGetDirect:
             "get",
             side_effect=requests.ConnectionError("boom"),
         ):
-            assert _cs_get("prod_drink") == []
+            assert _cs_get("prod_drink") is None
 
     def test_timeout_returns_empty(self):
         with patch.object(
@@ -78,14 +78,14 @@ class TestCsGetDirect:
             "get",
             side_effect=requests.Timeout("slow"),
         ):
-            assert _cs_get("prod_drink") == []
+            assert _cs_get("prod_drink") is None
 
     def test_http_error_returns_empty(self):
         """raise_for_status raising HTTPError goes through the except branch."""
         resp = MagicMock()
         resp.raise_for_status.side_effect = requests.HTTPError("500")
         with patch.object(contentstack.requests, "get", return_value=resp):
-            assert _cs_get("prod_drink") == []
+            assert _cs_get("prod_drink") is None
 
     def test_invalid_json_returns_empty(self):
         """ValueError from .json() is caught — empty list returned."""
@@ -93,10 +93,10 @@ class TestCsGetDirect:
         resp.raise_for_status.return_value = None
         resp.json.side_effect = ValueError("not json")
         with patch.object(contentstack.requests, "get", return_value=resp):
-            assert _cs_get("prod_drink") == []
+            assert _cs_get("prod_drink") is None
 
     def test_empty_entries_key(self):
-        """Response without 'entries' returns []."""
+        """Response without 'entries' is a legitimate empty result (not a failure)."""
         with patch.object(
             contentstack.requests,
             "get",

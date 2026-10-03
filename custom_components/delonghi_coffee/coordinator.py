@@ -9,10 +9,13 @@ from time import monotonic
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import (
+    ACTIVE_MACHINE_STATES,
+    ACTIVE_SCAN_INTERVAL_SECONDS,
     DOMAIN,
     FULL_REFRESH_INTERVAL,
     LAN_SESSION_STALE_SECONDS,
@@ -63,6 +66,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.bean_adapt: dict[str, Any] | None = None  # ContentStack bean adapt calibration
         self.coffee_beans: list[dict[str, Any]] = []  # ContentStack coffee bean catalog
         self._contentstack_loaded: bool = False
+        self._model_identified: bool = False
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
         self._monitor_last_changed: float = monotonic()
@@ -82,6 +86,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # for a bounded window (default 60s window @ 5s interval) so
         # automations that watch machine_state actually see the brew flow.
         self._fast_poll_until: float | None = None
+        # Active-state polling: when the machine reports a transient state
+        # (Brewing, Turning On, …) we automatically shorten the interval to
+        # ACTIVE_SCAN_INTERVAL_SECONDS so state transitions surface in
+        # near-real-time without the user pressing anything. Reverts to the
+        # normal 60s once the machine settles.
+        self._active_polling: bool = False
         # Cache the canonical normal interval so we can revert from a
         # fast-poll window even if the test harness stubs out
         # DataUpdateCoordinator.__init__ (where update_interval lives).
@@ -105,6 +115,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         deadline = monotonic() + duration_s
         # Extend or arm the window
         self._fast_poll_until = max(self._fast_poll_until or 0.0, deadline)
+        # An explicit fast-poll window supersedes active-state polling
+        self._active_polling = False
         self.update_interval = timedelta(seconds=interval_s)
         _LOGGER.debug(
             "Fast poll requested: interval=%ds for %.0fs (until monotonic=%.1f)",
@@ -112,6 +124,22 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             duration_s,
             deadline,
         )
+
+    async def async_refresh_after_command(
+        self,
+        duration_s: float = 90.0,
+        interval_s: float = 5.0,
+    ) -> None:
+        """Refresh immediately after a user command, then fast-poll.
+
+        Ayla 201 means "cloud accepted", NOT "machine received". The machine
+        pushes its fresh monitor datapoint within seconds when awake, but a
+        lazy 60s poll hides that. This helper fires a refresh right away so
+        the UI reflects the command, and arms the fast-poll window so the
+        follow-up transitions are captured.
+        """
+        self.request_fast_poll(duration_s=duration_s, interval_s=interval_s)
+        await self.async_request_refresh()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -132,6 +160,24 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Fast poll window expired, reverting to %ds interval", SCAN_INTERVAL_SECONDS)
                 self.update_interval = self._normal_update_interval
                 self._fast_poll_until = None
+
+            # Adaptive active-state polling: transient machine states change
+            # the monitor byte every few seconds, so we shorten the interval
+            # automatically. Settled states (Ready/Off/…) revert to 60s. This
+            # runs AFTER the fast-poll expiry check so an explicit
+            # request_fast_poll() window (5s interval) always wins.
+            prev = getattr(self, "data", None)
+            machine_state_now: str = prev.get("machine_state", "Unknown") if isinstance(prev, dict) else "Unknown"
+            should_poll_active = machine_state_now in ACTIVE_MACHINE_STATES
+            if should_poll_active and not self._active_polling and self._fast_poll_until is None:
+                self._active_polling = True
+                self.update_interval = timedelta(seconds=ACTIVE_SCAN_INTERVAL_SECONDS)
+                _LOGGER.debug("Machine in '%s' — switching to %ds active polling", machine_state_now, ACTIVE_SCAN_INTERVAL_SECONDS)
+            elif not should_poll_active and self._active_polling:
+                self._active_polling = False
+                if self._fast_poll_until is None:
+                    self.update_interval = self._normal_update_interval
+                    _LOGGER.debug("Machine settled ('%s') — reverting to %ds polling", machine_state_now, SCAN_INTERVAL_SECONDS)
 
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 
@@ -220,6 +266,17 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._cached_profiles = self.api.parse_profiles(all_props)
                 self._cached_beans = self.api.parse_bean_systems(all_props)
                 self._cached_bean_system_par = self.api.parse_bean_system_par(all_props)
+
+                # Identify the model once via TranscodeTable (audit m1) —
+                # previously fetch_transcode_table/identify_model were never
+                # called, leaving api.model_info None and the model_name hint
+                # branch in _detect_contentstack_pattern dead. Runs on the
+                # executor: it performs a blocking HTTP POST (HA strict mode
+                # rejects blocking calls inside the event loop).
+                if not self._model_identified:
+                    await self.hass.async_add_executor_job(self.api.fetch_transcode_table)
+                    self.api.identify_model(all_props)
+                    self._model_identified = True
 
                 # Fetch LAN config once (first full refresh only)
                 if self._lan_config is None:
@@ -327,7 +384,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "coffee_beans_count": len(self.coffee_beans),
             }
         except DeLonghiAuthError as err:
-            raise UpdateFailed(f"Authentication error: {err}") from err
+            # HA only opens the reauth flow on ConfigEntryAuthFailed —
+            # a plain UpdateFailed loops forever with last_update_success=False
+            # and the user is never prompted to re-enter credentials (audit C1).
+            raise ConfigEntryAuthFailed(f"Authentication error: {err}") from err
         except DeLonghiApiError as err:
             raise UpdateFailed(f"Error fetching data: {err}") from err
         except Exception as err:  # noqa: BLE001 — last-resort guard: coordinator must surface UpdateFailed
@@ -429,7 +489,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LAN_LOGGER.info("LAN property: %s = %s", name, value)
 
         # Trigger entity update so sensors can pick up LAN data
-        self.async_set_updated_data(self.data if self.data else {})
+        if self._lan_properties:
+            merged = dict(self.data) if isinstance(self.data, dict) else {}
+            merged["lan_properties"] = dict(self._lan_properties)
+            self.async_set_updated_data(merged)
+        else:
+            self.async_set_updated_data(self.data if self.data else {})
 
     async def send_command_lan(self, ecam_bytes: bytes) -> bool:
         """Enqueue an ECAM command for delivery on the next device LAN poll.

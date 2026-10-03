@@ -83,7 +83,11 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         # a test (or any caller) that swaps the data dict without firing
         # the coordinator hook still produces a consistent answer.
         self._cached_is_on: bool = False
-        self._processed_data_id: int | None = None
+        # Identity sentinel replacing raw id() — id() values get recycled
+        # after GC and a fresh dict can land on the same address, skipping
+        # the reconcile (audit m3). Holding the previous data dict for one
+        # extra cycle is negligible; identity comparison via `is` is exact.
+        self._processed_data_obj: dict | None = None
         # Track the background retry coroutine so it can be cancelled on
         # entity removal — otherwise it survives reloads as an orphan task.
         self._retry_task: asyncio.Task | None = None
@@ -121,11 +125,11 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
 
         Idempotency contract: callers may invoke this at most once per
         coordinator refresh. The ``is_on`` property uses
-        ``_processed_data_id`` to guarantee that property reads do not
+        ``_processed_data_obj`` to guarantee that property reads do not
         re-enter the machine within the same cycle.
         """
         state = self.coordinator.data.get("machine_state", "Unknown")
-        self._processed_data_id = id(self.coordinator.data)
+        self._processed_data_obj = self.coordinator.data
 
         if state == "Unknown":
             self._cached_is_on = self._assumed_on
@@ -175,7 +179,8 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
         state = self.coordinator.data.get("machine_state", "Unknown")
         if state == "Unknown":
             return self._assumed_on
-        if self._processed_data_id != id(self.coordinator.data):
+        # Identity sentinel — see __init__ (audit m3).
+        if self._processed_data_obj is not self.coordinator.data:
             self._reconcile_monitor_state()
         return self._cached_is_on
 
@@ -247,6 +252,11 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             except (DeLonghiApiError, DeLonghiAuthError) as err:
                 raise HomeAssistantError(f"Failed to power on: {err}") from err
             self.async_write_ha_state()
+
+            # Reactive refresh: capture Turning On → Ready transitions
+            # immediately instead of waiting up to 60s for the next poll.
+            self.coordinator.request_fast_poll(duration_s=240.0, interval_s=10.0)
+            self.hass.async_create_task(self.coordinator.async_request_refresh())
 
             # Phase 4: Background retry after 3 min if monitor doesn't confirm.
             # Cancel any previous retry still pending from a prior command so
@@ -382,6 +392,9 @@ class DeLonghiPowerSwitch(CoordinatorEntity[DeLonghiCoordinator], SwitchEntity):
             except (DeLonghiApiError, DeLonghiAuthError) as err:
                 raise HomeAssistantError(f"Failed to power off: {err}") from err
             self.async_write_ha_state()
+            # Reactive refresh: confirm the Off state quickly.
+            self.coordinator.request_fast_poll(duration_s=60.0, interval_s=10.0)
+            self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     async def async_will_remove_from_hass(self) -> None:
         """Cancel the pending power-on retry task, if any, before teardown."""

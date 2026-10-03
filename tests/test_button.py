@@ -173,6 +173,8 @@ def _make_coord(machine_state: str = "Ready", selected_profile: int = 1) -> Magi
     coord.selected_profile = selected_profile
     coord.custom_recipe_names = {}
     coord.beverages = []
+    coord.async_refresh_after_command = AsyncMock()
+    coord.async_refresh_after_command = AsyncMock()
     coord.request_fast_poll = MagicMock()
     coord.async_request_refresh = AsyncMock()
     return coord

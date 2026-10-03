@@ -20,6 +20,7 @@ import requests
 from .const import (
     APP_SIGNATURE,
     BEAN_NAME_MAX_BYTES,
+    BEVERAGES,
     GIGYA_API_KEY,
     GIGYA_URL,
     MODEL_NAMES,
@@ -268,8 +269,12 @@ class DeLonghiApi:
         # Cache which command property works for this model
         # For PrimaDonna (DL-pd-*): data_request without app_id
         # For Eletta/Striker (DL-striker-*): app_data_request with app_id
+        # DL-millcore = PrimaDonna Soul firmware on later production runs
+        # (issue #34): same routing as DL-pd-*, and the packet WITHOUT app_id
+        # must be tried first — the cloud accepts the app_id variant (HTTP
+        # 201) but the machine silently ignores it.
         self._cmd_property: str | None = None
-        if oem_model.startswith("DL-pd-"):
+        if oem_model.startswith(("DL-pd-", "DL-millcore")):
             self._cmd_property = "data_request"
         elif oem_model.startswith("DL-striker-"):
             self._cmd_property = "app_data_request"
@@ -293,6 +298,15 @@ class DeLonghiApi:
         # Credit: TranscodeTable approach from FrozenGalaxy/PyDeLonghiAPI
         self._transcode_table: list[dict] | None = None
         self._model_info: dict[str, Any] | None = None
+
+    def close(self) -> None:
+        """Close the underlying requests.Session.
+
+        Called from async_unload_entry — without it every reload leaks the
+        Session's keep-alive socket pool to the GC (audit M3).
+        """
+        with contextlib.suppress(Exception):  # noqa: BLE001 — teardown must never raise
+            self._session.close()
 
     @property
     def rate_tracker(self) -> RateLimitTracker:
@@ -700,8 +714,9 @@ class DeLonghiApi:
                         ayla_oem,
                     )
                     # Re-apply the cmd_property routing now that we know
-                    # the model — mirrors the __init__ branch.
-                    if ayla_oem.startswith("DL-pd-"):
+                    # the model — mirrors the __init__ branch. DL-millcore
+                    # routes like DL-pd-* (issue #34).
+                    if ayla_oem.startswith(("DL-pd-", "DL-millcore")):
                         self._cmd_property = "data_request"
                     elif ayla_oem.startswith("DL-striker-"):
                         self._cmd_property = "app_data_request"
@@ -861,12 +876,14 @@ class DeLonghiApi:
         headers = self._headers()
 
         # Build attempt list: (property_name, include_app_id)
-        # For PrimaDonna models, try both formats on data_request to maximize
-        # chances of the cloud actually forwarding to the machine.
+        # Order matters: the cloud accepts BOTH packet shapes with HTTP 201
+        # but DL-millcore/PrimaDonna firmware only acts on the one matching
+        # its protocol — trying app_id first lets the cloud 201 shadow the
+        # working no-app_id variant (issue #34). Try without app_id first.
         if self._cmd_property == "data_request":
             attempts = [
-                ("data_request", True),  # try with app_id first (newer firmware)
-                ("data_request", False),  # legacy: without app_id
+                ("data_request", False),  # legacy: without app_id (works on PD Soul / millcore)
+                ("data_request", True),  # newer firmware
             ]
         elif self._cmd_property == "app_data_request":
             attempts = [
@@ -978,6 +995,7 @@ class DeLonghiApi:
 
         try:
             props = self.get_properties(dsn, names=["app_device_status", "d302_monitor_machine", "d302_monitor"])
+
             result["status"] = props.get("app_device_status", {}).get("value", "UNKNOWN")
 
             has_d302 = "d302_monitor_machine" in props
@@ -1001,8 +1019,13 @@ class DeLonghiApi:
                     [a["name"] for a in result.get("alarms", [])],
                     result.get("profile", 0),
                 )
-        except (requests.RequestException, DeLonghiApiError, KeyError, ValueError) as err:
-            _LOGGER.debug("Status/monitor fetch error: %s", err)
+        except (DeLonghiApiError, KeyError, ValueError) as err:
+            # Parse/property errors degrade to defaults — the monitor may be
+            # legitimately absent. But transport failures
+            # (requests.RequestException) propagate so the coordinator
+            # raises UpdateFailed and last_update_success reflects the cloud
+            # outage instead of serving stale cache as fresh data (audit M2).
+            _LOGGER.debug("Status/monitor parse error: %s", err)
 
         return result
 
@@ -1370,22 +1393,24 @@ class DeLonghiApi:
         )
         return self.send_command(dsn, brew_cmd)
 
-    # Beverage name → ID mapping for custom brew
+    # Beverage name → ID mapping for custom brew — derived from the single
+    # source of truth (const.BEVERAGES) so the two can never diverge again;
+    # the hand-maintained list was missing most drinks and used "coffee"
+    # where discovery exposes "regular" (audit m5). The explicit "coffee"
+    # alias is kept so existing service callers keep working.
     _BEVERAGE_IDS: dict[str, int] = {
-        "espresso": 1,
+        **{key: int(meta["drink_id"]) for key, meta in BEVERAGES.items() if "drink_id" in meta},
         "coffee": 2,
-        "long_coffee": 3,
-        "doppio": 5,
-        "americano": 6,
-        "cappuccino": 7,
+        "latte_macch": 8,
+        "espr_macch": 11,
+        "espr_macchiato": 11,
+        "capp_doppio": 13,
+        "capp_doppio_pl": 13,
+        "capp_reverse": 15,
         "latte_macchiato": 8,
         "caffe_latte": 9,
         "flat_white": 10,
         "espresso_macchiato": 11,
-        "hot_milk": 12,
-        "hot_water": 16,
-        "tea": 22,
-        "cortado": 24,
     }
 
     # Accessory required per beverage type (2=Latte Crema Hot)
@@ -1484,16 +1509,28 @@ class DeLonghiApi:
         _LOGGER.info("Sending CANCEL command to %s", dsn)
         return self.send_command(dsn, cancel_cmd)
 
-    def sync_recipes(self, dsn: str, profile: int = 1) -> bool:  # send_command retries (F-API-02)
-        """Force machine to synchronize and upload recipes to the cloud.
+    def set_active_profile(self, dsn: str, profile: int) -> bool:  # send_command retries (F-API-02)
+        """Set the active profile on the machine.
 
-        Sends ECAM 0xA9 (READ_RECIPES) for a specific profile.
+        Sends ECAM 0xA9 (PROFILE_SELECTION, longshot ``ProfileSelection = 169``)
+        with the profile number as single payload byte. The machine also
+        uploads its recipes for that profile to the cloud as a side effect,
+        which is why this opcode was previously mislabeled READ_RECIPES.
         """
+        if not 1 <= profile <= 5:
+            raise DeLonghiApiError(f"Profile must be 1-5, got {profile}")
         # len = total(6) - 1 = 5: [0x0D][0x05][0xA9][profile] + CRC(2)
-        sync_body = bytes([0x0D, 0x05, 0xA9, profile])
-        sync_cmd = sync_body + self._crc16(sync_body)
-        _LOGGER.info("Requesting recipes sync for profile %d on %s", profile, dsn)
-        return self.send_command(dsn, sync_cmd)
+        body = bytes([0x0D, 0x05, 0xA9, profile])
+        _LOGGER.info("Setting active profile to %d on %s", profile, dsn)
+        return self.send_command(dsn, body + self._crc16(body))
+
+    def sync_recipes(self, dsn: str, profile: int = 1) -> bool:
+        """Backward-compatible alias for ``set_active_profile``.
+
+        ECAM 0xA9 selects the active profile; the recipe upload to the cloud
+        is a side effect performed by the machine.
+        """
+        return self.set_active_profile(dsn, profile)
 
     # ── Bean Adapt (issue #7) ─────────────────────────────────────────────
     # Opcodes shared by @MattG-K: 0xB9 select, 0xBA read, 0xBB write. Full

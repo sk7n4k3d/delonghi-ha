@@ -5,6 +5,82 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.21] — 2026-10-03
+
+Deep bug-hunt pass + API reactivity overhaul. Every fix below is covered by
+the test suite (948 tests green).
+
+### Fixed — issues
+- **#36 — profile select never changed the machine's active profile:**
+  `async_select_option` only updated local state; no ECAM command was ever
+  sent. It now sends ECAM `0xA9` (ProfileSelection, confirmed against the
+  longshot protocol map: `ProfileSelection = 169`) and the old
+  `sync_recipes` was renamed `set_active_profile` (recipe upload is a side
+  effect of profile selection, not the primary opcode). The legacy
+  `sync_recipes` button/service keep working as an alias. On command
+  failure the select keeps the previous profile instead of lying.
+- **#34 — DL-millcore (PrimaDonna Soul, late production runs) power/brew
+  commands accepted by the cloud but ignored by the machine:** the model
+  fell through the cmd-property routing (matched neither `DL-pd-*` nor
+  `DL-striker-*`) and the attempt order tried the app_id packet first —
+  the cloud answers HTTP 201 for both shapes, so the working no-app_id
+  variant was never reached. `DL-millcore` now routes like `DL-pd-*`, and
+  the `data_request` attempts try **without app_id first**.
+
+### Fixed — critical (deep audit)
+- **Reauth never triggered:** `DeLonghiAuthError` was mapped to
+  `UpdateFailed` in the coordinator, so an expired/changed password looped
+  forever with `last_update_success=False` and HA never opened the reauth
+  flow. Now raises `ConfigEntryAuthFailed`.
+- **Second machine on the same account impossible:** the config flow set
+  `unique_id = email` and aborted, so multi-machine accounts (Eletta +
+  PrimaDonna) could never add a second entry. The unique_id is now the
+  device DSN.
+
+### Fixed — major (deep audit)
+- Socket leak on every reload: `requests.Session` was never closed;
+  `api.close()` is now called from `async_unload_entry`.
+- DSN leaked in shared diagnostics: the redaction list had
+  `device_serial` but the entry key is `dsn`.
+- Cloud outages were invisible: `get_status` swallowed transport errors,
+  so light polls kept `last_update_success=True` with stale data; network
+  failures now propagate to `UpdateFailed`.
+- ContentStack catalog permanently disabled by one transient network
+  failure: fetches now signal failure distinctly from empty, and the
+  coordinator retries on the next full refresh.
+- Coffee bean/drink catalog silently truncated at 100 entries: the
+  prod_drink fetch now paginates.
+
+### Fixed — minor (deep audit)
+- `brew_custom` beverage mapping diverged from `BEVERAGES` (missing most
+  drinks, `coffee` vs `regular` mismatch) — now derived from the single
+  source of truth.
+- Bit 15 "Coffee Beans Empty 2" now blocking everywhere (the pre-brew
+  check blocked it but the switch didn't warn).
+- TranscodeTable/model identification was dead code (never called);
+  now runs once at the first full refresh (on the executor — HA strict
+  mode rejects blocking HTTP in the event loop).
+- `set_baseline_from_screen` no longer warns about the injected
+  `config_entry_id` field.
+- Switch staleness sentinel used `id()` (values recycled after GC);
+  now holds the previous data object for exact identity comparison.
+- LAN datapoints received are now merged into `coordinator.data` instead
+  of being stored where no sensor could read them.
+
+### Changed — API reactivity (the "it lags" pass)
+- **Adaptive polling:** while the machine reports a transient state
+  (Turning On, Brewing, Rinsing, Descaling, Heating…) the coordinator
+  automatically shortens its interval from 60s to 10s, and reverts when
+  the machine settles. State changes made on the machine's own touchscreen
+  now surface in near-real-time too, not just HA-triggered ones.
+- **Immediate refresh after every command:** new coordinator helper
+  `async_refresh_after_command()` (instant refresh + 90s fast-poll) is
+  wired into power on/off, profile select, brew buttons, cancel and bean
+  profile selection. Ayla's HTTP 201 means "cloud accepted", not "machine
+  received" — the machine's response now shows up within seconds.
+- HTTP read timeout reduced 15s → 8s: a lagging cloud fails fast into
+  the retry path instead of stalling the refresh chain.
+
 ## [1.6.0-beta.20] — 2026-08-26
 
 Investigation pass on issue #23 (PrimaDonna Soul power/brew reported not

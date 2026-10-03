@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -86,21 +87,37 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
         return profiles.get(active, {}).get("name", f"Profile {active}")
 
     async def async_select_option(self, option: str) -> None:
-        """Handle profile selection."""
+        """Handle profile selection.
+
+        Sends the ECAM 0xA9 ProfileSelection command to the machine (issue
+        #36: previously this only updated local state, so the machine never
+        changed its active profile). On success, we schedule a fast poll so
+        the monitor byte confirms (or reverts) the new profile quickly.
+        """
         profiles = self.coordinator.data.get("profiles", {})
-        for pid, pdata in profiles.items():
+        pid: int | None = None
+        for p, pdata in profiles.items():
             if pdata.get("name") == option:
-                self.coordinator.selected_profile = pid
-                _LOGGER.info("Profile switched to %d (%s)", pid, option)
-                self.async_write_ha_state()
-                return
+                pid = p
+                break
+        if pid is None:
+            # Fallback: parse "Profile N"
+            for i in range(1, 5):
+                if option == f"Profile {i}":
+                    pid = i
+                    break
+        if pid is None:
+            _LOGGER.warning("Profile selection failed: '%s' not found in profiles", option)
+            return
 
-        # Fallback: try to parse "Profile N"
-        for i in range(1, 5):
-            if option == f"Profile {i}":
-                self.coordinator.selected_profile = i
-                _LOGGER.info("Profile switched to %d", i)
-                self.async_write_ha_state()
-                return
-
-        _LOGGER.warning("Profile selection failed: '%s' not found in profiles", option)
+        ok = await self.hass.async_add_executor_job(self.coordinator.api.set_active_profile, self.coordinator.dsn, pid)
+        if not ok:
+            _LOGGER.warning("Profile selection failed: machine did not accept profile %d", pid)
+            return
+        self.coordinator.selected_profile = pid
+        _LOGGER.info("Profile switched to %d (%s)", pid, option)
+        # Reactive refresh: pick up the machine's new active profile
+        # immediately instead of waiting for the next 60s poll.
+        with contextlib.suppress(AttributeError):
+            await self.coordinator.async_refresh_after_command(duration_s=90.0, interval_s=5.0)
+        self.async_write_ha_state()

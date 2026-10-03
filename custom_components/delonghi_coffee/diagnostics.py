@@ -24,6 +24,9 @@ REDACT_KEYS: set[str] = {
     "signatureTimestamp",
     "lan_key",
     "device_serial",
+    # entry.data stores the machine identifier under "dsn" — the device_serial
+    # key never matched, leaking the DSN in shared diagnostics (audit M4).
+    "dsn",
 }
 
 

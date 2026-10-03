@@ -1,7 +1,7 @@
 """Test select.py — DeLonghiProfileSelect entity."""
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -13,10 +13,12 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
-def _make_coordinator(profiles=None, selected_profile=None):
+def _make_coordinator(profiles=None, selected_profile=None, api_ok=True):
     coord = MagicMock()
     coord.selected_profile = selected_profile
     coord.data = {"profiles": profiles or {}}
+    coord.api.set_active_profile = MagicMock(return_value=api_ok)
+    coord.async_refresh_after_command = AsyncMock()
     return coord
 
 
@@ -74,22 +76,39 @@ class TestProfileSelectAsyncSelectOption:
         profiles = {1: {"name": "Sebastien"}, 2: {"name": "Sasha"}}
         coord = _make_coordinator(profiles=profiles, selected_profile=1)
         sel = DeLonghiProfileSelect(coord, "DSN", "m", "n", None)
+        sel.hass = MagicMock()
+        sel.hass.async_add_executor_job = AsyncMock(return_value=True)
         sel.async_write_ha_state = MagicMock()
         _run(sel.async_select_option("Sasha"))
         assert coord.selected_profile == 2
+        sel.hass.async_add_executor_job.assert_called_once_with(coord.api.set_active_profile, coord.dsn, 2)
+        coord.async_refresh_after_command.assert_awaited_once_with(duration_s=90.0, interval_s=5.0)
         sel.async_write_ha_state.assert_called_once()
 
     def test_selects_by_default_label_fallback(self):
         coord = _make_coordinator(profiles={}, selected_profile=1)
         sel = DeLonghiProfileSelect(coord, "DSN", "m", "n", None)
+        sel.hass = MagicMock()
+        sel.hass.async_add_executor_job = AsyncMock(return_value=True)
         sel.async_write_ha_state = MagicMock()
         _run(sel.async_select_option("Profile 3"))
         assert coord.selected_profile == 3
         sel.async_write_ha_state.assert_called_once()
 
+    def test_command_failure_keeps_old_profile(self):
+        coord = _make_coordinator(profiles={1: {"name": "A"}, 2: {"name": "B"}}, selected_profile=1, api_ok=False)
+        sel = DeLonghiProfileSelect(coord, "DSN", "m", "n", None)
+        sel.hass = MagicMock()
+        sel.hass.async_add_executor_job = AsyncMock(return_value=False)
+        sel.async_write_ha_state = MagicMock()
+        _run(sel.async_select_option("B"))
+        assert coord.selected_profile == 1  # unchanged on failure
+        sel.async_write_ha_state.assert_not_called()
+
     def test_unknown_option_logs_warning_no_change(self):
         coord = _make_coordinator(profiles={1: {"name": "X"}}, selected_profile=1)
         sel = DeLonghiProfileSelect(coord, "DSN", "m", "n", None)
+        sel.hass = MagicMock()
         sel.async_write_ha_state = MagicMock()
         _run(sel.async_select_option("ghost_profile"))
         assert coord.selected_profile == 1  # unchanged
@@ -100,6 +119,8 @@ class TestProfileSelectAsyncSelectOption:
         profiles = {2: {"name": "Profile 3"}}
         coord = _make_coordinator(profiles=profiles, selected_profile=1)
         sel = DeLonghiProfileSelect(coord, "DSN", "m", "n", None)
+        sel.hass = MagicMock()
+        sel.hass.async_add_executor_job = AsyncMock(return_value=True)
         sel.async_write_ha_state = MagicMock()
         _run(sel.async_select_option("Profile 3"))
         assert coord.selected_profile == 2

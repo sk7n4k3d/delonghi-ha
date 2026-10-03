@@ -8,13 +8,15 @@ not correspond to any known profile.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 def _make_coord(profiles: dict | None = None, selected: int | None = None) -> MagicMock:
     coord = MagicMock()
     coord.data = {"profiles": profiles} if profiles is not None else {}
     coord.selected_profile = selected
+    coord.api.set_active_profile = MagicMock(return_value=True)
+    coord.async_refresh_after_command = AsyncMock()
     return coord
 
 
@@ -29,6 +31,8 @@ def _entity(coord: MagicMock):
         sw_version="1",
     )
     entity.coordinator = coord
+    entity.hass = MagicMock()
+    entity.hass.async_add_executor_job = AsyncMock(return_value=True)
     return entity
 
 
@@ -108,6 +112,7 @@ class TestProfileSelectSelectOption:
         entity = _entity(coord)
         asyncio.run(entity.async_select_option("Weekend"))
         assert coord.selected_profile == 2
+        entity.hass.async_add_executor_job.assert_called_once_with(coord.api.set_active_profile, coord.dsn, 2)
 
     def test_select_option_falls_back_to_profile_number_format(self):
         """No matching profile, but 'Profile N' parsed directly."""

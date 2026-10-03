@@ -53,14 +53,28 @@ APP_SIGNATURE: Final = bytes([0x20, 0x40, 0x35, 0xEF])
 # Scan interval — status polling (monitor only, lightweight)
 SCAN_INTERVAL_SECONDS: Final = 60
 
+# Active-state polling — when the machine is in a transient state (Turning On,
+# Brewing, Rinsing, Descaling, Heating…), the monitor byte changes every few
+# seconds. Polling at 60s misses the whole transition. The coordinator
+# switches to this interval automatically while the state is transient
+# (ACTIVE_MACHINE_STATES), and reverts to SCAN_INTERVAL_SECONDS once the
+# machine settles (Ready/Off). Bounded per-cycle so the Ayla rate budget
+# stays well under the 200/hour warning threshold: even 100% transient
+# duty would stay ~90 calls/hour (active poll + keepalive amortized).
+ACTIVE_SCAN_INTERVAL_SECONDS: Final = 10
+
 # Full refresh interval — counters, profiles, beans (heavy, includes ping)
 FULL_REFRESH_INTERVAL: Final = 600  # 10 minutes
 
 # MQTT keepalive interval — ping to prevent session expiry (cloud timeout ~300s)
 MQTT_KEEPALIVE_INTERVAL: Final = 240  # 4 minutes
 
-# HTTP timeouts (connect, read) in seconds
-REQUEST_TIMEOUT: Final = (5, 15)
+# HTTP timeouts (connect, read) in seconds. Cloud endpoints answer in
+# 300-800ms normally; 8s read covers slow full-refresh property fetches
+# (~1.3s observed) with margin. The old 15s read timeout made a lagging
+# cloud stall the whole refresh chain (and the fast-poll window) for
+# nothing — failing fast lets the retry/backoff logic kick in sooner.
+REQUEST_TIMEOUT: Final = (5, 8)
 
 # Retry configuration
 RETRY_COUNT: Final = 3
@@ -291,7 +305,7 @@ ALARMS: Final[dict[int, dict[str, Any]]] = {
     12: {"name": "Hydraulic Problem", "icon": "mdi:pipe-leak", "blocking": True},
     13: {"name": "Water Tank Missing", "icon": "mdi:water-off", "inverted": True, "blocking": True},
     14: {"name": "Clean Milk Knob", "icon": "mdi:broom"},
-    15: {"name": "Coffee Beans Empty 2", "icon": "mdi:seed-off"},
+    15: {"name": "Coffee Beans Empty 2", "icon": "mdi:seed-off", "blocking": True},
     16: {"name": "Cleaning Needed", "icon": "mdi:spray-bottle"},
     17: {"name": "Bean Hopper Absent", "icon": "mdi:tray-remove", "blocking": True},
     18: {"name": "Grid Missing", "icon": "mdi:grid", "inverted": True, "blocking": True},
@@ -400,3 +414,10 @@ MACHINE_STATES: Final[dict[int, str]] = {
     8: "Rinsing",
     9: "Going to sleep",
 }
+
+# States during which the machine is actively transitioning — the monitor
+# byte changes every few seconds, so the coordinator auto-switches to
+# ACTIVE_SCAN_INTERVAL_SECONDS polling until the state settles.
+ACTIVE_MACHINE_STATES: Final[frozenset[str]] = frozenset(
+    {"Turning On", "Brewing", "Descaling", "Heating", "Rinsing", "Error", "Idle"}
+)

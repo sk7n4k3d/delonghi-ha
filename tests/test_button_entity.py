@@ -25,6 +25,8 @@ def _make_coordinator(selected_profile=2, custom_recipe_names=None, beverages=No
     coord.beverages = beverages or []
     coord.data = {"machine_state": machine_state}
     coord.async_add_listener = MagicMock(return_value=lambda: None)
+    coord.async_refresh_after_command = AsyncMock()
+    coord.async_refresh_after_command = AsyncMock()
     coord.request_fast_poll = MagicMock()
     coord.async_request_refresh = AsyncMock()
     return coord
@@ -151,8 +153,8 @@ class TestBrewButtonPress:
         btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
         btn.hass = _make_hass_with_executor()
         _run(btn.async_press())
-        coord.request_fast_poll.assert_called_once()
-        coord.async_request_refresh.assert_awaited_once()
+        coord.async_refresh_after_command.assert_awaited_once()
+        coord.async_refresh_after_command.assert_awaited_once_with(duration_s=90.0, interval_s=5.0)
 
     def test_no_refresh_when_brew_fails(self):
         """A failed brew must not arm fast-poll / refresh (command never sent)."""
@@ -165,8 +167,7 @@ class TestBrewButtonPress:
 
         with pytest.raises(HomeAssistantError):
             _run(btn.async_press())
-        coord.request_fast_poll.assert_not_called()
-        coord.async_request_refresh.assert_not_awaited()
+        coord.async_refresh_after_command.assert_not_awaited()
 
 
 class TestCancelButton:

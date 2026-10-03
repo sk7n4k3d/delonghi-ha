@@ -155,17 +155,10 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         # Pre-brewing → Brewing → Frothing milk → Rinsing → Ready actually
         # surface to automations. Without this the default 60s poll misses
         # them and watchers never see anything happen.
-        # Older coordinator stubs (test harness without request_fast_poll)
+        # Older coordinator stubs (test harness without the helper)
         # are tolerated by the AttributeError suppression.
-        #
-        # request_fast_poll only reassigns update_interval; HA re-reads it in
-        # _schedule_refresh, which runs AFTER the currently-armed 60s timer
-        # fires. So we also kick an immediate refresh: it forces _schedule_refresh
-        # to re-read the new 5s interval now, capturing the Pre-brewing/Brewing
-        # transitions instead of missing up to 60s of the brew (F-COORD-02 / #5).
         with contextlib.suppress(AttributeError):
-            self.coordinator.request_fast_poll(duration_s=90.0, interval_s=5.0)
-            await self.coordinator.async_request_refresh()
+            await self.coordinator.async_refresh_after_command(duration_s=90.0, interval_s=5.0)
 
 
 class DeLonghiCancelButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):

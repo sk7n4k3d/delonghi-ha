@@ -87,7 +87,15 @@ def _cs_get(
         return resp.json().get("entries", [])
     except (requests.RequestException, ValueError) as err:
         _LOGGER.warning("ContentStack fetch %s failed: %s", content_type, err)
-        return []
+        # None signals a *failure* so callers can retry next refresh; an
+        # empty list would be indistinguishable from "no data" and would
+        # permanently disable the catalog after one transient network blip
+        # (audit M1).
+        return None
+
+
+class ContentStackFetchError(Exception):
+    """Transient ContentStack network failure — caller should retry later."""
 
 
 def fetch_drink_catalog(sku: str, model_name: str = "") -> dict[int, dict[str, Any]]:
@@ -125,7 +133,19 @@ def fetch_drink_catalog(sku: str, model_name: str = "") -> dict[int, dict[str, A
     for pattern in patterns:
         if not is_family_supported(pattern):
             continue
-        entries = _cs_get("prod_drink", query={"title": {"$regex": pattern}}, limit=100)
+        # Paginate — limit=100 alone silently truncates catalogs larger than
+        # a single page (audit m8).
+        page = _cs_get("prod_drink", query={"title": {"$regex": pattern}}, limit=100, skip=0)
+        if page is None:
+            raise ContentStackFetchError("prod_drink fetch failed")
+        entries = list(page)
+        skip = len(page)
+        while len(page) == 100:
+            page = _cs_get("prod_drink", query={"title": {"$regex": pattern}}, limit=100, skip=skip)
+            if page is None:
+                raise ContentStackFetchError("prod_drink fetch failed")
+            entries.extend(page)
+            skip += len(page)
         if entries:
             _LOGGER.info("ContentStack: found %d drinks for pattern '%s'", len(entries), pattern)
             break
@@ -201,6 +221,8 @@ def fetch_bean_adapt(sku: str, model_name: str = "") -> dict[str, Any] | None:
         if not is_family_supported(pattern):
             continue
         entries = _cs_get("bean_adapt", query={"title": {"$regex": pattern}}, limit=5)
+        if entries is None:
+            raise ContentStackFetchError("bean_adapt fetch failed")
         if entries:
             break
     if not entries:
@@ -246,6 +268,8 @@ def fetch_coffee_beans(locale: str = "en-gb", limit: int = 100) -> list[dict[str
     skip = 0
     while True:
         entries = _cs_get("coffee_bean", limit=limit, skip=skip)
+        if entries is None:
+            raise ContentStackFetchError("coffee_bean fetch failed")
         if not entries:
             break
         for entry in entries:

@@ -81,8 +81,18 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # machine (e.g. only a Pinguino A/C) — issue #30.
                     errors["base"] = "no_coffee_machine"
                 else:
-                    await self.async_set_unique_id(user_input[CONF_EMAIL])
-                    self._abort_if_unique_id_configured()
+                    # Unique per DEVICE, not per account email — a multi-machine
+                    # account (Eletta + PrimaDonna) must be able to add a
+                    # second entry; unique_id=email aborted the flow before the
+                    # device picker could even show (audit C2). Single-machine
+                    # accounts set the DSN unique_id right away so adding the
+                    # same machine twice still aborts.
+                    if len(coffee) == 1:
+                        await self.async_set_unique_id(coffee[0]["dsn"])
+                        self._abort_if_unique_id_configured()
+                    # Multi-machine: the picker step sets the unique_id per
+                    # chosen DSN. We deliberately do NOT abort on the email
+                    # here — same account, several machines is legitimate.
 
                     self._pending_creds = {
                         CONF_EMAIL: user_input[CONF_EMAIL],
@@ -119,6 +129,9 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             dsn = user_input["dsn"]
             device = next((d for d in self._coffee_devices if d["dsn"] == dsn), None)
             if device is not None:
+                # Per-device unique_id — see async_step_user (audit C2).
+                await self.async_set_unique_id(device["dsn"])
+                self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=f"De'Longhi {device.get('product_name', device['dsn'])}",
                     data=self._entry_data_for(device),

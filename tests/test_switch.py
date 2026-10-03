@@ -18,6 +18,8 @@ def _make_switch() -> DeLonghiPowerSwitch:
     api = MagicMock()
     coordinator = MagicMock()
     coordinator.data = {"machine_state": "Off"}
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.request_fast_poll = MagicMock()
     # LAN path unavailable by default — switch falls back to cloud send_command,
     # which is what the existing tests assert on.
     coordinator.send_command_lan = AsyncMock(return_value=False)

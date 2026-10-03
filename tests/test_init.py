@@ -95,6 +95,7 @@ def _make_fake_api(**overrides):
 def _make_fake_coord():
     coord = MagicMock()
     coord.async_config_entry_first_refresh = AsyncMock()
+    coord.async_refresh_after_command = AsyncMock()
     coord.selected_profile = None
     coord.diagnostic_mode = False
     return coord
