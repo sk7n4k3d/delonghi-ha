@@ -172,12 +172,16 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if should_poll_active and not self._active_polling and self._fast_poll_until is None:
                 self._active_polling = True
                 self.update_interval = timedelta(seconds=ACTIVE_SCAN_INTERVAL_SECONDS)
-                _LOGGER.debug("Machine in '%s' — switching to %ds active polling", machine_state_now, ACTIVE_SCAN_INTERVAL_SECONDS)
+                _LOGGER.debug(
+                    "Machine in '%s' — switching to %ds active polling", machine_state_now, ACTIVE_SCAN_INTERVAL_SECONDS
+                )
             elif not should_poll_active and self._active_polling:
                 self._active_polling = False
                 if self._fast_poll_until is None:
                     self.update_interval = self._normal_update_interval
-                    _LOGGER.debug("Machine settled ('%s') — reverting to %ds polling", machine_state_now, SCAN_INTERVAL_SECONDS)
+                    _LOGGER.debug(
+                        "Machine settled ('%s') — reverting to %ds polling", machine_state_now, SCAN_INTERVAL_SECONDS
+                    )
 
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 

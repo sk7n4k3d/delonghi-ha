@@ -927,9 +927,7 @@ class DeLonghiApi:
                 last_error = err
                 continue
             if resp.status_code == 201:
-                _LOGGER.info(
-                    "Command sent via %s (app_id=%s): %s", prop_name, include_app_id, ecam_bytes.hex()
-                )
+                _LOGGER.info("Command sent via %s (app_id=%s): %s", prop_name, include_app_id, ecam_bytes.hex())
                 # Same property listed twice (data_request family): keep
                 # sending the remaining shape — see the attempts rationale.
                 if not any(p == prop_name for p, _ in attempts[attempt_idx + 1 :]):
