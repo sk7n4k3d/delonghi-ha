@@ -465,13 +465,22 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _on_lan_property(self, data: dict[str, Any]) -> None:
         """Callback invoked when the machine pushes a decrypted datapoint.
 
-        Accepts both shapes seen in the wild:
+        Accepts the shapes seen in the wild:
           - ``{"property": {"name": ..., "value": ...}}``
           - ``{"properties": [{"property": {...}}, ...]}``
+          - ``{"seq_no": N, "data": {"name": ..., "value": ...}}``
+            (ECAM610.75 / DL-millcore — this is the shape in the issue #10
+            logs; previously unrecognized, so all LAN telemetry was decoded
+            then silently discarded.)
         """
         _LAN_LOGGER.debug("LAN property received: %s", data)
 
         cached: list[tuple[str, Any]] = []
+
+        # ECAM610.75 / millcore envelope: {"seq_no": N, "data": {...}}
+        inner = data.get("data")
+        if isinstance(inner, dict) and inner.get("name"):
+            cached.append((inner["name"], inner.get("value")))
 
         prop = data.get("property")
         if isinstance(prop, dict) and prop.get("name"):
@@ -518,8 +527,37 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
 
         include_app_id = self.api._cmd_property != "data_request"  # noqa: SLF001
-        b64 = self.api._build_packet(ecam_bytes, include_app_id=include_app_id)  # noqa: SLF001
         property_name = self.api._cmd_property or "app_data_request"  # noqa: SLF001
+
+        # data_request family (PD Soul / millcore): two firmware variants
+        # observed in the wild act on OPPOSITE packet shapes (issues #10 vs
+        # #34) and the machine polls its command queue infrequently — we
+        # enqueue BOTH shapes so whichever firmware polls gets the one it
+        # understands. Each firmware's strict ECAM parser ignores the other.
+        if self.api._cmd_property == "data_request":  # noqa: SLF001
+            props = []
+            for app_id_flag in (False, True):
+                b64 = self.api._build_packet(ecam_bytes, include_app_id=app_id_flag)  # noqa: SLF001
+                props.append(
+                    {
+                        "property": {
+                            "base_type": "string",
+                            "dsn": self.dsn,
+                            "name": property_name,
+                            "value": b64,
+                        }
+                    }
+                )
+            payload = {"properties": props}
+            await server.enqueue_command(payload)
+            _LAN_LOGGER.info(
+                "LAN command queued (both shapes): property=%s ecam=%s",
+                property_name,
+                ecam_bytes.hex(),
+            )
+            return True
+
+        b64 = self.api._build_packet(ecam_bytes, include_app_id=include_app_id)  # noqa: SLF001
 
         payload = {
             "properties": [

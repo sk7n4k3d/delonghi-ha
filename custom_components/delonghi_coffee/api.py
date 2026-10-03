@@ -875,15 +875,23 @@ class DeLonghiApi:
         self._rate_tracker.record()
         headers = self._headers()
 
-        # Build attempt list: (property_name, include_app_id)
-        # Order matters: the cloud accepts BOTH packet shapes with HTTP 201
-        # but DL-millcore/PrimaDonna firmware only acts on the one matching
-        # its protocol — trying app_id first lets the cloud 201 shadow the
-        # working no-app_id variant (issue #34). Try without app_id first.
+        # Build attempt list: (property_name, include_app_id).
+        #
+        # The Ayla cloud accepts BOTH packet shapes with HTTP 201 regardless
+        # of which one the machine firmware actually acts on. Two DL-millcore
+        # units observed in the wild behave OPPOSITELY (issues #10 vs #34):
+        # Uchomar's machine only acts on the no-app_id packet, lodzen's only
+        # on the with-app_id one (its command echoes carry the APP_SIGNATURE).
+        # Since a single 201 cannot tell us which shape landed, the
+        # data_request family sends BOTH shapes back-to-back — each firmware
+        # acts on exactly one and ignores the other (its ECAM parser rejects
+        # the trailing signature / missing signature). This is idempotent for
+        # monitor/wake commands; brew/power commands are single-shot by nature
+        # and the machine's strict parser is the natural dedupe.
         if self._cmd_property == "data_request":
             attempts = [
-                ("data_request", False),  # legacy: without app_id (works on PD Soul / millcore)
-                ("data_request", True),  # newer firmware
+                ("data_request", False),  # legacy shape (Uchomar's millcore, #34)
+                ("data_request", True),  # with app_id (lodzen's millcore, #10)
             ]
         elif self._cmd_property == "app_data_request":
             attempts = [
@@ -893,11 +901,13 @@ class DeLonghiApi:
             # Unknown model: try all combinations
             attempts = [
                 ("app_data_request", True),
-                ("data_request", True),
                 ("data_request", False),
+                ("data_request", True),
             ]
 
-        for prop_name, include_app_id in attempts:
+        sent_any = False
+        last_error: Exception | None = None
+        for attempt_idx, (prop_name, include_app_id) in enumerate(attempts):
             _LOGGER.debug(
                 "send_command: trying %s (app_id=%s, cached=%s) cmd=%s",
                 prop_name,
@@ -906,15 +916,26 @@ class DeLonghiApi:
                 ecam_bytes.hex(),
             )
             b64 = self._build_packet(ecam_bytes, include_app_id=include_app_id)
-            resp = self._session.post(
-                f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/{prop_name}/datapoints.json",
-                json={"datapoint": {"value": b64}},
-                headers=headers,
-                timeout=REQUEST_TIMEOUT,
-            )
+            try:
+                resp = self._session.post(
+                    f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/{prop_name}/datapoints.json",
+                    json={"datapoint": {"value": b64}},
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                )
+            except requests.RequestException as err:
+                last_error = err
+                continue
             if resp.status_code == 201:
-                _LOGGER.info("Command sent via %s (app_id=%s): %s", prop_name, include_app_id, ecam_bytes.hex())
-                return True
+                _LOGGER.info(
+                    "Command sent via %s (app_id=%s): %s", prop_name, include_app_id, ecam_bytes.hex()
+                )
+                # Same property listed twice (data_request family): keep
+                # sending the remaining shape — see the attempts rationale.
+                if not any(p == prop_name for p, _ in attempts[attempt_idx + 1 :]):
+                    return True
+                sent_any = True
+                continue
             if resp.status_code == 404:
                 _LOGGER.debug("send_command: %s returned 404, trying next", prop_name)
                 # 404 proves this property doesn't exist — cache the other one
@@ -926,8 +947,12 @@ class DeLonghiApi:
             _LOGGER.error(
                 "send_command: %s returned HTTP %d: %s", prop_name, resp.status_code, sanitize(resp.text[:200])
             )
-            resp.raise_for_status()
+            last_error = resp
 
+        if sent_any:
+            return True
+        if last_error is not None:
+            raise DeLonghiApiError(f"send_command failed: {last_error}")
         raise DeLonghiUnsupportedError(
             "No valid command property found (all endpoints returned 404) — this model does not expose this command"
         )

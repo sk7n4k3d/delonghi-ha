@@ -691,6 +691,12 @@ class DeLonghiLanServer:
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("LAN datapoint: decrypt failed: %s", err)
                 return web.json_response({}, status=200)
+            # A successfully decrypted push proves the device is alive and
+            # the session is current — count it as activity so
+            # is_session_alive() doesn't declare a live-but-pushing device
+            # stale (observed on ECAM610.75: pushes every 12s-minutes while
+            # command polls aren't observable in logs, audit 2026-10-03).
+            self._last_activity = time.monotonic()
 
         try:
             data = json.loads(plaintext.decode("utf-8"))

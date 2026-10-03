@@ -647,15 +647,19 @@ class TestCoordinatorSendCommandLan:
         ok = asyncio.run(coord.send_command_lan(b"\x0d\x07\x84\x0f\x02\x01\x55\x12"))
 
         assert ok is True
-        coord.api._build_packet.assert_called_once()
-        # include_app_id should be False for data_request (legacy PrimaDonna)
-        assert coord.api._build_packet.call_args.kwargs == {"include_app_id": False}
+        # data_request family queues BOTH packet shapes (issues #10/#34:
+        # two millcore firmwares act on opposite shapes).
+        assert coord.api._build_packet.call_count == 2
+        call_flags = {c.kwargs["include_app_id"] for c in coord.api._build_packet.call_args_list}
+        assert call_flags == {False, True}
         server.enqueue_command.assert_awaited_once()
         payload = server.enqueue_command.call_args.args[0]
-        prop = payload["properties"][0]["property"]
-        assert prop["name"] == "data_request"
-        assert prop["dsn"] == "DSN-TEST"
-        assert prop["value"] == "b64packet=="
+        assert len(payload["properties"]) == 2
+        for prop_entry in payload["properties"]:
+            prop = prop_entry["property"]
+            assert prop["name"] == "data_request"
+            assert prop["dsn"] == "DSN-TEST"
+            assert prop["value"] == "b64packet=="
         assert prop["base_type"] == "string"
 
     def test_uses_app_data_request_for_striker(self) -> None:

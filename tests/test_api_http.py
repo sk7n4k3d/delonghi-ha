@@ -223,12 +223,10 @@ class TestSendCommand:
     def test_auto_detect_from_404(self):
         """Unknown model auto-detects from 404 on first endpoint."""
         api = self._make_api("")
-        # First attempt (app_data_request) returns 404
-        # Second attempt (data_request) returns 201
-        api._session.post.side_effect = [
-            _mock_response(404),
-            _mock_response(201),
-        ]
+        # First attempt (app_data_request) 404s → cached to data_request.
+        # data_request family sends BOTH shapes (issues #10/#34) → 201 on
+        # each is expected; the mock serves 201 for all remaining attempts.
+        api._session.post.side_effect = [_mock_response(404), _mock_response(201), _mock_response(201)]
 
         result = api.send_command("DSN", bytes.fromhex("0d07840f02015512"))
         assert result is True
