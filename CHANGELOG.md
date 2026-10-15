@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0-beta.23] — 2026-10-15
+
+### Fixed — issues
+- **#42 — `Unknown (10)` pendant le fonctionnement:** `MACHINE_STATES`
+  ne cartographiait que les codes d'état bruts 0-9. Les codes de phase
+  de distribution (10-17) observés sur Eletta Explore sont maintenant
+  nommés (`Preparing Milk`, `Dispensing Hot Water`, `Cleaning Milk
+  System`, `Rinsing Water Filter`, `Preparing Chocolate`,
+  `Preparing Milk Alt` — nomenclature du profil moniteur cremalink
+  ECAM452, même famille de protocole, même position d'octet) et
+  rejoignent `ACTIVE_MACHINE_STATES` pour le polling adaptatif.
+- Le capteur d'état expose désormais `monitor_action` (octet 10) et
+  `monitor_progress` (octet 11) en attributs : ce que la machine est en
+  train de faire et où elle en est, visibles même quand l'octet d'état
+  reste générique.
+
 ## [1.6.0-beta.21] — 2026-10-03
 
 Deep bug-hunt pass + API reactivity overhaul. Every fix below is covered by
