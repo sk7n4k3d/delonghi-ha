@@ -157,6 +157,10 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
             "api_calls_hour": self.coordinator.data.get("api_rate", 0),
             "api_total_calls": self.coordinator.data.get("api_total_calls", 0),
         }
+        action = self.coordinator.data.get("monitor_action")
+        if action is not None:
+            attrs["monitor_action"] = action
+            attrs["monitor_progress"] = self.coordinator.data.get("monitor_progress")
         if lan:
             attrs["lan_enabled"] = lan.get("lan_enabled", False)
             attrs["lan_ip"] = lan.get("lan_ip")

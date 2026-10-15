@@ -1063,8 +1063,8 @@ class DeLonghiApi:
         [7]    Alarm byte 0 (bits 0-7)
         [8]    Alarm byte 1 (bits 8-15)
         [9]    Machine state (0=off, 6=heating, 7=ready, 3=brewing)
-        [10]   Sub-state
-        [11]   Extra data
+        [10]   Action code (beverage being dispensed, cremalink naming)
+        [11]   Progress (0-100 while dispensing)
         [12]   Alarm byte 2 (bits 16-23)
         [13]   Alarm byte 3 (bits 24-31)
         [14+]  Additional data + timestamp
@@ -1082,6 +1082,11 @@ class DeLonghiApi:
         # Machine state
         state_val = raw[9]
         result["machine_state"] = MACHINE_STATES.get(state_val, f"Unknown ({state_val})")
+
+        # Dispensing detail (cremalink naming): which action is running and
+        # how far along it is — what the reporter of #42 wants to see live.
+        result["action"] = raw[10]
+        result["progress"] = raw[11]
 
         # 32-bit alarm word from 4 bytes
         alarm_word = (raw[7] & 0xFF) | ((raw[8] & 0xFF) << 8) | ((raw[12] & 0xFF) << 16) | ((raw[13] & 0xFF) << 24)

@@ -413,11 +413,36 @@ MACHINE_STATES: Final[dict[int, str]] = {
     7: "Ready",
     8: "Rinsing",
     9: "Going to sleep",
+    # Dispensing-phase codes reported while a beverage is being prepared.
+    # 10 observed live on an Eletta Explore during operation (issue #42);
+    # 11 observed on our own machine during the post-power-on hot water rinse.
+    # The names come from the cremalink ECAM452 monitor profile — same
+    # protocol family, status read at the same byte.
+    10: "Preparing Milk",
+    11: "Dispensing Hot Water",
+    12: "Cleaning Milk System",
+    14: "Rinsing Water Filter",
+    16: "Preparing Chocolate",
+    17: "Preparing Milk Alt",
 }
 
 # States during which the machine is actively transitioning — the monitor
 # byte changes every few seconds, so the coordinator auto-switches to
 # ACTIVE_SCAN_INTERVAL_SECONDS polling until the state settles.
 ACTIVE_MACHINE_STATES: Final[frozenset[str]] = frozenset(
-    {"Turning On", "Brewing", "Descaling", "Heating", "Rinsing", "Error", "Idle"}
+    {
+        "Turning On",
+        "Brewing",
+        "Descaling",
+        "Heating",
+        "Rinsing",
+        "Error",
+        "Idle",
+        "Preparing Milk",
+        "Dispensing Hot Water",
+        "Cleaning Milk System",
+        "Rinsing Water Filter",
+        "Preparing Chocolate",
+        "Preparing Milk Alt",
+    }
 )

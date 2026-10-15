@@ -369,6 +369,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return {
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": machine_state,
+                "monitor_action": status.get("action"),
+                "monitor_progress": status.get("progress"),
                 "alarms": alarms,
                 "alarm_word": alarm_word,
                 "monitor_stale": monitor_timed_out,

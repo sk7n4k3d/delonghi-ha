@@ -73,3 +73,40 @@ class TestMonitorV2:
         result = self._parse(raw)
         expected = 0xFF | (0x00 << 8) | (0x00 << 16) | (0x01 << 24)
         assert result["alarm_word"] == expected
+
+    def test_extended_operation_states(self):
+        """Dispensing-phase codes >= 10 map to names instead of Unknown (issue #42)."""
+        for code, name in [
+            (10, "Preparing Milk"),
+            (11, "Dispensing Hot Water"),
+            (12, "Cleaning Milk System"),
+            (14, "Rinsing Water Filter"),
+            (16, "Preparing Chocolate"),
+            (17, "Preparing Milk Alt"),
+        ]:
+            raw = f"d00ca4f00102000000{code:02x}00000000"
+            result = self._parse(raw)
+            assert result["machine_state"] == name, f"state {code}"
+
+    def test_unknown_code_still_flagged(self):
+        """Codes without a mapping keep the Unknown (N) rendering."""
+        raw = "d00ca4f001020000001d00000000"  # 0x1d = 29
+        result = self._parse(raw)
+        assert result["machine_state"] == "Unknown (29)"
+
+    def test_action_and_progress(self):
+        """Bytes [10]/[11] are exposed as action/progress (cremalink naming)."""
+        raw = "d0 0c a4 f0 01 02 00 00 00 0a 03 2a 00 00".replace(" ", "")
+        result = self._parse(raw)
+        assert result["machine_state"] == "Preparing Milk"
+        assert result["action"] == 3
+        assert result["progress"] == 0x2A
+
+    def test_real_striker_frame(self):
+        """Live frame captured from an Eletta Explore (state=7, Cleaning Needed)."""
+        raw = "d012750f010100000007000001000000003ae46ad0aae1"
+        result = self._parse(raw)
+        assert result["machine_state"] == "Ready"
+        assert result["action"] == 0
+        assert result["progress"] == 0
+        assert [a["name"] for a in result["alarms"]] == ["Cleaning Needed"]
