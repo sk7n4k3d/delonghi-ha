@@ -16,6 +16,7 @@ from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import (
     ACTIVE_MACHINE_STATES,
     ACTIVE_SCAN_INTERVAL_SECONDS,
+    CONTENTSTACK_RETRY_MAX,
     DOMAIN,
     FULL_REFRESH_INTERVAL,
     LAN_SESSION_STALE_SECONDS,
@@ -66,6 +67,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.bean_adapt: dict[str, Any] | None = None  # ContentStack bean adapt calibration
         self.coffee_beans: list[dict[str, Any]] = []  # ContentStack coffee bean catalog
         self._contentstack_loaded: bool = False
+        # Backoff state for the one-shot ContentStack load: consecutive fetch
+        # failures push the next attempt further out (see _load_contentstack)
+        # so an unreachable CMS cannot spam the HA error log every 10 minutes.
+        self._cs_failures: int = 0
+        self._cs_next_retry: float = 0.0  # monotonic(); 0.0 = attempt allowed
         self._model_identified: bool = False
         self._last_monitor_raw: str | None = None
         self._monitor_stale_count: int = 0
@@ -291,7 +297,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self._try_start_lan()
 
                 # ContentStack: fetch drink catalog + bean adapt once
-                if not self._contentstack_loaded:
+                # (gated by the failure backoff — see _load_contentstack)
+                if not self._contentstack_loaded and now >= self._cs_next_retry:
                     await self._load_contentstack()
 
                 self._last_full_refresh = now
@@ -654,14 +661,43 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.bean_adapt = await self.hass.async_add_executor_job(fetch_bean_adapt, model_pattern, model_name)
             self.coffee_beans = await self.hass.async_add_executor_job(fetch_coffee_beans)
             self._contentstack_loaded = True
-            _LOGGER.info(
-                "ContentStack loaded: %d drinks, bean_adapt=%s, %d coffee beans",
-                len(self.drink_catalog),
-                bool(self.bean_adapt),
-                len(self.coffee_beans),
-            )
+            if self._cs_failures:
+                _LOGGER.info(
+                    "ContentStack recovered after %d failed attempt(s): %d drinks, bean_adapt=%s, %d coffee beans",
+                    self._cs_failures,
+                    len(self.drink_catalog),
+                    bool(self.bean_adapt),
+                    len(self.coffee_beans),
+                )
+                self._cs_failures = 0
+                self._cs_next_retry = 0.0
+            else:
+                _LOGGER.info(
+                    "ContentStack loaded: %d drinks, bean_adapt=%s, %d coffee beans",
+                    len(self.drink_catalog),
+                    bool(self.bean_adapt),
+                    len(self.coffee_beans),
+                )
         except Exception:  # noqa: BLE001 — CMS failures must not block refresh
-            _LOGGER.exception("ContentStack load failed, will retry next refresh")
+            # Exponential backoff: the catalog is auxiliary (brews run off the
+            # machine's own recipes), so an unreachable CMS — DNS filter, offline
+            # uplink — must not produce a full traceback every 10 minutes.
+            # First failure keeps the traceback for diagnostics; after that,
+            # single-line warnings as the retry window doubles toward the ceiling.
+            self._cs_failures += 1
+            backoff = min(FULL_REFRESH_INTERVAL * 2**self._cs_failures, CONTENTSTACK_RETRY_MAX)
+            self._cs_next_retry = monotonic() + backoff
+            if self._cs_failures == 1:
+                _LOGGER.exception(
+                    "ContentStack load failed (network/DNS to eu-cdn.contentstack.com?), next retry in ~%d min",
+                    backoff // 60,
+                )
+            else:
+                _LOGGER.warning(
+                    "ContentStack still unavailable (attempt %d), next retry in ~%d min",
+                    self._cs_failures,
+                    backoff // 60,
+                )
 
     def _detect_contentstack_pattern(self) -> str:
         """Return the best ECAM pattern for ContentStack title lookups.

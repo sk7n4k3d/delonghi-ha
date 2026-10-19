@@ -66,6 +66,12 @@ ACTIVE_SCAN_INTERVAL_SECONDS: Final = 10
 # Full refresh interval — counters, profiles, beans (heavy, includes ping)
 FULL_REFRESH_INTERVAL: Final = 600  # 10 minutes
 
+# ContentStack retry ceiling — when the CMS is unreachable (DNS filter,
+# offline), the coordinator backs off exponentially from
+# FULL_REFRESH_INTERVAL up to this ceiling before re-attempting the
+# one-shot catalog load, instead of retrying every full refresh forever.
+CONTENTSTACK_RETRY_MAX: Final = 21600  # 6 hours
+
 # MQTT keepalive interval — ping to prevent session expiry (cloud timeout ~300s)
 MQTT_KEEPALIVE_INTERVAL: Final = 240  # 4 minutes
 
