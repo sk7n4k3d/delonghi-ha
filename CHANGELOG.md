@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-10-29
+
+Première version stable de la branche 1.6. Contenu = `1.6.0-beta.23` (passage en revue
+des bugs + réactivité de l'API) plus la robustesse du chargement du catalogue.
+
+### Fixed
+- **Catalogue `ContentStack` injoignable : retries en explosion exponentielle.** Le
+  CMS (`eu-cdn.contentstack.com`, bloqué par un filtre DNS le 2026-10-19) était
+  ré-interrogé à chaque rafraîchissement complet et journalisait un traceback complet
+  toutes les 10 minutes, indéfiniment. La fenêtre de retry double à chaque échec
+  (plafonnée à 6 h), la traceback n'est plus journalisée qu'au premier échec, puis
+  simples avertissements d'une ligne, avec une ligne de reprise. Les chemins de
+  préparation sont intouchés : le catalogue est auxiliaire, les extractions utilisent
+  les recettes de la machine.
+
 ## [1.6.0-beta.23] — 2026-10-15
 
 ### Fixed — issues
