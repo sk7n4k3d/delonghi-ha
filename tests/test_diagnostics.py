@@ -163,6 +163,49 @@ class TestEntryDiagnostics:
         assert result["api"] == {}
 
 
+class TestLastExceptionRedaction:
+    """Audit 2026-11-05 (M1): async_redact_data is key-indexed and cannot
+    scrub a free-text value — yet requests' HTTPError text embeds the full
+    Ayla URL, DSN included, and Gigya error strings can echo the account
+    email. The dump is made to be pasted into a public GitHub issue."""
+
+    def test_dsn_url_scrubbed_from_last_exception(self):
+        coord = MagicMock()
+        coord.last_exception = ValueError(
+            "Error fetching data: get_properties failed after 3 attempts: "
+            "404 Client Error for url: https://ads.cloud.getayla.net/apiv1/dsns/AC000W038925641/properties.json"
+        )
+        coord.data = None
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id, coordinator=coord)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        le = result["coordinator"]["last_exception"]
+        assert "AC000W038925641" not in le
+        assert "/dsns/**REDACTED**/" in le
+        assert le.startswith("ValueError:")  # exception type kept for triage
+
+    def test_email_echo_scrubbed_from_last_exception(self):
+        coord = MagicMock()
+        coord.last_exception = RuntimeError("Gigya login failed: loginID sebastien@corp.example.net rejected")
+        coord.data = None
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id, coordinator=coord)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        le = result["coordinator"]["last_exception"]
+        assert "sebastien@corp.example.net" not in le
+
+    def test_none_last_exception_stays_empty_string(self):
+        """Wire-compat: the field was `""` when no error — must not become
+        `None` or a type name."""
+        coord = MagicMock()
+        coord.last_exception = None
+        coord.data = None
+        entry = _make_entry()
+        hass = _make_hass(entry.entry_id, coordinator=coord)
+        result = _run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+        assert result["coordinator"]["last_exception"] == ""
+
+
 class TestDeviceDiagnostics:
     """async_get_device_diagnostics returns same payload as entry-scoped."""
 

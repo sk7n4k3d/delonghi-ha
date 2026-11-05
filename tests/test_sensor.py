@@ -593,3 +593,84 @@ class TestBlockingAlarmsSensor:
         assert "bit0" in attrs["blocking_alarms"]
         # Bit 99 unknown alarm, surfaces in all_active with "bit99" label
         assert "bit99" in attrs["all_active_alarms"]
+
+
+class TestCounterSensorBaselineWithStringCloudValue:
+    """Audit 2026-11-05: cloud counter kept as a raw string by parse_counters
+    (int() failure) crashed the baseline comparison paths with TypeError.
+    LocalBaselineStore.merge guarded it; native_value's scaling and
+    extra_state_attributes' source computation did not.
+    """
+
+    def _store_with_baseline(self, key: str, value: int):
+        from custom_components.delonghi_coffee.local_baseline import LocalBaselineStore
+
+        store = LocalBaselineStore(MagicMock(), "DSN123")
+        asyncio.run(store.async_set_many({key: value}))
+        return store
+
+    def _coord_with(self, counters, store):
+        coord = MagicMock()
+        coord.data = {"counters": counters}
+        coord.local_baseline = store
+        return coord
+
+    def test_scaled_string_cloud_value_yields_unknown(self):
+        store = self._store_with_baseline("total_water_ml", 100)
+        coord = self._coord_with({"total_water_ml": "not-a-number"}, store)
+        sensor = _make_counter_sensor(coord, "total_water_ml")
+        # merge() returns the string (incompatible types → cloud wins). The
+        # old fix returned it verbatim — but with a state_class set, HA's
+        # SensorEntity.state then raises ValueError on EVERY state write
+        # (audit 2026-11-05). Numeric-or-None is the only HA-valid contract.
+        assert sensor.native_value is None
+
+    def test_string_counter_warns_once(self, caplog):
+        import logging as _logging
+
+        store = self._store_with_baseline("total_water_ml", 100)
+        coord = self._coord_with({"total_water_ml": "not-a-number"}, store)
+        sensor = _make_counter_sensor(coord, "total_water_ml")
+        with caplog.at_level(_logging.WARNING, logger="custom_components.delonghi_coffee.sensor"):
+            for _ in range(3):
+                assert sensor.native_value is None
+        warns = [r for r in caplog.records if "non-numeric" in r.getMessage()]
+        assert len(warns) == 1, "warning must fire once per entity, not per state write"
+
+    def test_attributes_source_baseline_on_incompatible_types(self):
+        store = self._store_with_baseline("total_water_ml", 100)
+        coord = self._coord_with({"total_water_ml": "not-a-number"}, store)
+        sensor = _make_counter_sensor(coord, "total_water_ml")
+        # used to raise TypeError on ``str < int``
+        attrs = sensor.extra_state_attributes
+        assert attrs["source"] == "baseline"
+
+    def test_numeric_cloud_still_wins_and_scales(self):
+        """Happy path unchanged: numeric cloud > baseline → cloud + scaled."""
+        store = self._store_with_baseline("total_water_ml", 100)
+        coord = self._coord_with({"total_water_ml": 500}, store)
+        sensor = _make_counter_sensor(coord, "total_water_ml")
+        assert sensor.native_value == 0.5
+        assert sensor.extra_state_attributes["source"] == "cloud"
+
+    def test_scaled_string_without_baseline_yields_unknown(self):
+        """No baseline at all: string → unknown (was a crash, then a string
+        HA would reject — both fixed by the numeric guard)."""
+        coord = MagicMock()
+        coord.data = {"counters": {"total_water_ml": "n/a"}}
+        coord.local_baseline = None
+        sensor = _make_counter_sensor(coord, "total_water_ml")
+        assert sensor.native_value is None
+
+    def test_missing_counter_yields_unknown_without_warning(self, caplog):
+        """A missing key (val None) is the ordinary ``unknown`` case — it must
+        not be treated as a non-numeric anomaly."""
+        import logging as _logging
+
+        coord = MagicMock()
+        coord.data = {"counters": {}}
+        coord.local_baseline = None
+        sensor = _make_counter_sensor(coord, "total_water_ml")
+        with caplog.at_level(_logging.WARNING, logger="custom_components.delonghi_coffee.sensor"):
+            assert sensor.native_value is None
+        assert not [r for r in caplog.records if "non-numeric" in r.getMessage()]

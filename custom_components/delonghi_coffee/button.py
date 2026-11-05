@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -19,9 +18,10 @@ from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import BEVERAGES, DOMAIN, resolve_beverage_meta
 from .coordinator import DeLonghiCoordinator
 from .lan import run_lan_diagnostic
+from .logger import get_logger
 from .sensor import _device_info
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:

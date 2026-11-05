@@ -85,6 +85,14 @@ def _make_coord(api=None, dsn="DSN-1"):
 
 
 class TestInit:
+    def test_config_entry_forwarded_to_base(self):
+        """Audit 2026-11-05 (L4): the coffee reauth escalation ("audit C1")
+        rides on self.config_entry — it must come from the explicit kwarg,
+        not HA's current_entry ContextVar."""
+        entry = MagicMock()
+        coord = DeLonghiCoordinator(_make_hass(), _make_api(), "DSN-1", config_entry=entry)
+        assert coord.init_kwargs.get("config_entry") is entry
+
     def test_defaults_populated(self):
         coord, _, api = _make_coord()
         assert coord.api is api

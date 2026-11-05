@@ -99,6 +99,10 @@ class _GenericBase:
         return cls
 
     def __init__(self, coordinator=None, *args, **kwargs) -> None:
+        # Recorded so tests can assert what subclasses forward to the real
+        # HA base (e.g. config_entry= — audit 2026-11-05).
+        self.init_args = args
+        self.init_kwargs = kwargs
         if coordinator is not None:
             self.coordinator = coordinator
 

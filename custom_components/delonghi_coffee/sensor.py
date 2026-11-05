@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -14,8 +13,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import BLOCKING_ALARM_BITS, DOMAIN
 from .coordinator import DeLonghiCoordinator
 from .local_baseline import LocalBaselineStore
+from .logger import get_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 COUNTER_SENSORS: dict[str, dict[str, Any]] = {
     # Core counters
@@ -193,6 +193,7 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         self._dsn = dsn
         self._counter_key = counter_key
         self._scale: float | None = meta.get("scale")
+        self._non_numeric_warned = False  # one warning per entity for string counters
         self._attr_unique_id = f"{dsn}_{counter_key}"
         self._attr_has_entity_name = True
         self._attr_translation_key = counter_key
@@ -250,7 +251,24 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         if isinstance(baseline_store, LocalBaselineStore):
             val = baseline_store.merge(self._counter_key, val)
 
-        if val is not None and self._scale:
+        # Numeric guard (audit 2026-11-05): ``parse_counters`` keeps a counter
+        # it cannot ``int()`` as a raw string; ``str * 0.001`` raised TypeError
+        # and broke the entity. Returning the string was NOT a fix either —
+        # with a state_class/unit set, HA's SensorEntity.state validates
+        # numerically and raises ValueError on every state write instead.
+        # Non-numeric values therefore yield ``None`` (entity goes ``unknown``,
+        # self-healing on the next numeric push), warned about once.
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            if val is not None and not self._non_numeric_warned:
+                self._non_numeric_warned = True
+                _LOGGER.warning(
+                    "Counter %r received non-numeric value of type %s from the cloud; "
+                    "sensor stays unknown until a numeric value arrives",
+                    self._counter_key,
+                    type(val).__name__,
+                )
+            return None
+        if self._scale:
             return round(val * self._scale, 1)
         return val
 
@@ -269,7 +287,9 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
             return {}
         counters: dict[str, Any] = self.coordinator.data.get("counters", {})
         cloud_val = counters.get(self._counter_key)
-        if cloud_val is not None and self._scale:
+        # Numeric-only scaling — same string-counter guard as native_value
+        # (audit 2026-11-05): ``str * 0.001`` raised TypeError here too.
+        if isinstance(cloud_val, (int, float)) and not isinstance(cloud_val, bool) and self._scale:
             cloud_display = round(cloud_val * self._scale, 1)
         else:
             cloud_display = cloud_val
@@ -277,7 +297,18 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
             baseline_display = round(baseline * self._scale, 1)
         else:
             baseline_display = baseline
-        source = "baseline" if (cloud_val is None or cloud_val < baseline) else "cloud"
+        # ``cloud_val < baseline`` must be type-guarded (audit 2026-11-05):
+        # ``parse_counters`` keeps non-numeric counter values as raw strings,
+        # and comparing ``str < int`` raises TypeError — which HA turns into a
+        # broken entity (the attribute property blows up every state write).
+        # LocalBaselineStore.merge() already guards the same comparison; this
+        # attribute path was the unguarded twin. On incompatible types the
+        # cloud value lost, so the baseline is what the sensor shows.
+        try:
+            baseline_wins = cloud_val is not None and cloud_val < baseline
+        except TypeError:
+            baseline_wins = True
+        source = "baseline" if (cloud_val is None or baseline_wins) else "cloud"
         return {
             "cloud_value": cloud_display,
             "baseline_value": baseline_display,

@@ -7,7 +7,6 @@ import binascii
 import contextlib
 import functools
 import json
-import logging
 import re
 import struct
 import threading
@@ -37,9 +36,9 @@ from .const import (
     TRANSCODE_TABLE_URL,
     is_coffee_oem_model,
 )
-from .logger import ApiTimer, RateLimitTracker, sanitize
+from .logger import ApiTimer, RateLimitTracker, get_logger, sanitize
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 def _decode_utf16(data: bytes) -> str:
@@ -231,7 +230,14 @@ def _retry(func):  # noqa: ANN001, ANN202
                         delay,
                     )
                     time.sleep(delay)
-        raise DeLonghiApiError(f"{func.__name__} failed after {RETRY_COUNT} attempts: {last_err}") from last_err
+        # The error text embeds the last exception, which for HTTPError is
+        # requests' message containing the FULL URL — DSN included (audit
+        # 2026-11-05). This string reaches HA's error log (via UpdateFailed)
+        # and the diagnostics dump (via coordinator.last_exception), so it is
+        # sanitized at the source, not only at each sink.
+        raise DeLonghiApiError(
+            f"{func.__name__} failed after {RETRY_COUNT} attempts: {sanitize(last_err)}"
+        ) from last_err
 
     return wrapper
 
@@ -542,7 +548,13 @@ class DeLonghiApi:
 
     def authenticate(self) -> bool:
         """Full auth flow: Gigya login -> JWT -> Ayla token_sign_in."""
-        _LOGGER.debug("Authenticating %s (Ayla ADS: %s)", self._email, self._ayla_ads)
+        # The email goes through sanitize() (audit 2026-11-05): HA logs are
+        # routinely pasted into GitHub issues, and logger.py already carries
+        # an email-masking pattern for exactly this — it just was never
+        # applied to these three lines, so the user's address landed in the
+        # log verbatim on every auth attempt (DEBUG) and on every failure
+        # (ERROR, always visible without debug mode).
+        _LOGGER.debug("Authenticating %s (Ayla ADS: %s)", sanitize(self._email), self._ayla_ads)
         try:
             # Step 1: Gigya login
             gigya_resp = self._session.post(
@@ -563,10 +575,14 @@ class DeLonghiApi:
             if gigya_resp.status_code != 200 or gigya_data.get("errorCode", 0) != 0:
                 _LOGGER.error(
                     "Gigya login failed for %s: %s",
-                    self._email,
+                    sanitize(self._email),
                     gigya_data.get("errorMessage", "Unknown error"),
                 )
-                raise DeLonghiAuthError(f"Gigya login failed: {gigya_data.get('errorMessage', 'Unknown')}")
+                # Gigya's errorMessage is server-controlled and can echo the
+                # loginID (the very address the three lines above went out of
+                # their way to mask) — sanitize the text that escapes into
+                # HA logs and last_exception via this exception (audit 2026-11-05).
+                raise DeLonghiAuthError(f"Gigya login failed: {sanitize(gigya_data.get('errorMessage', 'Unknown'))}")
 
             id_token: str | None = gigya_data.get("id_token")
             if not id_token:
@@ -574,7 +590,7 @@ class DeLonghiApi:
                 id_token = gigya_data.get("sessionInfo", {}).get("sessionToken")
 
             if not id_token:
-                _LOGGER.error("No id_token in Gigya response for %s", self._email)
+                _LOGGER.error("No id_token in Gigya response for %s", sanitize(self._email))
                 raise DeLonghiAuthError("No id_token in Gigya response")
 
             # Step 2: Get long-lived JWT (requires sessionInfo)

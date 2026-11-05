@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .logger import sanitize
 
 REDACT_KEYS: set[str] = {
     "email",
@@ -30,6 +31,21 @@ REDACT_KEYS: set[str] = {
 }
 
 
+def _redact_last_exception(exc: object | None) -> str:
+    """Free-text render of ``coordinator.last_exception``, safe to share.
+
+    ``async_redact_data`` is key-indexed and cannot see inside a value — but
+    requests' HTTPError text embeds the full Ayla URL (hence the DSN), and
+    server-controlled Gigya messages can echo the account email. The dump is
+    meant to be pasted into a public GitHub issue, so the text goes through
+    ``sanitize()`` (which also scrubs ``/dsns/<X>/`` URLs) and is prefixed
+    with the exception type for triage value (audit 2026-11-05, M4 bypass).
+    """
+    if exc is None:
+        return ""
+    return f"{type(exc).__name__}: {sanitize(str(exc))}"
+
+
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     """Return diagnostics for a config entry.
 
@@ -45,7 +61,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     if coordinator is not None:
         coord_state = {
             "last_update_success": bool(getattr(coordinator, "last_update_success", False)),
-            "last_exception": str(getattr(coordinator, "last_exception", "") or ""),
+            "last_exception": _redact_last_exception(getattr(coordinator, "last_exception", None)),
             "diagnostic_mode": bool(getattr(coordinator, "diagnostic_mode", False)),
             "selected_profile": getattr(coordinator, "selected_profile", None),
             "beverages_count": len(getattr(coordinator, "beverages", []) or []),

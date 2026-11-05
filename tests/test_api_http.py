@@ -793,3 +793,33 @@ class TestRegionConfig:
         """Unknown region falls back to EU."""
         api = DeLonghiApi("test@example.com", "password", region="UNKNOWN")
         assert "eu" in api._ayla_ads
+
+
+class TestAuthLogPrivacy:
+    """Audit 2026-11-05: the user email must never reach the HA log verbatim.
+
+    HA logs are routinely pasted into GitHub issues (SECURITY.md asks for
+    diagnostics), and logger.sanitize() carries an email-masker that was
+    simply never wired to the three authenticate() log sites.
+    """
+
+    _RAW_EMAIL = "sebastien.martin@example.com"
+
+    def test_gigya_failure_error_log_masks_email(self, caplog):
+        import logging
+
+        api = DeLonghiApi(self._RAW_EMAIL, "wrong", region="EU")
+        api._session = MagicMock()
+        api._session.post.return_value = _mock_response(200, {"errorCode": 403042, "errorMessage": "Invalid LoginID"})
+
+        with (
+            pytest.raises(DeLonghiAuthError),
+            caplog.at_level(logging.DEBUG, logger="custom_components.delonghi_coffee.api"),
+        ):
+            api.authenticate()
+
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert self._RAW_EMAIL not in joined, "raw email leaked into log"
+        # logger._mask_email: first+last char kept, every domain label but
+        # the TLD hidden (audit 2026-11-05: e***.com still named the org)
+        assert "s***n@***.com" in joined

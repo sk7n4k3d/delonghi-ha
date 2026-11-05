@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, Platform
@@ -13,8 +12,9 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import DOMAIN, MODEL_NAMES
 from .coordinator import DeLonghiCoordinator
+from .logger import get_logger, sanitize
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SWITCH, Platform.SELECT]
 
@@ -44,9 +44,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await hass.async_add_executor_job(api.authenticate)
     except DeLonghiAuthError as err:
-        raise ConfigEntryAuthFailed(f"Invalid credentials: {err}") from err
+        raise ConfigEntryAuthFailed(f"Invalid credentials: {sanitize(err)}") from err
     except DeLonghiApiError as err:
-        raise ConfigEntryNotReady(f"Cannot connect: {err}") from err
+        raise ConfigEntryNotReady(f"Cannot connect: {sanitize(err)}") from err
 
     dsn: str = entry.data["dsn"]
 
@@ -64,7 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except (DeLonghiApiError, DeLonghiAuthError):
             _LOGGER.debug("Could not fetch device info, using defaults")
 
-    coordinator = DeLonghiCoordinator(hass, api, dsn)
+    coordinator = DeLonghiCoordinator(hass, api, dsn, config_entry=entry)
     coordinator.diagnostic_mode = entry.options.get("diagnostic_mode", False)
     await coordinator.async_config_entry_first_refresh()
 

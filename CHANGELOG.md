@@ -5,6 +5,107 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+Correctifs des constats avérés du rapport blue-team 2026-11-05 (audit du
+commit `f783725`, rapport `2026-11-05-delonghi-ha-f783725-BLUE-TEAM.md`).
+
+### Fixed — sécurité (daedalus)
+- **Escalade réauth déclenchée par une trame malformée**
+  (`delonghi_daedalus/lan_protocol.py`, `api.py`) : tout `LanProtocolError`
+  était classé « rejet d'auth », y compris une réponse non-JSON ou sans
+  `ConnectionId` (machine en boot/upgrade, ou IP mal saisie sur laquelle un
+  autre service écoute le port 443). Après une rotation JWT réussie côté
+  cloud, la deuxième erreur ouvrait un flux `ConfigEntryAuthFailed` —
+  saisie manuelle du mot de passe, sans auto-guérison. Seule la réponse
+  explicite `Response != "OK"` (`LanAuthRejectedError`, nouvelle classe)
+  escalade désormais ; les trames malformées restent transitoires et
+  l'entrée se répare seule au cycle suivant.
+- **DSN / e-mail / hôte LAN en clair dans les diagnostics**
+  (les deux `diagnostics.py`) : `async_redact_data` masque par clés et ne
+  peut rien contre la valeur free-text `coordinator.last_exception`, dans
+  laquelle le texte d'erreur HTTP de `requests` embarque l'URL complète —
+  DSN compris. Le champ est désormais purgé (`/dsns/<X>/`, JWT, e-mails,
+  URL/IP LAN) et préfixé par le type d'exception pour le triage. Le texte
+  des exceptions est aussi assaini **à la source** (`api.py`, `coordinator.py`),
+  d'où il atteignait également les journaux ERROR de Home Assistant.
+- **`host` et `serial_number` journalisés en clair au WARNING**
+  (`delonghi_daedalus/config_flow.py`) : masquage partiel (`192.168.x.x`,
+  4 derniers caractères du numéro de série) aligné sur la politique
+  `REDACT_KEYS` des diagnostics — même canal public.
+- **Masqueur d'e-mail divergents entre les deux intégrations** : la règle
+  masquait le seul premier label du domaine et laissait survivre le label
+  de l'organisation (`mail.entreprise.fr` → `m***.entreprise.fr`). Tous les
+  labels sauf le dernier sont maintenant remplacés ; l'entrée du masque ne
+  plante plus sur une valeur non-`str` ; le domaine sans point n'est plus
+  un no-op silencieux. Un unique implémenteur par composant
+  (`delonghi_daedalus/redact.py`, partagé flow/diagnostics).
+
+### Fixed — sécurité (coffee)
+- **`native_value` retournait une chaîne** avec `state_class` posé : le
+  ValueMapper de Home Assistant rejette toute valeur non numérique dès
+  qu'une unité/`state_class` est présente — le `TypeError` d'hier était
+  remplacé par un `ValueError` levé par HA à chaque écriture d'état
+  (le commentaire du fix promettait un affichage verbatim impossible).
+  Le capteur passe désormais en `unknown` (valeur `None`) avec un
+  avertissement unique, et redevient numérique dès que la machine renvoie
+  un nombre.
+- **Masquage devenus inductifs** (`delonghi_daedalus`/`logger.py`) : un
+  `logging.Filter` appliqué au logger de chaque module masque désormais
+  le message **rendu** (pas seulement l'argument), y compris les
+  tracebacks — les lignes ajoutées plus tard sont couvertes sans rien
+  faire. Le motif `auth_token` couvre la forme `auth_token=<valeur>` et
+  les URL `/dsns/<X>/` sont purgées.
+- **`config_entry` explicite** dans les deux `DataUpdateCoordinator` :
+  l'escalade réauth ne dépend plus du ContextVar interne `current_entry`
+  que HA déconseille aux custom integrations.
+- Gigya : le texte `errorMessage` (contrôlé par le serveur, peut echoit le
+  loginID) est assaini avant d'entrer dans l'exception `DeLonghiAuthError`.
+
+## [1.6.1] — 2026-11-05
+
+Correctifs issus de l'audit complet du dépôt (lecture ligne à ligne des deux
+intégrations + revue sécurité).
+
+### Fixed — confidentialité
+- **Adresse e-mail de l'utilisateur en clair dans les journaux Home Assistant**
+  (`delonghi_coffee/api.py`) : `authenticate()` journalisait l'e-mail non masqué
+  à chaque tentative (DEBUG) et à chaque échec Gigya (ERROR, visible sans mode
+  debug). `logger.sanitize()` portait déjà le masqueur d'e-mail sans jamais
+  être appliqué à ces trois lignes. Même fuite corrigée dans la
+  `delonghi_daedalus/config_flow.py` (message d'erreur `all_pools`), masquée
+  via un `_mask_email` local. Les journaux HA étant collés tels quels dans les
+  tickets GitHub, c'était une fuite d'identifiant personnel pour tout le monde.
+
+### Fixed — entités
+- **Compteurs non numériques : entité cassée à chaque écriture d'état**
+  (`delonghi_coffee/sensor.py`) : `parse_counters` conserve en chaîne brute une
+  valeur de compteur qu'il ne peut pas convertir en `int` ; trois sites
+  appliquaient ensuite une arithmétique sans garde — échelle
+  `str * 0.001` dans `native_value` et dans `extra_state_attributes`, et
+  comparaison `str < int` pour la source baseline/cloud (la garde existait déjà
+  dans `LocalBaselineStore.merge`, pas dans ces deux-là). Les valeurs non
+  numériques passent désormais brutes, la source affichée est `baseline`.
+
+### Fixed — daedalus
+- **Rotation JWT refusée deux fois : boucle `UpdateFailed` sans flux de
+  réauthentification** (`delonghi_daedalus/coordinator.py`) : si la machine
+  rejetait aussi le JWT fraîchement rotatif, l'erreur remontait en échec
+  transitoire et le flux de réauthentification documenté ne se déclenchait
+  jamais. Escalade maintenant en `ConfigEntryAuthFailed` ; les erreurs
+  transport restent transitoires.
+
+### Fixed — ressources
+- **Fuite de session HTTP dans le parcours de configuration**
+  (`delonghi_coffee/config_flow.py`) : la `requests.Session` créée par étape
+  utilisateur/réauthentification n'était fermée sur aucun chemin (chaque
+  tentative d'ajout laissait un pool keep-alive en suspens). Les deux étapes
+  ferment désormais la session dans `finally`.
+
+### Tests
+- 12 tests de régression ajoutés (971 au total) : masque d'e-mail dans les
+  journaux d'authentification, compteurs-chaînes (échelle + source baseline),
+  fermeture de session dans les parcours, escalade de réauthentification JWT
+  daedalus.
+
 ## [1.6.0] — 2026-10-29
 
 Première version stable de la branche 1.6. Contenu = `1.6.0-beta.23` (passage en revue

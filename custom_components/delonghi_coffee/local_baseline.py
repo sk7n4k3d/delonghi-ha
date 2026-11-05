@@ -33,13 +33,14 @@ switch back to cloud.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-_LOGGER = logging.getLogger(__name__)
+from .logger import get_logger
+
+_LOGGER = get_logger(__name__)
 
 # Storage version: bump when the schema changes. Stored under
 # .storage/delonghi_coffee_baseline_<DSN>.

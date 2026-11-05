@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import socket
 from datetime import timedelta
 from time import monotonic
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -27,9 +27,9 @@ from .const import (
 from .contentstack import fetch_bean_adapt, fetch_coffee_beans, fetch_drink_catalog
 from .lan import _LAN_LOGGER, DeLonghiLanServer, LanError, LanServerConfig, register_with_device
 from .local_baseline import LocalBaselineStore
-from .logger import get_diagnostic_dump
+from .logger import get_diagnostic_dump, get_logger, sanitize
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -42,10 +42,18 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     After: ~70 API calls/hour (3x reduction)
     """
 
-    def __init__(self, hass: HomeAssistant, api: DeLonghiApi, dsn: str) -> None:
+    def __init__(
+        self, hass: HomeAssistant, api: DeLonghiApi, dsn: str, config_entry: ConfigEntry | None = None
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
+            # Explicit config_entry: without it the base class falls back to
+            # the `current_entry` ContextVar, an implicit dependency HA
+            # discourages for custom components — and the ConfigEntryAuthFailed
+            # reauth escalation depends on `self.config_entry` being set
+            # (audit 2026-11-05).
+            config_entry=config_entry,
             name=DOMAIN,
             update_interval=timedelta(seconds=SCAN_INTERVAL_SECONDS),
         )
@@ -400,12 +408,15 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # HA only opens the reauth flow on ConfigEntryAuthFailed —
             # a plain UpdateFailed loops forever with last_update_success=False
             # and the user is never prompted to re-enter credentials (audit C1).
-            raise ConfigEntryAuthFailed(f"Authentication error: {err}") from err
+            # Text sanitized: HA logs it verbatim in its own ERROR logger,
+            # outside the reach of our SanitizeFilter (audit 2026-11-05).
+            raise ConfigEntryAuthFailed(f"Authentication error: {sanitize(err)}") from err
         except DeLonghiApiError as err:
-            raise UpdateFailed(f"Error fetching data: {err}") from err
+            # Same: the API error text can carry the DSN-bearing Ayla URL.
+            raise UpdateFailed(f"Error fetching data: {sanitize(err)}") from err
         except Exception as err:  # noqa: BLE001 — last-resort guard: coordinator must surface UpdateFailed
             _LOGGER.exception("Unexpected error during coordinator refresh")
-            raise UpdateFailed(f"Unexpected error: {err}") from err
+            raise UpdateFailed(f"Unexpected error: {sanitize(err)}") from err
 
     # ── LAN server lifecycle ─────────────────────────────────────────────
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -11,8 +9,9 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, GIGYA_API_KEYS
 from .coordinator import DaedalusCoordinator
 from .gigya_auth import apikey_fingerprint
+from .redact import get_logger
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 

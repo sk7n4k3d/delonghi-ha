@@ -473,3 +473,84 @@ def test_step_user_maps_all_pools_failure_to_dedicated_error_key() -> None:
     )
     assert result["type"] == "form"
     assert result["errors"]["base"] == "all_pools_unauthorized"
+
+
+class TestProbePoolsEmailPrivacy:
+    """Audit 2026-11-05: the all_pools failure message is logged verbatim by
+    the flow — the email inside it must be masked, not raw.
+    """
+
+    def test_all_pools_message_masks_email(self):
+        async def _run_probe():
+            api = MagicMock()
+            api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+            return await _probe_pools(
+                api,
+                email="sebastien.martin@example.com",
+                password="x",
+                preferred_pool=GIGYA_POOL_EU,
+            )
+
+        with pytest.raises(DaedalusAuthError) as excinfo:
+            asyncio.run(_run_probe())
+
+        msg = str(excinfo.value)
+        assert msg.startswith("all_pools:")
+        assert "sebastien.martin@example.com" not in msg
+        assert "s***n@***.com" in msg
+
+
+class TestFailureLogsMaskIdentifiers:
+    """Audit 2026-11-05 (M3): the flow logged host + serial number verbatim
+    at WARNING while the component's own REDACT_KEYS masks both for the
+    diagnostics dump — same public-issue-tracker channel, same bar."""
+
+    def _run_user_step(self, *, login_error=None, connect_error=None):
+        api = MagicMock()
+        if login_error is not None:
+            api.login_and_get_jwt = AsyncMock(side_effect=login_error)
+        else:
+            api.login_and_get_jwt = AsyncMock(return_value=("s", "jwt"))
+        if connect_error is not None:
+            api.connect_lan = AsyncMock(side_effect=connect_error)
+        else:
+            lan = MagicMock()
+            lan.close = AsyncMock()
+            api.connect_lan = AsyncMock(return_value=lan)
+        api.close = AsyncMock()
+        flow = _make_flow(api)
+        asyncio.run(
+            flow.async_step_user(
+                {
+                    CONF_EMAIL: "user@example.com",
+                    CONF_PASSWORD: "p",
+                    CONF_HOST: "192.168.1.42",
+                    CONF_SERIAL_NUMBER: "SN1234567890",
+                }
+            )
+        )
+
+    def test_auth_failure_warning_masks_host(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_daedalus.config_flow"):
+            self._run_user_step(login_error=DaedalusAuthError("bad creds"))
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "login refused" in joined
+        assert "192.168.x.x" in joined, "masked host expected for subnet triage"
+        assert "192.168.1.42" not in joined
+
+    def test_connect_failure_warning_masks_host_and_serial(self, caplog: pytest.LogCaptureFixture) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_daedalus.config_flow"):
+            self._run_user_step(
+                connect_error=DaedalusConnectionError("LAN WS connect to wss://192.168.1.42/ws/lan2lan failed")
+            )
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "LAN probe failed" in joined
+        assert "SN1234567890" not in joined
+        assert joined.count("192.168.1.42") == 0, "host must be masked in args AND in the exception text"
+        # triage value preserved: last serial digits + error detail survive
+        assert "********7890" in joined
+        assert "LAN WS connect" in joined

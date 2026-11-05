@@ -192,8 +192,10 @@ class TestAsyncSetupEntryHappyPath:
         # authenticate + get_devices both called (entry data missing device_name/sw_version)
         api.authenticate.assert_called_once()
         api.get_devices.assert_called_once()
-        # Coordinator constructed with (hass, api, dsn)
-        coord_cls.assert_called_once_with(hass, api, "DSN-1")
+        # Coordinator constructed with (hass, api, dsn) + the config entry
+        # (explicit config_entry is what makes the reauth escalation
+        # deterministic — audit 2026-11-05)
+        coord_cls.assert_called_once_with(hass, api, "DSN-1", config_entry=entry)
         # diagnostic_mode propagated
         assert coord.diagnostic_mode is True
         coord.async_config_entry_first_refresh.assert_awaited_once()

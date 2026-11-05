@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
@@ -25,9 +24,10 @@ from .const import (
     POWER_WAKE_DELAY,
 )
 from .coordinator import DeLonghiCoordinator
+from .logger import get_logger
 from .sensor import _device_info
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 # Re-exported under legacy names so existing tests and private callers still resolve.
 _WAKE_DELAY: float = POWER_WAKE_DELAY

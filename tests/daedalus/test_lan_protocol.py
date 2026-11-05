@@ -23,6 +23,7 @@ import json
 import pytest
 
 from custom_components.delonghi_daedalus.lan_protocol import (
+    LanAuthRejectedError,
     LanProtocolError,
     build_auth_frame,
     build_command_frame,
@@ -56,13 +57,19 @@ def test_parse_auth_response_returns_connection_id() -> None:
 
 
 def test_parse_auth_response_rejects_non_ok() -> None:
-    with pytest.raises(LanProtocolError):
+    """Response != OK on a PARSED frame = proven credential refusal →
+    the dedicated LanAuthRejectedError subclass (audit 2026-11-05): the
+    coordinator escalation must trigger ONLY on this."""
+    with pytest.raises(LanAuthRejectedError):
         parse_auth_response({"Response": "ERROR", "Reason": "bad token"})
 
 
-def test_parse_auth_response_rejects_missing_connection_id() -> None:
-    with pytest.raises(LanProtocolError):
+def test_parse_auth_response_rejects_missing_connection_id_as_malformed() -> None:
+    """A parsable OK answer without numeric ConnectionId is a protocol
+    anomaly (booting firmware), NOT a rejection → base error only."""
+    with pytest.raises(LanProtocolError) as excinfo:
         parse_auth_response({"Response": "OK"})
+    assert not isinstance(excinfo.value, LanAuthRejectedError)
 
 
 def test_build_command_frame_includes_request_id_and_connection_id() -> None:

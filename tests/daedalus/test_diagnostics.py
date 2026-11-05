@@ -127,6 +127,44 @@ def test_coordinator_state_included_when_present() -> None:
     assert result["coordinator"]["update_interval_s"] == 30
 
 
+def test_last_exception_free_text_is_scrubbed() -> None:
+    """Audit 2026-11-05: async_redact_data is key-indexed — it cannot scrub
+    the exception TEXT, which carries the LAN WS URL (host), JWT fragments
+    and possibly Gigya messages echoing the account email. The dump is made
+    for public issue trackers."""
+    coord = MagicMock()
+    coord.data = {"connected": False}
+    coord.last_update_success = False
+    coord.last_exception = ConnectionError(
+        "LAN WS connect to wss://192.168.1.42/ws/lan2lan failed for "
+        "sebastien@corp.example.net with token eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig123"
+    )
+    coord.update_interval = MagicMock(total_seconds=lambda: 30)
+
+    entry = _make_entry(data=_full_data())
+    hass = _make_hass_with(entry.entry_id, coord)
+    result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+    le = result["coordinator"]["last_exception"]
+
+    assert "192.168.1.42" not in le
+    assert "sebastien@corp.example.net" not in le
+    assert "eyJ" not in le
+    assert "sig123" not in le
+    assert le.startswith("ConnectionError:")  # type kept for triage
+
+
+def test_last_exception_none_stays_empty_string() -> None:
+    coord = MagicMock()
+    coord.data = {}
+    coord.last_update_success = True
+    coord.last_exception = None
+    coord.update_interval = MagicMock(total_seconds=lambda: 30)
+    entry = _make_entry(data=_full_data())
+    hass = _make_hass_with(entry.entry_id, coord)
+    result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+    assert result["coordinator"]["last_exception"] == ""
+
+
 def test_handles_missing_coordinator_gracefully() -> None:
     """If the entry hasn't been set up yet, diagnostics still works."""
     entry = _make_entry(data=_full_data())

@@ -10,7 +10,6 @@ Brewing commands are intentionally out of scope until we capture the exact
 
 from __future__ import annotations
 
-import logging
 import ssl
 from typing import Any
 
@@ -26,6 +25,7 @@ from .gigya_auth import (
     parse_login_response,
 )
 from .lan_protocol import (
+    LanAuthRejectedError,
     LanProtocolError,
     build_auth_frame,
     build_command_frame,
@@ -35,8 +35,9 @@ from .lan_protocol import (
     parse_message,
     validate_lan_host,
 )
+from .redact import get_logger, register_lan_host, sanitize_text
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
@@ -123,7 +124,10 @@ class DaedalusApi:
         try:
             return parse_login_response(payload)
         except GigyaAuthError as exc:
-            raise DaedalusAuthError(_augment_400093(str(exc), api_key)) from exc
+            # Gigya error text is server-controlled and can echo the loginID
+            # (audit 2026-11-05): scrub before it propagates into logs,
+            # error strings and last_exception.
+            raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
 
     async def _gigya_get_jwt(self, session_token: str, api_key: str) -> str:
         payload = await self._post_gigya(
@@ -133,7 +137,7 @@ class DaedalusApi:
         try:
             return parse_jwt_response(payload)
         except GigyaAuthError as exc:
-            raise DaedalusAuthError(_augment_400093(str(exc), api_key)) from exc
+            raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
 
     async def _post_gigya(self, path: str, data: dict[str, str]) -> dict[str, Any]:
         session = self._get_session()
@@ -158,17 +162,29 @@ class DaedalusApi:
         Refuses to connect to a non-private / hostname target — see
         `lan_protocol.validate_lan_host` for the rationale.
         """
+        # Remember the host so the logger filter and every downstream
+        # sanitize_text scrub it even without the value in hand: aiohttp's
+        # own exception texts (chained via `from exc`, rendered in tracebacks
+        # and last_exception) repeat it — audit 2026-11-05 (F1/F2).
+        register_lan_host(host)
         try:
             validate_lan_host(host)
         except LanProtocolError as exc:
-            raise DaedalusConnectionError(str(exc)) from exc
+            # The error echoes the host repr; scrub it at birth so no public
+            # channel (flow WARNING, UpdateFailed, diagnostics) ever carries
+            # it, IPv6 forms included.
+            raise DaedalusConnectionError(sanitize_text(str(exc), host=host)) from exc
         url = build_lan_ws_url(host)
         ssl_ctx = _build_trust_all_ssl_context()
         session = self._get_session()
         try:
             ws = await session.ws_connect(url, ssl=ssl_ctx, heartbeat=20)
         except aiohttp.ClientError as exc:
-            raise DaedalusConnectionError(f"LAN WS connect to {url} failed: {exc}") from exc
+            # Both `{url}` and the aiohttp text carry the host — scrub here so
+            # the message is clean in EVERY channel, including the raw
+            # traceback HA prints for unexpected errors (no sanitizer runs
+            # at that point).
+            raise DaedalusConnectionError(sanitize_text(f"LAN WS connect to {url} failed: {exc}", host=host)) from exc
 
         # H-daedalus-2 (audit 2026-05-08): split network failures from auth
         # failures during the AUTH handshake. The earlier code wrapped
@@ -179,8 +195,9 @@ class DaedalusApi:
         # expired, rotate it via Gigya getJWT" — turning a flaky Wi-Fi
         # link into an unbounded Gigya refresh storm. Now: transport
         # errors map to DaedalusConnectionError (transient, no Gigya
-        # call), and only an explicit device-side rejection raises
-        # DaedalusAuthError.
+        # call), and only an explicit device-side rejection (a parsed
+        # frame with Response != OK, audit 2026-11-05) raises
+        # DaedalusAuthError; malformed replies are transient too.
         try:
             await ws.send_str(build_auth_frame(serial_number=serial_number, jwt=jwt))
             raw = await ws.receive(timeout=10)
@@ -189,15 +206,34 @@ class DaedalusApi:
                 raise DaedalusConnectionError(f"LAN AUTH: unexpected WS frame type {raw.type!r}")
             response = parse_message(raw.data)
             connection_id = parse_auth_response(response)
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+            # TimeoutError (ws.receive timing out on a machine that accepts
+            # TCP but never answers the AUTH frame) and bare OSError (reset,
+            # TLS abort) used to escape ALL the handlers below: the ws was
+            # never closed and one socket leaked per 30 s cycle (audit
+            # 2026-11-05). TimeoutError ⊂ OSError since 3.11; named
+            # explicitly for clarity and older-runtime safety.
             await ws.close()
-            raise DaedalusConnectionError(f"LAN AUTH transport failed: {exc}") from exc
+            raise DaedalusConnectionError(sanitize_text(f"LAN AUTH transport failed: {exc}", host=host)) from exc
+        except LanAuthRejectedError as exc:
+            # The machine parsed our frame and answered Response != OK — the
+            # ONE path that genuinely proves a credential rejection. Let the
+            # coordinator rotate/escalate.
+            await ws.close()
+            # The frame's `Reason` is machine-controlled text (it can carry
+            # the LAN IP or session material) — the coordinator's
+            # sanitize_text is the last gate before it reaches the
+            # ConfigEntryAuthFailed message HA logs with a traceback.
+            raise DaedalusAuthError(sanitize_text(f"LAN AUTH handshake rejected: {exc}", host=host)) from exc
         except LanProtocolError as exc:
-            # The device parsed our frame and rejected it (or sent a
-            # malformed reply). This is the only path that genuinely
-            # signals an auth problem — let the coordinator reauth.
+            # Garbled / incomplete reply (non-JSON, missing ConnectionId…):
+            # NOT proof of an auth problem — a rebooting machine or any
+            # service on port 443 of a mistyped IP lands here. Treat as
+            # transient so the coordinator retries next cycle instead of
+            # rotating JWTs needlessly or opening a reauth flow the user
+            # cannot act on (audit 2026-11-05).
             await ws.close()
-            raise DaedalusAuthError(f"LAN AUTH handshake rejected: {exc}") from exc
+            raise DaedalusConnectionError(sanitize_text(f"LAN AUTH got a malformed reply: {exc}", host=host)) from exc
 
         return DaedalusLanConnection(ws=ws, connection_id=connection_id)
 
@@ -254,7 +290,12 @@ class DaedalusLanConnection:
         """Read the next JSON frame from the machine."""
         try:
             raw = await self._ws.receive(timeout=timeout)
-        except aiohttp.ClientError as exc:
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+            # TimeoutError is raised (not returned) by aiohttp's receive on
+            # timeout — same trap as connect_lan (audit 2026-11-05): a bare
+            # TimeoutError would escape every DaedalusError handler upstream.
+            # The handle itself stays open: a slow machine is transient, the
+            # coordinator's closed-check owns the lifecycle.
             raise DaedalusConnectionError(f"LAN receive failed: {exc}") from exc
         if raw.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
             raise DaedalusConnectionError("LAN WS closed by machine")

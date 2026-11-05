@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -16,9 +15,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ALARMS, DOMAIN
 from .coordinator import DeLonghiCoordinator
+from .logger import get_logger
 from .sensor import _device_info
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:

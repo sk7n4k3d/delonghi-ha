@@ -8,6 +8,7 @@ server mock is heavier than this scope justifies.
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -162,6 +163,51 @@ def test_400093_message_includes_apikey_fingerprint() -> None:
         assert "400093" in msg
         assert "len:11" in msg
         assert "sha1[:8]=" in msg
+
+    asyncio.run(_run())
+
+
+def _auth_ws(reply_data: str):
+    """WS double answering the AUTH handshake with a fixed reply frame."""
+    ws = MagicMock()
+    ws.send_str = AsyncMock()
+    ws.close = AsyncMock()
+    ws.receive = AsyncMock(return_value=MagicMock(type=aiohttp.WSMsgType.TEXT, data=reply_data))
+    return ws
+
+
+@pytest.mark.parametrize(
+    ("reply", "expected_error", "expected_text"),
+    [
+        # Proven rejection: parsed frame, Response != OK → auth error.
+        ('{"Response":"ERROR","Reason":"invalid AuthToken"}', DaedalusAuthError, "handshake rejected"),
+        # Malformed / anomalous replies: NOT proof of an auth problem →
+        # transient (audit 2026-11-05). The old code mapped ALL of these to
+        # DaedalusAuthError, so a booting machine locked the config entry
+        # behind a password re-prompt with no auto-heal.
+        ("not-json-at-all", DaedalusConnectionError, "malformed reply"),
+        ("[1,2,3]", DaedalusConnectionError, "malformed reply"),
+        ('{"Response":"OK"}', DaedalusConnectionError, "malformed reply"),
+    ],
+)
+def test_connect_lan_separates_proven_rejection_from_malformed_reply(reply, expected_error, expected_text) -> None:
+    """Audit 2026-11-05 (M2): only an explicit Response != OK rejection may
+    raise DaedalusAuthError — malformed frames stay transient."""
+
+    async def _run() -> None:
+        api = DaedalusApi()
+        try:
+            ws = _auth_ws(reply)
+            session = MagicMock()
+            session.ws_connect = AsyncMock(return_value=ws)
+            with (
+                patch.object(api, "_get_session", return_value=session),
+                pytest.raises(expected_error, match=expected_text),
+            ):
+                await api.connect_lan(host="192.168.1.42", serial_number="SN1", jwt="eyJ.eyJ.x")
+            ws.close.assert_awaited()
+        finally:
+            await api.close()
 
     asyncio.run(_run())
 

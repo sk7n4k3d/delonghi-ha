@@ -394,3 +394,42 @@ def _ensure_event_loop():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     yield
+
+
+class TestFlowSessionCleanup:
+    """Audit 2026-11-05: the flow-created DeLonghiApi used to leak its
+    requests.Session (keep-alive pool) on every attempt — error paths and
+    success path alike. Both steps must now close it.
+    """
+
+    def test_user_step_closes_api_on_auth_failure(self):
+        flow = _make_flow()
+        api = MagicMock()
+        api.authenticate.side_effect = DeLonghiAuthError("bad creds")
+        with patch.object(cf_mod, "DeLonghiApi", return_value=api):
+            result = _run(flow.async_step_user({"region": "EU", "email": "a@b.c", "password": "x"}))
+        assert result["errors"]["base"] == "invalid_auth"
+        api.close.assert_called_once()
+
+    def test_user_step_closes_api_on_success(self):
+        flow = _make_flow()
+        api = MagicMock()
+        api.authenticate.return_value = True
+        api.get_devices.return_value = [{"dsn": "D1"}]
+        api.coffee_devices.return_value = [{"dsn": "D1", "product_name": "Eletta"}]
+        with patch.object(cf_mod, "DeLonghiApi", return_value=api):
+            result = _run(flow.async_step_user({"region": "EU", "email": "a@b.c", "password": "x"}))
+        assert result["type"] == "create_entry"
+        api.close.assert_called_once()
+
+    def test_reauth_step_closes_api_on_failure(self):
+        flow = _make_flow()
+        entry = MagicMock()
+        entry.data = {"email": "a@b.c", "region": "EU"}
+        flow._reauth_entry = entry
+        api = MagicMock()
+        api.authenticate.side_effect = DeLonghiAuthError("bad")
+        with patch.object(cf_mod, "DeLonghiApi", return_value=api):
+            result = _run(flow.async_step_reauth_confirm({"password": "y"}))
+        assert result["errors"]["base"] == "invalid_auth"
+        api.close.assert_called_once()

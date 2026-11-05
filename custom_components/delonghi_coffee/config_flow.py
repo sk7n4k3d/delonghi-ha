@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import voluptuous as vol
@@ -12,10 +11,11 @@ from homeassistant.data_entry_flow import FlowResult
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
 from .const import CONF_REGION, DOMAIN, REGIONS
+from .logger import get_logger
 
 CONF_DIAGNOSTIC_MODE = "diagnostic_mode"
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = get_logger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -63,13 +63,16 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             region = user_input[CONF_REGION]
-
+            # Own the session lifetime: every flow attempt (including the
+            # ones that end in an error form or a created entry) must close
+            # the requests.Session opened here — repeated failed adds used to
+            # leak one keep-alive pool per attempt (audit 2026-11-05).
+            api = DeLonghiApi(
+                user_input[CONF_EMAIL],
+                user_input[CONF_PASSWORD],
+                region=region,
+            )
             try:
-                api = DeLonghiApi(
-                    user_input[CONF_EMAIL],
-                    user_input[CONF_PASSWORD],
-                    region=region,
-                )
                 await self.hass.async_add_executor_job(api.authenticate)
                 devices = await self.hass.async_add_executor_job(api.get_devices)
                 coffee = await self.hass.async_add_executor_job(api.coffee_devices)
@@ -116,6 +119,8 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # noqa: BLE001 — config flows must never surface unhandled exceptions to the user
                 _LOGGER.exception("Unexpected error during config flow")
                 errors["base"] = "unknown"
+            finally:
+                api.close()
 
         return self.async_show_form(
             step_id="user",
@@ -157,8 +162,8 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             region = self._reauth_entry.data.get(CONF_REGION, "EU")
             password = user_input[CONF_PASSWORD]
 
+            api = DeLonghiApi(email, password, region=region)
             try:
-                api = DeLonghiApi(email, password, region=region)
                 await self.hass.async_add_executor_job(api.authenticate)
 
                 self.hass.config_entries.async_update_entry(
@@ -175,6 +180,8 @@ class DeLonghiCoffeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # noqa: BLE001 — reauth flow must never surface unhandled exceptions to the user
                 _LOGGER.exception("Unexpected error during reauth")
                 errors["base"] = "unknown"
+            finally:
+                api.close()  # same session-leak fix as async_step_user
 
         return self.async_show_form(
             step_id="reauth_confirm",

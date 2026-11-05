@@ -3,10 +3,14 @@
 import time
 from unittest.mock import patch
 
+import pytest
+
 from custom_components.delonghi_coffee.logger import (
+    _MAX_LEN,
     ApiTimer,
     RateLimitTracker,
     _mask_email,
+    _mask_emails,
     get_diagnostic_dump,
     sanitize,
 )
@@ -20,6 +24,61 @@ class TestSanitize:
         msg = "Header: auth_token abc123def456_very_long_token"
         assert "abc123" not in sanitize(msg)
         assert "auth_token ***" in sanitize(msg)
+
+    def test_mask_auth_token_query_form(self):
+        """Audit 2026-11-05 (L1): the old space-only pattern let `auth_token=`
+        and `auth_token:` through unmasked — today latent (the token travels
+        in a header), but the mask must not depend on the separator."""
+        for msg in (
+            "Authorization: auth_token=SECRET1234567890",
+            "auth_token: SECRET1234567890",
+            "AUTH_TOKEN=SECRET1234567890",
+        ):
+            assert "SECRET1234567890" not in sanitize(msg), msg
+
+    def test_mask_auth_token_json_form(self):
+        """Audit 2026-11-05 (F4, LOW): the old rule broke on the JSON shape
+        its own docstring advertised — the key's closing quote defeats
+        `[:=]?` and the space after `:` defeats `\\S+`, leaving the token
+        intact: {"auth_token": "s3cr3t..."} -> {"auth_token *** "s3cr3t..."}."""
+        for msg, secret in (
+            ('{"auth_token": "s3cr3tAAAAAAAA"}', "s3cr3tAAAAAAAA"),
+            ("{'auth_token': 'ZZZZZZZZZZZZ'}", "ZZZZZZZZZZZZ"),  # dict repr
+            ('{"AuthToken":"x","auth_token" : "s3cr3tAAAAAAAA"}', "s3cr3tAAAAAAAA"),
+        ):
+            out = sanitize(msg)
+            assert secret not in out, msg
+            assert sanitize(out) == out, msg  # idempotent
+
+    def test_auth_token_value_only(self):
+        """Mirror effect of F4: the old \\S+ over-masked past the token and
+        lost triage context; the new rule masks only a token-shaped value."""
+        assert sanitize("auth_token court") == "auth_token court"  # 5 chars, no token
+        out = sanitize("/api?auth_token=s3cr3tAAAAAA&x=1")
+        assert "s3cr3tAAAAAA" not in out
+        assert "x=1" in out  # neighbouring query params survive
+        assert "auth_token=***" in out
+
+    def test_scrub_dsn_from_ayla_url(self):
+        """Audit 2026-11-05 (M1): requests' HTTPError text embeds the full
+        Ayla URL — the DSN rides exception messages into logs and dumps."""
+        msg = "get_properties failed: 404 Client Error for url: https://ads.cloud.getayla.net/apiv1/dsns/AC000W038925641/properties.json"
+        out = sanitize(msg)
+        assert "AC000W038925641" not in out
+        assert "/dsns/**REDACTED**/" in out
+        # the rest of the URL keeps its triage value
+        assert "properties.json" in out
+
+    def test_sanitize_is_idempotent(self):
+        msg = "auth_token=SECRET1234567890 a@b.co https://x/apiv1/dsns/AC000W1/props"
+        once = sanitize(msg)
+        assert sanitize(once) == once
+
+    def test_sanitize_coerces_non_strings(self):
+        """Exception objects are interpolated into log args constantly —
+        sanitize() must never raise from inside a logging path."""
+        assert sanitize(ValueError("boom")) == "boom"
+        assert isinstance(sanitize(None), str)
 
     def test_mask_jwt(self):
         """JWT tokens (three dot-separated base64 segments) must be masked."""
@@ -83,10 +142,16 @@ class TestSanitize:
         assert "AcbDe_1234567890" not in result
 
     def test_multiple_sensitive_values(self):
-        """Multiple credentials in one message all get masked."""
-        msg = "auth_token abc123 password=secret123 access_token=tok456789012345"
+        """Multiple credentials in one message all get masked.
+
+        Audit 2026-11-05 (F4): the auth_token value is a token-shaped run of
+        8+ chars — the 6-char dummy this test used before relied on the old
+        rule eating the whole rest of the word (over-masking the JSON form's
+        real value left standing). Real Ayla tokens are far above the floor.
+        """
+        msg = "auth_token abc123def456 password=secret123 access_token=tok456789012345"
         result = sanitize(msg)
-        assert "abc123" not in result
+        assert "abc123def456" not in result
         assert "secret123" not in result
         assert "tok456789012345" not in result
 
@@ -205,33 +270,189 @@ class TestDiagnosticDump:
         assert dump["properties"]["list_prop"] == {"type": "list", "value": [1, 2, 3]}
 
 
+class TestSanitizeLogFilter:
+    """Audit 2026-11-05 (L3): masking must be inductive — a logging.Filter
+    applied to every module logger, not hand-wrapped call-site by call-site.
+    """
+
+    def test_get_logger_installs_filter_idempotently(self):
+        from custom_components.delonghi_coffee.logger import SanitizeFilter, get_logger
+
+        first = get_logger("test.delonghi.idem")
+        second = get_logger("test.delonghi.idem")
+        assert first is second
+        assert sum(isinstance(f, SanitizeFilter) for f in first.filters) == 1
+
+    def test_filter_sanitizes_interpolated_args(self, caplog):
+        """A `%s` added tomorrow is masked without anyone remembering to
+        wrap it — the whole point of the filter."""
+        import logging as _logging
+
+        from custom_components.delonghi_coffee.logger import get_logger
+
+        log = get_logger("test.delonghi.filter")
+        with caplog.at_level(_logging.DEBUG, logger="test.delonghi.filter"):
+            log.error("Gigya failed for %s with %s", "user@corp.example.org", "auth_token=SUPERSECRET123")
+        joined = "\n".join(r.getMessage() for r in caplog.records)
+        assert "user@corp.example.org" not in joined
+        assert "SUPERSECRET123" not in joined
+
+    def test_filter_sanitizes_traceback_but_keeps_exc_info(self, caplog):
+        """The formatter only renders exc_info when exc_text is empty — the
+        filter pre-renders a sanitized exc_text while leaving exc_info
+        inspectable (HA UIs and tests read it)."""
+        import logging as _logging
+
+        from custom_components.delonghi_coffee.logger import get_logger
+
+        log = get_logger("test.delonghi.filterexc")
+        with caplog.at_level(_logging.ERROR, logger="test.delonghi.filterexc"):
+            try:
+                raise RuntimeError("boom for https://ads/apiv1/dsns/AC000W038925641/properties.json")
+            except RuntimeError:
+                log.exception("refresh failed")
+        rec = caplog.records[-1]
+        assert rec.exc_info is not None, "exc_info must survive for introspection"
+        assert "AC000W038925641" not in (rec.exc_text or "")
+        assert "/dsns/**REDACTED**/" in rec.exc_text
+
+    def test_exc_text_has_no_trailing_newline(self, caplog):
+        """Audit 2026-11-05 (F5, LOW): traceback.format_exception keeps its
+        final \\n (formatException retranchait s[:-1]) — one empty line per
+        traceback broke "one block = one entry" readers (grep -A, traceback
+        parsers)."""
+        import logging as _logging
+
+        from custom_components.delonghi_coffee.logger import get_logger
+
+        log = get_logger("test.delonghi.nl")
+        with caplog.at_level(_logging.ERROR, logger="test.delonghi.nl"):
+            try:
+                raise RuntimeError("boom")
+            except RuntimeError:
+                log.exception("ctx")
+        rec = caplog.records[-1]
+        assert rec.exc_text and not rec.exc_text.endswith("\n")
+
+    @pytest.mark.parametrize(
+        ("pkg_name", "filter_module"),
+        [
+            ("custom_components.delonghi_coffee", "custom_components.delonghi_coffee.logger"),
+            # Audit 2026-11-05 (F2, MEDIUM): the guard used to balance only
+            # the coffee package — the Daedalus coordinator logger is the
+            # one HA's update_coordinator uses for logger.exception.
+            ("custom_components.delonghi_daedalus", "custom_components.delonghi_daedalus.redact"),
+        ],
+    )
+    def test_module_loggers_all_filtered(self, pkg_name, filter_module):
+        """Every module of a component must go through get_logger — one
+        forgotten logging.getLogger() silently re-opens the leak."""
+        import importlib
+        import pkgutil
+
+        pkg = importlib.import_module(pkg_name)
+        filter_cls = importlib.import_module(filter_module).SanitizeFilter
+
+        for mod in pkgutil.iter_modules(pkg.__path__):
+            name = f"{pkg.__name__}.{mod.name}"
+            if name.rsplit(".", 1)[-1] in {"logger", "redact"}:
+                continue
+            module = importlib.import_module(name)
+            log = getattr(module, "_LOGGER", None)
+            if log is not None:
+                assert any(isinstance(f, filter_cls) for f in log.filters), name
+
+
+class TestEmailLinearScan:
+    """Audit 2026-11-05 (F3, MEDIUM): the e-mail regex backtracked per start
+    position — quadratic on long non-matching text (n=50 000 → ~9 s), and the
+    filter now runs it on every record including machine-piloted tracebacks.
+    The scan is now literal (find('@') + extension), the cap bounds input."""
+
+    def test_linear_scan_matches_reference_regex(self):
+        import random
+        import string
+
+        from custom_components.delonghi_coffee.logger import _EMAIL_REF_RE
+
+        random.seed(20261105)
+        alphabet = string.ascii_letters + string.digits + "._+-@:,/é 0"
+        corpus = (
+            "a@b.co user@mail.example.org x@localhost tag+u-1@sub.a-b.io "
+            "a@b@@c.d @@nope @nodo tld@dot no@ at@no user@dom.ain.tld.end "
+            "éè@café.fr 1.2.3.4@x.fr a@b.fr,c@d.fr"
+        )
+        cases = [corpus, *corpus.split()]
+        for _ in range(400):
+            cases.append("".join(random.choice(alphabet) for _ in range(random.randint(0, 60))))
+        for text in cases:
+            want = _EMAIL_REF_RE.sub(lambda m: _mask_email(m.group(0)), text)
+            assert _mask_emails(text) == want, repr(text)
+
+    def test_long_non_matching_text_is_linear(self):
+        import time
+
+        payload = "x" * 50_000 + " and no address"
+        t0 = time.perf_counter()
+        out = sanitize(payload)
+        elapsed = time.perf_counter() - t0
+        assert out == payload
+        assert elapsed < 0.25  # was ~8.7 s pre-fix on the same input
+
+    def test_sanitized_output_still_idempotent_with_emails(self):
+        msg = "mail from s***n@***.fr reply-to a@b.fr? password=hunter22very"
+        once = sanitize(msg)
+        assert sanitize(once) == once
+
+    def test_input_capped(self):
+        """Over-long input is truncated (tail dropped — never rendered
+        unfiltered), and the marker keeps the pass idempotent."""
+        out = sanitize("B" * (_MAX_LEN + 5000) + " secret=auth_token=s3cr3tAAAAAA")
+        assert len(out) == _MAX_LEN
+        assert "TRUNCATED" in out
+        assert "s3cr3tAAAAAA" not in out
+        assert sanitize(out) == out
+
+
 class TestMaskEmail:
     """Direct coverage of the email masking helper."""
 
     def test_short_local_part_fully_masked(self):
         """Local part of two chars or fewer → pure asterisks (line 38)."""
-        assert _mask_email("ab@example.com") == "**@e***.com"
-        assert _mask_email("a@example.com") == "*@e***.com"
+        assert _mask_email("ab@example.com") == "**@***.com"
+        assert _mask_email("a@example.com") == "*@***.com"
 
     def test_empty_local_part_masked_empty(self):
         """Empty local part still masks to an empty string."""
-        assert _mask_email("@example.com") == "@e***.com"
+        assert _mask_email("@example.com") == "@***.com"
 
-    def test_short_domain_prefix_kept_verbatim(self):
-        """Domain with a short prefix (≤2 chars) is not masked — covers 45."""
-        assert _mask_email("someone@io.local") == "s***e@io.local"
+    def test_every_domain_label_but_tld_masked(self):
+        """Audit 2026-11-05: masking only the first label left the org label
+        standing in multi-label domains — every label but the LAST is hidden
+        (no public-suffix list: `co.uk` is fully masked too, stricter)."""
+        assert _mask_email("someone@io.local") == "s***e@***.local"
+        assert _mask_email("p.nom@mail.entreprise.fr") == "p***m@***.***.fr"
+        assert _mask_email("a.b@sub.domain.co.uk") == "a***b@***.***.***.uk"
 
     def test_domain_without_dot_returned_as_is(self):
-        """No dot in domain → fallback branch on line 45."""
-        # Single-segment domains can't be split → masked_domain = domain.
+        """No dot in domain → fallback branch: no organisation label exists,
+        but the local part is still masked (never a silent no-op)."""
+        # Single-segment hosts can't be split → masked_domain = domain.
         assert _mask_email("sebastien@localhost") == "s***n@localhost"
+
+    def test_non_string_input_does_not_raise(self):
+        """Called during ``raise`` construction on entry.data values — a
+        non-str must degrade, not replace the auth error with AttributeError."""
+        assert _mask_email(None) == "***"
+        assert "@" not in _mask_email(12345)
 
     def test_long_local_and_long_domain(self):
         """Regression: full masking still works when both parts are long."""
         result = _mask_email("sebastien.homelab@devlabz.eu")
-        # Local gets first+***+last; domain gets first+"***."+rest.
+        # Local gets first+***+last; every domain label but the TLD is hidden.
         assert result.startswith("s***b@")
-        assert result.endswith("@d***.eu")
+        assert result.endswith("@***.eu")
+        assert "devlabz" not in result
 
 
 class TestRateLimitTrackerAdvanced:

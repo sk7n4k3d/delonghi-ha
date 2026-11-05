@@ -53,7 +53,6 @@ import base64
 import hashlib
 import hmac
 import json
-import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
@@ -75,7 +74,9 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 #
 # Both names point at the same logger; _LAN_LOGGER exists so the namespace
 # is obvious to readers.
-_LOGGER = logging.getLogger(__name__)
+from .logger import get_logger
+
+_LOGGER = get_logger(__name__)
 _LAN_LOGGER = _LOGGER
 
 LAN_SERVER_DEFAULT_PORT: int = 10280

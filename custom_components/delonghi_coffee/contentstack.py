@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import Any
 
 import requests
 
-_LOGGER = logging.getLogger(__name__)
+from .logger import get_logger
+
+_LOGGER = get_logger(__name__)
 
 # ContentStack APP stack (machine-specific data: drinks, capabilities, beans)
 _CS_BASE = "https://eu-cdn.contentstack.com/v3"
