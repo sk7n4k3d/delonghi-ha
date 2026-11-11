@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-11-11
+
 Correctifs des constats avérés du rapport blue-team 2026-11-05 (audit du
 commit `f783725`, rapport `2026-11-05-delonghi-ha-f783725-BLUE-TEAM.md`).
 
@@ -59,8 +61,6 @@ commit `f783725`, rapport `2026-11-05-delonghi-ha-f783725-BLUE-TEAM.md`).
   que HA déconseille aux custom integrations.
 - Gigya : le texte `errorMessage` (contrôlé par le serveur, peut echoit le
   loginID) est assaini avant d'entrer dans l'exception `DeLonghiAuthError`.
-
-## [1.6.1] — 2026-11-05
 
 Correctifs issus de l'audit complet du dépôt (lecture ligne à ligne des deux
 intégrations + revue sécurité).
@@ -804,7 +804,8 @@ ready.
 
 See the [GitHub releases](https://github.com/sk7n4k3d/delonghi-ha/releases) page.
 
-[Unreleased]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.9...HEAD
+[Unreleased]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0...v1.7.0
 [1.6.0-beta.9]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.8...v1.6.0-beta.9
 [1.6.0-beta.8]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.7...v1.6.0-beta.8
 [1.6.0-beta.7]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.6...v1.6.0-beta.7
