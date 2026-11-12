@@ -7,5 +7,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/sk7n4k3d/delonghi-ha/issues",
   "requirements": [],
-  "version": "1.7.0"
+  "version": "1.7.1"
 }

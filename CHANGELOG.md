@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.7.1] — 2026-11-12
+
+Correctif de packaging uniquement — aucun changement de code par rapport à 1.7.0.
+
+### Fixed
+- **Asset `delonghi_coffee.zip` de v1.7.0 mal empaqueté (#52)** : l'asset
+  publié contenait les fichiers sous `custom_components/delonghi_coffee/`
+  au lieu de la racine du zip, ce qui faisait échouer la mise à jour
+  HACS / Marketplace (`no usable manifest.json`). L'asset avait été
+  construit localement et avait remplacé celui de la CI, qui produit
+  pourtant le bon layout plat. v1.7.1 est publié par le workflow
+  `release.yaml` depuis le tag, sans retouche manuelle de l'asset.
+
 ## [1.7.0] — 2026-11-11
 
 Correctifs des constats avérés du rapport blue-team 2026-11-05 (audit du
@@ -804,7 +817,8 @@ ready.
 
 See the [GitHub releases](https://github.com/sk7n4k3d/delonghi-ha/releases) page.
 
-[Unreleased]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.7.1...HEAD
+[1.7.1]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0...v1.7.0
 [1.6.0-beta.9]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.8...v1.6.0-beta.9
 [1.6.0-beta.8]: https://github.com/sk7n4k3d/delonghi-ha/compare/v1.6.0-beta.7...v1.6.0-beta.8
