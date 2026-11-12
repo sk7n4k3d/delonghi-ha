@@ -7,8 +7,13 @@ import pytest
 from custom_components.delonghi_daedalus.gigya_auth import (
     GIGYA_JWT_TTL_SECONDS,
     GigyaAuthError,
+    _check_gigya_error,
+    build_jwt_app_request,
     build_jwt_request_params,
     build_login_params,
+    build_login_params_legacy,
+    build_login_query,
+    is_credential_error,
     parse_jwt_response,
     parse_login_response,
 )
@@ -22,11 +27,42 @@ def test_build_login_params_includes_required_fields() -> None:
     )
     assert params["loginID"] == "user@example.com"
     assert params["password"] == "hunter2"
-    assert params["apiKey"] == "4_mXSplGaqrFT0H88TAjqJuA"
+    # App-aligned format (#18): apiKey travels in the QUERY, not the body.
+    assert "apiKey" not in params
     assert params["targetEnv"] == "mobile"
-    # Cookie/session handling requires session expiration — set to long-lived
-    # since Daedalus refreshes via getJWT, not via re-login.
+    # 90-day session, verbatim from My Coffee Lounge 1.5.0 — the app never
+    # asks for a session that outlives the JWT it will rotate.
+    assert params["sessionExpiration"] == "7776000"
+    assert params["include"] == "id_token,profile,data,preferences"
+
+
+def test_build_login_query_carries_api_key() -> None:
+    assert build_login_query(api_key="k1") == {"apiKey": "k1"}
+
+
+def test_build_jwt_app_request_shape() -> None:
+    query, body, headers = build_jwt_app_request(session_token="st", session_secret="ss", api_key="k1", ttl_seconds=100)
+    assert query == {"apiKey": "k1", "secret": "ss"}
+    assert body == {"expiration": "100"}
+    assert headers == {"Authorization": "Bearer st"}
+
+
+def test_is_credential_error_only_on_refusal_codes() -> None:
+    assert is_credential_error(GigyaAuthError("x", error_code=403001))
+    assert is_credential_error(GigyaAuthError("x", error_code=403005))
+    assert not is_credential_error(GigyaAuthError("x", error_code=403013))
+    assert not is_credential_error(GigyaAuthError("x"))
+
+
+def test_build_login_params_legacy_keeps_old_shape() -> None:
+    params = build_login_params_legacy(
+        loginID="u",
+        password="p",
+        api_key="k1",  # noqa: S106 — test fixture
+    )
+    assert params["apiKey"] == "k1"
     assert params["sessionExpiration"] == "-1"
+    assert "include" not in params
 
 
 def test_parse_login_response_extracts_session_credentials() -> None:
@@ -118,3 +154,22 @@ def test_apikey_fingerprint_changes_on_truncation() -> None:
     assert full != truncated
     assert "len:24" in full
     assert "len:17" in truncated
+
+
+def test_malformed_errorcode_degrades_without_traceback() -> None:
+    """Audit #18 A4: non-numeric errorCode must not raise ValueError out of
+    the parser; it becomes an unknown code (fallback-eligible)."""
+    with pytest.raises(GigyaAuthError) as caught:
+        _check_gigya_error({"errorCode": "INVALID", "errorMessage": "weird proxy"})
+    assert caught.value.error_code == -1
+
+
+def test_string_zero_errorcode_is_success() -> None:
+    _check_gigya_error({"errorCode": "0"})  # must not raise
+
+
+def test_is_credential_error_normalizes_types() -> None:
+    """Audit #18 A5: a str/float refusal code must still short-circuit."""
+    assert is_credential_error(GigyaAuthError("x", error_code="403001"))
+    assert is_credential_error(GigyaAuthError("x", error_code=403005.0))
+    assert not is_credential_error(GigyaAuthError("x", error_code="nope"))

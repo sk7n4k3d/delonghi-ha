@@ -23,13 +23,16 @@ from custom_components.delonghi_daedalus.config_flow import (
     _probe_pools,
 )
 from custom_components.delonghi_daedalus.const import (
+    CONF_CLOUD_TELEMETRY,
     CONF_EMAIL,
     CONF_HOST,
     CONF_JWT,
+    CONF_LAN_AUTH_MESSAGE,
     CONF_MACHINE_NAME,
     CONF_PASSWORD,
     CONF_POOL,
     CONF_SERIAL_NUMBER,
+    CONF_SESSION_SECRET,
     CONF_SESSION_TOKEN,
     GIGYA_API_KEYS,
     GIGYA_POOL_EU,
@@ -53,9 +56,10 @@ def test_show_form_when_no_input() -> None:
 
 def test_create_entry_on_success() -> None:
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("session-abc", "jwt-xyz"))
+    api.login_and_get_jwt = AsyncMock(return_value=("session-abc", "secret-1", "jwt-xyz"))
     lan = MagicMock()
     lan.connection_id = 7
+    lan.auth_message = "AUTH"
     lan.close = AsyncMock()
     api.connect_lan = AsyncMock(return_value=lan)
     api.close = AsyncMock()
@@ -81,6 +85,9 @@ def test_create_entry_on_success() -> None:
     assert data[CONF_SERIAL_NUMBER] == "SN1234"
     assert data[CONF_JWT] == "jwt-xyz"
     assert data[CONF_SESSION_TOKEN] == "session-abc"
+    assert data[CONF_SESSION_SECRET] == "secret-1"
+    assert data[CONF_LAN_AUTH_MESSAGE] == "AUTH"
+    assert data[CONF_CLOUD_TELEMETRY] is False
     # machine_name defaults to SN until we can pull it from the cloud /devices
     assert data[CONF_MACHINE_NAME] == "SN1234"
     # Probe connection must have been closed.
@@ -109,7 +116,7 @@ def test_invalid_auth_shows_form_error() -> None:
 
 def test_cannot_connect_shows_form_error() -> None:
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("s", "jwt"))
+    api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "jwt"))
     api.connect_lan = AsyncMock(side_effect=DaedalusConnectionError("no route"))
     api.close = AsyncMock()
 
@@ -131,9 +138,10 @@ def test_cannot_connect_shows_form_error() -> None:
 def test_pool_selection_passes_matching_api_key_to_login() -> None:
     """When user picks Pool EU_US, the flow must forward the EU_US Gigya apiKey."""
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("session-abc", "jwt-xyz"))
+    api.login_and_get_jwt = AsyncMock(return_value=("session-abc", "secret-1", "jwt-xyz"))
     lan = MagicMock()
     lan.connection_id = 7
+    lan.auth_message = "AUTH"
     lan.close = AsyncMock()
     api.connect_lan = AsyncMock(return_value=lan)
     api.close = AsyncMock()
@@ -161,7 +169,7 @@ def test_pool_selection_passes_matching_api_key_to_login() -> None:
 def test_pool_defaults_to_eu_when_not_provided() -> None:
     """Backwards-compat: existing flows without pool field keep using Pool EU."""
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("s", "j"))
+    api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "j"))
     lan = MagicMock()
     lan.connection_id = 1
     lan.close = AsyncMock()
@@ -213,7 +221,7 @@ def test_invalid_auth_logs_reason(caplog: pytest.LogCaptureFixture) -> None:
 
 def test_cannot_connect_logs_reason(caplog: pytest.LogCaptureFixture) -> None:
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("s", "jwt"))
+    api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "jwt"))
     api.connect_lan = AsyncMock(
         side_effect=DaedalusConnectionError(
             "LAN WS connect to wss://10.0.0.5/ws/lan2lan failed: [Errno 113] No route to host"
@@ -270,9 +278,11 @@ class TestProbePools:
     def test_preferred_pool_succeeds_no_fallback(self) -> None:
         """Preferred pool succeeds → no other pool is tried."""
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(return_value=("session", "jwt"))
+        api.login_and_get_jwt = AsyncMock(return_value=("session", "ss", "jwt"))
 
-        pool, session_token, jwt = asyncio.run(_probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU))
+        pool, session_token, session_secret, jwt = asyncio.run(
+            _probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU)
+        )
 
         assert pool == GIGYA_POOL_EU
         assert session_token == "session"
@@ -287,11 +297,13 @@ class TestProbePools:
         api.login_and_get_jwt = AsyncMock(
             side_effect=[
                 DaedalusAuthError("Gigya error 403005: Unauthorized user"),
-                ("session", "jwt"),
+                ("session", "ss", "jwt"),
             ]
         )
 
-        pool, session_token, jwt = asyncio.run(_probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU))
+        pool, session_token, session_secret, jwt = asyncio.run(
+            _probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU)
+        )
 
         # Resolved pool must be one of the non-preferred pools.
         assert pool != GIGYA_POOL_EU
@@ -326,9 +338,9 @@ class TestProbePools:
     def test_preferred_pool_first_in_order(self) -> None:
         """When preferred is EU_US, the first call uses EU_US apiKey, not EU."""
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(return_value=("session", "jwt"))
+        api.login_and_get_jwt = AsyncMock(return_value=("session", "ss", "jwt"))
 
-        pool, _, _ = asyncio.run(_probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU_US))
+        pool, _, _, _ = asyncio.run(_probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU_US))
 
         assert pool == GIGYA_POOL_EU_US
         assert api.login_and_get_jwt.await_args.kwargs["api_key"] == GIGYA_API_KEYS[GIGYA_POOL_EU_US]
@@ -339,7 +351,7 @@ class TestProbePools:
         api.login_and_get_jwt = AsyncMock(
             side_effect=[
                 DaedalusAuthError("Gigya error 403005: Unauthorized user"),
-                ("session", "jwt"),
+                ("session", "ss", "jwt"),
             ]
         )
 
@@ -372,7 +384,7 @@ class TestReauthFlow:
 
     def test_reauth_confirm_renews_session_and_aborts_successful(self) -> None:
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(return_value=("session-new", "jwt-new"))
+        api.login_and_get_jwt = AsyncMock(return_value=("session-new", "secret-new", "jwt-new"))
         api.close = AsyncMock()
         entry = self._make_entry(
             data={
@@ -510,7 +522,7 @@ class TestFailureLogsMaskIdentifiers:
         if login_error is not None:
             api.login_and_get_jwt = AsyncMock(side_effect=login_error)
         else:
-            api.login_and_get_jwt = AsyncMock(return_value=("s", "jwt"))
+            api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "jwt"))
         if connect_error is not None:
             api.connect_lan = AsyncMock(side_effect=connect_error)
         else:

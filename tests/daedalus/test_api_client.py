@@ -45,7 +45,8 @@ def test_login_roundtrip_returns_jwt() -> None:
             body = await request.post()
             assert body["loginID"] == "user@example.com"
             assert body["password"] == "hunter2"
-            assert body["apiKey"] == "4_mXSplGaqrFT0H88TAjqJuA"
+            # App-aligned format (#18): apiKey in the query string.
+            assert request.query["apiKey"] == "4_mXSplGaqrFT0H88TAjqJuA"
             return web.json_response(
                 {
                     "errorCode": 0,
@@ -55,15 +56,20 @@ def test_login_roundtrip_returns_jwt() -> None:
             )
 
         async def get_jwt(request: web.Request) -> web.Response:
-            body = await request.post()
-            assert body["oauth_token"] == "st"
+            # With a sessionSecret captured at login, the app-aligned call
+            # carries the session token as Bearer and the secret in the query.
+            assert request.headers.get("Authorization") == "Bearer st"
+            assert request.query["secret"] == "ss"
             return web.json_response({"errorCode": 0, "id_token": "jwt-abc"})
 
         runner, base = await _start_gigya({"/accounts.login": login, "/accounts.getJWT": get_jwt})
         try:
             api = DaedalusApi(gigya_base_url=base)
-            session_token, jwt = await api.login_and_get_jwt(email="user@example.com", password="hunter2")
+            session_token, session_secret, jwt = await api.login_and_get_jwt(
+                email="user@example.com", password="hunter2"
+            )
             assert session_token == "st"
+            assert session_secret == "ss"
             assert jwt == "jwt-abc"
         finally:
             await api.close()
@@ -108,8 +114,7 @@ def test_login_uses_custom_api_key_when_pool_is_eu_us() -> None:
         captured: dict[str, str] = {}
 
         async def login(request: web.Request) -> web.Response:
-            body = await request.post()
-            captured["apiKey"] = str(body["apiKey"])
+            captured["apiKey"] = str(request.query["apiKey"])
             return web.json_response(
                 {
                     "errorCode": 0,

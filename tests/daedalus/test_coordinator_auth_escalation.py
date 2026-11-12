@@ -66,6 +66,7 @@ def test_rotation_success_assigns_connection():
     """Happy path unchanged: rotated JWT accepted → live connection."""
     coord = _make_coordinator()
     fake_conn = MagicMock()
+    fake_conn.auth_message = "AUTH"  # matches entry default → no extra entry update
     coord._api.connect_lan.side_effect = [DaedalusAuthError("expired"), fake_conn]
 
     asyncio.run(coord._ensure_connected())

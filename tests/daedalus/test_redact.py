@@ -279,3 +279,32 @@ class TestDaedalusSanitizeFilter:
         assert rec.exc_text is not None
         assert ULA not in rec.exc_text
         assert not rec.exc_text.endswith("\n")
+
+
+# --- audit #18 (blue-team): free-text secret echoes ------------------------
+
+
+def test_password_echo_in_error_message_is_masked() -> None:
+    """Gigya can echo the raw password in a free-text errorMessage."""
+    out = sanitize_text("Wrong password 'Sup3rS3cret!' for user")
+    assert "Sup3rS3cret" not in out
+
+
+def test_secret_query_param_in_https_url_is_masked() -> None:
+    """The getJWT query carries secret=<sessionSecret> in a plain https URL
+    that the wss-only URL scrubber never matched."""
+    out = sanitize_text("POST https://accounts.eu1.gigya.com/accounts.getJWT?apiKey=4_x&secret=c/9pT0kenZ failed")
+    assert "c/9pT0kenZ" not in out
+
+
+def test_serial_argument_masks_machine_reason() -> None:
+    out = sanitize_text("SerialNo mismatch 1234567890", serial="1234567890")
+    assert "1234567890" not in out
+
+
+def test_secret_kv_scrub_does_not_eat_benign_words() -> None:
+    """The scrub masks values, never the whole line, and leaves short
+    non-secret words (like the AUTH verb) alone."""
+    out = sanitize_text("Message auth accepted, secret=longsecretvalue")
+    assert "auth" in out
+    assert "longsecretvalue" not in out

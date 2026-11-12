@@ -28,13 +28,16 @@ from .api import (
     DaedalusConnectionError,
 )
 from .const import (
+    CONF_CLOUD_TELEMETRY,
     CONF_EMAIL,
     CONF_HOST,
     CONF_JWT,
+    CONF_LAN_AUTH_MESSAGE,
     CONF_MACHINE_NAME,
     CONF_PASSWORD,
     CONF_POOL,
     CONF_SERIAL_NUMBER,
+    CONF_SESSION_SECRET,
     CONF_SESSION_TOKEN,
     DOMAIN,
     GIGYA_API_KEYS,
@@ -58,6 +61,7 @@ _USER_SCHEMA = vol.Schema(
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_SERIAL_NUMBER): str,
         vol.Optional(CONF_POOL, default=GIGYA_POOL_EU): vol.In(list(GIGYA_API_KEYS.keys())),
+        vol.Optional(CONF_CLOUD_TELEMETRY, default=False): bool,
     }
 )
 
@@ -68,10 +72,11 @@ async def _probe_pools(
     email: str,
     password: str,
     preferred_pool: str,
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     """Try Gigya login across all pools, preferred pool first.
 
-    Returns (pool, session_token, jwt) for the first pool that succeeds.
+    Returns (pool, session_token, session_secret, jwt) for the first pool
+    that succeeds.
 
     If the preferred pool returns 403005 ("Unauthorized user") the remaining
     pools are tried automatically — this covers accounts registered on a
@@ -90,14 +95,16 @@ async def _probe_pools(
     for pool in pools_ordered:
         api_key = GIGYA_API_KEYS[pool]
         try:
-            session_token, jwt = await api.login_and_get_jwt(email=email, password=password, api_key=api_key)
+            session_token, session_secret, jwt = await api.login_and_get_jwt(
+                email=email, password=password, api_key=api_key
+            )
             if pool != preferred_pool:
                 _LOGGER.info(
                     "Daedalus: preferred pool %s returned 403005, succeeded with %s",
                     preferred_pool,
                     pool,
                 )
-            return pool, session_token, jwt
+            return pool, session_token, session_secret, jwt
         except DaedalusAuthError as exc:
             last_exc = exc
             if _GIGYA_UNAUTHORIZED_USER not in str(exc):
@@ -139,15 +146,16 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
 
         api = self._api_factory()
-        session_token = jwt = ""
+        session_token = session_secret = jwt = ""
         try:
-            resolved_pool, session_token, jwt = await _probe_pools(
+            resolved_pool, session_token, session_secret, jwt = await _probe_pools(
                 api,
                 email=user_input[CONF_EMAIL],
                 password=user_input[CONF_PASSWORD],
                 preferred_pool=preferred_pool,
             )
             lan = await api.connect_lan(host=host, serial_number=serial, jwt=jwt)
+            lan_auth_message = lan.auth_message
             await lan.close()
         except DaedalusAuthError as exc:
             # host/serial partial-masked: the same identifiers are in
@@ -192,6 +200,9 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_POOL: resolved_pool,
                 CONF_JWT: jwt,
                 CONF_SESSION_TOKEN: session_token,
+                CONF_SESSION_SECRET: session_secret,
+                CONF_LAN_AUTH_MESSAGE: lan_auth_message,
+                CONF_CLOUD_TELEMETRY: bool(user_input.get(CONF_CLOUD_TELEMETRY, False)),
             },
         )
 
@@ -212,7 +223,7 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             api = self._api_factory()
             try:
-                resolved_pool, session_token, jwt = await _probe_pools(
+                resolved_pool, session_token, session_secret, jwt = await _probe_pools(
                     api,
                     email=email,
                     password=password,
@@ -236,6 +247,7 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_POOL: resolved_pool,
                         CONF_JWT: jwt,
                         CONF_SESSION_TOKEN: session_token,
+                        CONF_SESSION_SECRET: session_secret,
                     },
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)

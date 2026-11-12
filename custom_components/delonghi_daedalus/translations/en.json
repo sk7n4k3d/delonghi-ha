@@ -9,7 +9,8 @@
           "password": "Password",
           "host": "Machine IP on LAN",
           "serial_number": "Machine serial number",
-          "pool": "Account region (Gigya pool) — the integration auto-probes all regions, leave on EU unless you know otherwise"
+          "pool": "Account region (Gigya pool) — the integration auto-probes all regions, leave on EU unless you know otherwise",
+          "cloud_telemetry": "Read-only cloud telemetry (experimental): also pull live state from the De'Longhi cloud every 2 minutes. Never sends commands."
         }
       },
       "reauth_confirm": {

@@ -42,6 +42,16 @@ _PRIV4_RE = re.compile(
     r"|\b169\.254(?:\.\d{1,3}){2}\b"
 )
 _TOKEN_RE = re.compile(r"(sessionToken|sessionSecret|oauth_token|AuthToken)[\"']?\s*[:=]\s*[\"']?[\w.+/=-]{10,}")
+# Audit #18 (blue-team A1/A2): Gigya can echo the raw password in a free-text
+# errorMessage ("Wrong password 'Sup3rS3cret!'"), and the getJWT query carries
+# `secret=<sessionSecret>` inside a plain https URL that _WSS_RE never matches.
+# Scrub keyword=value / keyword 'value' shapes for the remaining secret words;
+# over-masking a benign "secret sauce" in a log line is the accepted cost.
+# Single character classes only — no nested quantifiers (linear-time rule above).
+_SECRET_KV_RE = re.compile(
+    r"(?i)\b(password|passwd|passphrase|secret|id_token|access_token|refresh_token)"
+    r"(?:\s*[:=]\s*|\s+[\"']?)([^\s\"',;&]{6,}|[^\"']{6,})"
+)
 # Reference shape of an email in free text (audit 2026-11-05). Kept as the
 # exact semantics the linear scanner below must reproduce (asserted in tests);
 # it is NOT used to scan — the quantifier over ``[\w.+-]+`` backtracks per
@@ -202,7 +212,7 @@ def _scrub_hosts(msg: str, host: object) -> str:
     return msg
 
 
-def sanitize_text(text: object, *, host: object = None) -> str:
+def sanitize_text(text: object, *, host: object = None, serial: object = None) -> str:
     """Scrub every known secret class from free text (exception messages…).
 
     Server- and machine-controlled strings (Gigya errorMessage echoing the
@@ -214,15 +224,22 @@ def sanitize_text(text: object, *, host: object = None) -> str:
     IPv6 forms (ULA/LLA/``::1``, with or without zone-id) cannot be caught by
     the IPv4 pattern, so they are scrubbed literally. Hosts registered via
     :func:`register_lan_host` are scrubbed even without the argument.
+    ``serial`` (audit #18, G2) additionally masks the machine serial when a
+    machine-controlled ``Reason`` echoes it verbatim.
     """
     msg = text if isinstance(text, str) else str(text)
     if len(msg) > _MAX_LEN:
         msg = msg[: _MAX_LEN - len(_TRUNCATED)] + _TRUNCATED
     msg = _JWT_RE.sub("***JWT***", msg)
     msg = _TOKEN_RE.sub(r"\1=***", msg)
+    msg = _SECRET_KV_RE.sub(lambda m: m.group(1) + " ***", msg)
     msg = _WSS_RE.sub(r"\1**REDACTED**", msg)
     msg = _PRIV4_RE.sub("**REDACTED-IP**", msg)
     msg = _scrub_hosts(msg, host)
+    if serial is not None:
+        serial_text = str(serial)
+        if len(serial_text) >= 4:
+            msg = msg.replace(serial_text, mask_serial(serial_text))
     msg = _mask_emails(msg)
     return msg
 

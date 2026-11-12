@@ -21,9 +21,30 @@ GIGYA_BASE_URL = "https://accounts.eu1.gigya.com"
 GIGYA_API_KEY_PROD = "4_mXSplGaqrFT0H88TAjqJuA"
 GIGYA_JWT_TTL_SECONDS = 90 * 24 * 60 * 60  # 7_776_000s, Daedalus default
 
+# My Coffee Lounge 1.5.0 sends the login exactly like this (issue #18,
+# mimasek71 capture): apiKey travels as a QUERY parameter, the body carries
+# `include` and a 90-day sessionExpiration. The previous hand-built variant
+# (apiKey in the body, sessionExpiration=-1, no include) is rejected by the
+# Gigya screen-set some EU accounts sit behind — it is kept only as an
+# automatic fallback for accounts that predate the app flow.
+MCL_APP_SESSION_EXPIRATION_SECONDS = 7_776_000  # 90 days, verbatim from the app
+MCL_APP_LOGIN_INCLUDE = "id_token,profile,data,preferences"
+
+# Gigya errorCodes that prove the CREDENTIALS were seen and refused, or that
+# the account is locked/rate-limited. The legacy-format retry must never fire
+# on these: replaying a wrong password would double every failed login against
+# Gigya's rate limiter and deepen a lockout. Covers both the classic
+# (403001/403005) and the newer flow codes (403023/403025/403026) — see the
+# SAP CDC error catalog.
+_CREDENTIAL_ERROR_CODES = frozenset({403001, 403002, 403005, 403023, 403025, 403026})
+
 
 class GigyaAuthError(RuntimeError):
     """Raised when Gigya returns a non-zero errorCode or malformed payload."""
+
+    def __init__(self, message: str, *, error_code: int = 0) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def build_login_params(
@@ -32,11 +53,37 @@ def build_login_params(
     password: str,
     api_key: str = GIGYA_API_KEY_PROD,
 ) -> dict[str, str]:
-    """Construct POST body for `accounts.login`.
+    """Construct POST body for `accounts.login` (app-aligned format).
 
-    `sessionExpiration=-1` requests a long-lived session. Daedalus relies on
-    getJWT() to rotate the short-lived auth token, so we want the underlying
-    session to stay usable for months.
+    `apiKey` is NOT part of the body in this format — see `build_login_query`.
+    `sessionExpiration=7776000` (90 days) matches My Coffee Lounge 1.5.0;
+    the old `-1` variant lives on in `build_login_params_legacy` as the
+    automatic fallback.
+    """
+    return {
+        "loginID": loginID,
+        "password": password,
+        "targetEnv": "mobile",
+        "sessionExpiration": str(MCL_APP_SESSION_EXPIRATION_SECONDS),
+        "include": MCL_APP_LOGIN_INCLUDE,
+    }
+
+
+def build_login_query(*, api_key: str = GIGYA_API_KEY_PROD) -> dict[str, str]:
+    """Query-string parameters for the app-aligned `accounts.login`."""
+    return {"apiKey": api_key}
+
+
+def build_login_params_legacy(
+    *,
+    loginID: str,
+    password: str,
+    api_key: str = GIGYA_API_KEY_PROD,
+) -> dict[str, str]:
+    """Construct POST body for the pre-#18 format (apiKey in the body).
+
+    Kept as the fallback path: accounts created before the current MCL
+    screen-set still accept it, and some pools reject the query-string form.
     """
     return {
         "loginID": loginID,
@@ -69,12 +116,40 @@ def build_jwt_request_params(
     api_key: str = GIGYA_API_KEY_PROD,
     ttl_seconds: int = GIGYA_JWT_TTL_SECONDS,
 ) -> dict[str, str]:
-    """Construct POST body for `accounts.getJWT`."""
+    """Construct POST body for the legacy `accounts.getJWT` (oauth_token body).
+
+    Used when no sessionSecret was captured; the app-aligned variant is
+    `build_jwt_app_request`.
+    """
     return {
         "apiKey": api_key,
         "oauth_token": session_token,
         "expiration": str(ttl_seconds),
     }
+
+
+def build_jwt_app_request(
+    *,
+    session_token: str,
+    session_secret: str,
+    api_key: str = GIGYA_API_KEY_PROD,
+    ttl_seconds: int = GIGYA_JWT_TTL_SECONDS,
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """Build the app-aligned `accounts.getJWT` call (MCL 1.5.0, mimasek71).
+
+    Returns `(query, body, headers)`:
+      - query:   apiKey + the sessionSecret as `secret`
+      - body:    expiration only
+      - headers: `Authorization: Bearer <sessionToken>`
+
+    The sessionSecret is a bearer credential: never log it, never echo it in
+    an exception message (the api layer scrubs defensively regardless).
+    """
+    return (
+        {"apiKey": api_key, "secret": session_secret},
+        {"expiration": str(ttl_seconds)},
+        {"Authorization": f"Bearer {session_token}"},
+    )
 
 
 def parse_jwt_response(payload: dict[str, Any]) -> str:
@@ -89,8 +164,36 @@ def parse_jwt_response(payload: dict[str, Any]) -> str:
 def _check_gigya_error(payload: dict[str, Any]) -> None:
     error_code = payload.get("errorCode", 0)
     if error_code:
-        message = payload.get("errorMessage") or payload.get("errorDetails") or "unknown"
-        raise GigyaAuthError(f"Gigya error {error_code}: {message}")
+        # Audit #18 (A4): a malformed errorCode ("403001.5", "INVALID") must
+        # degrade to an unknown code (fallback-eligible), never a raw
+        # ValueError traceback out of the config flow. A truthy "0" string
+        # means success and must NOT raise.
+        try:
+            code = int(error_code)
+        except (TypeError, ValueError):
+            code = -1
+        if not code:
+            return
+        # errorMessage is server-controlled free text (can echo the password);
+        # sanitize_text scrubs known shapes, the hard cap bounds the blast
+        # radius of an unknown one (audit #18, A1).
+        message = str(payload.get("errorMessage") or payload.get("errorDetails") or "unknown")[:120]
+        raise GigyaAuthError(f"Gigya error {code}: {message}", error_code=code)
+
+
+def is_credential_error(exc: GigyaAuthError) -> bool:
+    """True when the Gigya errorCode proves the credentials were refused.
+
+    Only these codes justify short-circuiting (no legacy-format retry, no
+    next-pool probe): replaying them would hammer the same wrong password.
+    Audit #18 (A5): normalize defensively — a str/float code must never
+    silently downgrade a proven refusal into a replayable "unknown".
+    """
+    try:
+        code = int(exc.error_code)
+    except (TypeError, ValueError):
+        return False
+    return code in _CREDENTIAL_ERROR_CODES
 
 
 def apikey_fingerprint(api_key: str) -> str:

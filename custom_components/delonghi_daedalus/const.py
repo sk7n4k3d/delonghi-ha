@@ -54,5 +54,15 @@ CONF_POOL: Final = "pool"
 CONF_JWT: Final = "jwt"  # noqa: S105
 CONF_SESSION_TOKEN: Final = "session_token"  # noqa: S105
 CONF_SESSION_SECRET: Final = "session_secret"  # noqa: S105
+# Which AUTH frame verb this machine accepted ("AUTH" | "auth", issue #18).
+CONF_LAN_AUTH_MESSAGE: Final = "lan_auth_message"
+# Opt-in read-only cloud telemetry (AWS IoT shadow over MQTT/WSS).
+CONF_CLOUD_TELEMETRY: Final = "cloud_telemetry"
 
 DEFAULT_UPDATE_INTERVAL_SECONDS: Final = 30
+# Cloud shadows change slowly and every fetch is a full MQTT session;
+# 120 s matches the cadence mimasek71 validated on the Eletta Ultra.
+CLOUD_POLL_SECONDS: Final = 120
+# Hard budget for one full cloud hop (REST lookup + MQTT connect + shadows);
+# keeps a black-holed broker from stalling the coordinator (audit #18, D1).
+CLOUD_FETCH_TIMEOUT_SECONDS: Final = 75
