@@ -5,6 +5,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-11-13
+
+Support de la De'Longhi **Eletta Ultra** (pilet « Daedalus ») d'après le
+retour terrain de @mimasek71 (ticket #18). Intégration `delonghi_daedalus`
+passant à 0.3.0 ; `delonghi_coffee` inchangé à part le numéro de version.
+
+### Added
+- **Télémétrie cloud en lecture seule (expérimental, opt-in)** : case
+  « Télémétrie cloud » à l'ajout de l'intégration. Résout le nom cloud de la
+  machine via l'API De'Longhi, puis lit les shadows AWS IoT `MachineStatus`
+  et `MachineCapabilities` (MQTT/WSS) toutes les 2 minutes. Les échecs cloud
+  n'affectent jamais la connexion locale.
+- Les clés connues du shadow d'état deviennent des entités `sensor`
+  (valeurs brutes tant que les codes ne sont pas mappés).
+
+### Changed
+- **Connexion Gigya alignée sur l'app My Coffee Lounge 1.5.0** : `apiKey` en
+  paramètre d'URL, `sessionExpiration=7776000`, JWT obtenu via
+  `Authorization: Bearer` + secret de session. L'ancien format reste en
+  repli automatique ; un refus d'identifiants n'est **jamais** rejoué.
+- **Authentification locale** : les firmwares Eletta Ultra qui répondent
+  `UNAUTHORIZED` à la trame `AUTH` obtiennent une reconnexion unique avec la
+  trame minuscule `auth` ; l'orthographe retenue est mémorisée par machine.
+
+### Fixed
+- Le `sessionSecret` de session Gigya est conservé et utilisé pour la
+  rotation du JWT (moins de redemandes de mot de passe).
+- Durcissement complet (double revue) : masquage des secrets dans les
+  messages d'erreur serveur, bornes strictes du parsing MQTT, budget global
+  de 75 s pour le trajet cloud, nettoyage du coordinateur si la création des
+  entités échoue.
+
 ## [1.7.1] — 2026-11-12
 
 Correctif de packaging uniquement — aucun changement de code par rapport à 1.7.0.
