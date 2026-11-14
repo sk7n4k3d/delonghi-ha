@@ -145,6 +145,15 @@
       },
       "cloud_steam_wand": {
         "name": "Steam wand"
+      },
+      "cloud_peripheral_tank_presence": {
+        "name": "Water tank present"
+      },
+      "cloud_accessory_none": {
+        "name": "No accessory"
+      },
+      "cloud_accessory_water": {
+        "name": "Water accessory"
       }
     },
     "sensor": {
@@ -246,6 +255,30 @@
       },
       "cloud_water_drain_support": {
         "name": "Water drain support"
+      },
+      "cloud_step_description": {
+        "name": "Step description"
+      },
+      "cloud_wifi_firmware": {
+        "name": "Wi-Fi firmware"
+      },
+      "cloud_cloud_agent_version": {
+        "name": "Cloud agent version"
+      },
+      "cloud_machine_model_main": {
+        "name": "Mainboard model"
+      },
+      "cloud_machine_user_profiles": {
+        "name": "User profiles"
+      },
+      "cloud_user_profile_icons": {
+        "name": "User profile icons"
+      },
+      "cloud_coffee_temperatures": {
+        "name": "Coffee temperatures"
+      },
+      "cloud_auto_turn_off_options": {
+        "name": "Auto turn-off times (min)"
       }
     }
   }

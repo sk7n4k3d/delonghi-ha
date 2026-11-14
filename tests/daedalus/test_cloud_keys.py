@@ -110,3 +110,109 @@ def test_translations_cover_every_known_key(lang: str) -> None:
         entry = entity.get(section, {}).get(f"cloud_{meta.key}")
         assert entry is not None, f"{lang}.json missing {section}.cloud_{meta.key}"
         assert entry["name"].strip(), f"{lang}.json empty name for cloud_{meta.key}"
+
+
+# Real key names from mimasek71's anonymised raw shadow dump (issue #18,
+# 2026-11-14) — the regression guard for the guessed-alias replacement.
+_REAL_DUMP_KEYS = {
+    "Status": "operating_state",
+    "CurrMode": "current_mode",
+    "CurrFuncProgress": "function_progress",
+    "ExitBeverageWithError": "dispensing_error",
+    "BeverageDispensing": "dispensing_value",
+    "StepDescr": "step_description",
+    "alarms.TankLevel": "tank_level",
+    "alarms.Waste": "grounds_container",
+    "alarms.Descale": "descale",
+    "alarms.Filter": "water_filter",
+    "alarms.GroundFine": "ground_fine",
+    "alarms.General": "general_fault",
+    "alarms.HeaterNTC": "heater_ntc",
+    "alarms.Imbocco": "imbocco",
+    "alarms.MotorPos": "motor_pos",
+    "alarms.Drain": "drain",
+    "alarms.Bubble": "bubble",
+    "alarms.TankPresence": "tank_presence",
+    "alarms.Clean": "cleaning",
+    "alarms.BrokenGrinder": "broken_grinder",
+    "alarms.NoCoffee": "no_coffee_beans",
+    "alarms.Infuser": "infuser",
+    "alarms.UIMemory": "ui_memory",
+    "alarms.WifiDown": "wifi_down",
+    "alarms.Fan": "fan",
+    "alarms.BrewUnitClean": "brew_unit_cleaning",
+    "alarms.Fridge": "fridge",
+    "peripherals.Switch": "switch",
+    "peripherals.WaterSpout": "spout_presence",
+    "peripherals.Jug": "jug",
+    "peripherals.TankPresence": "peripheral_tank_presence",
+    "peripherals.WaterTankLow": "low_water",
+    "peripherals.DripPresence": "drip_tray_presence",
+    "peripherals.HotJug": "hot_jug",
+    "peripherals.Grinder1ZSW": "grinder1_zsw",
+    "peripherals.MotDwSw": "motor_down_switch",
+    "peripherals.MotUpSw": "motor_up_switch",
+    "accessories.None": "accessory_none",
+    "accessories.Water": "accessory_water",
+    "accessories.IDFHot": "idf_hot",
+    "accessories.CleanHot": "clean_hot",
+    "accessories.IDFCold": "idf_cold",
+    "accessories.CleanCold": "clean_cold",
+    "accessories.SteamWand": "steam_wand",
+    "MachineModelUI": "machine_model",
+    "MachineModelMain": "machine_model_main",
+    "FWUIVersion": "display_firmware",
+    "FWMainboardVersion": "mainboard_firmware",
+    "FWWiFiVersion": "wifi_firmware",
+    "DLAWSAgentVersion": "cloud_agent_version",
+    "GFXVersion": "graphics_version",
+    "ExtraShot": "extra_shot",
+    "MugToGo": "mug_to_go",
+    "DrinkClusters": "drink_groups",
+    "CustomizedDrinks": "custom_drinks",
+    "CoffeeMoments": "coffee_moments",
+    "BeanAdaptType": "bean_adapt_type",
+    "Grinder": "grinder_type",
+    "MachineUserProfiles": "machine_user_profiles",
+    "MachineUserProfileIcons": "user_profile_icons",
+    "MachineUserProfileColours": "profile_colors",
+    "MachineStatisticTypes": "statistics_types",
+    "Hopper": "bean_hopper_type",
+    "Languages": "languages",
+    "Dictionaries": "dictionaries",
+    "SupportedAccessories": "supported_accessories",
+    "DisplayType": "display_type",
+    "CoffeeTemperatures": "coffee_temperatures",
+    "AutoTurnOffTimeInMinutes": "auto_turn_off_options",
+    "WaterHardness": "water_hardness_options",
+    "SoundEnable": "sound_options",
+    "EnergySavingMode": "eco_mode_options",
+    "Granulometries": "grind_levels",
+    "DrainWater": "water_drain_support",
+    "CustomRecipeNameLen": "recipe_name_length",
+    "BeanSystemNameLen": "bean_profile_name_length",
+    "UserProfileNameLen": "user_profile_name_length",
+}
+
+
+@pytest.mark.parametrize(("raw_key", "expected"), sorted(_REAL_DUMP_KEYS.items()))
+def test_real_dump_keys_resolve(raw_key: str, expected: str) -> None:
+    found = lookup_cloud_key(raw_key)
+    assert found is not None and found.key == expected, f"{raw_key} -> {found}"
+
+
+def test_path_alias_beats_segment_alias() -> None:
+    """alarms vs peripherals TankPresence must map to distinct entries."""
+    assert lookup_cloud_key("alarms.TankPresence").key == "tank_presence"
+    assert lookup_cloud_key("peripherals.TankPresence").key == "peripheral_tank_presence"
+
+
+def test_sensitive_keys_never_planned() -> None:
+    """BLE passcode / MAC / SN must not become entities in either platform."""
+    cloud = {
+        "status_flat": {"BlePassCode": "123456", "MAC": "08:aa", "SN": "AC000", "Status": "Standby"},
+        "capabilities_flat": {"BlePassCode": "x", "Languages": 27},
+    }
+    planned = {k for s, k, _ in plan_cloud_entities(cloud, want_binary=False)}
+    planned |= {k for s, k, _ in plan_cloud_entities(cloud, want_binary=True)}
+    assert planned == {"Status", "Languages"}

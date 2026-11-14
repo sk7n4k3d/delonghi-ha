@@ -5,6 +5,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-14
+
+### Changed
+- **daedalus 0.4.1 — alias exacts d'après le dump brut de mimasek71 (#18)** :
+  il a fourni les JSON `state.reported` anonymisés des deux shadows ; les
+  noms réels (`Status`, `CurrMode`, `Filter`, `Clean`, `NoCoffee`, `Waste`,
+  `FWUIVersion`, `Granulometries`, `SoundEnable`, `EnergySavingMode`,
+  `DrinkClusters`, `Grinder`, `Hopper`, `GFXVersion`, `DrainWater`…)
+  remplacent les alias devinés, conservés en secours pour les autres
+  modèles.
+- Nouveaux champs mappés : description d'étape, firmware Wi-Fi, version
+  agent cloud, modèle carte mère, profils utilisateur (nombre + icônes),
+  températures café, extinction auto, `accessories.None`/`Water` et
+  `peripherals.TankPresence` (alias en chemin complet pour lever
+  l'ambiguïté avec `alarms.TankPresence`).
+
+### Security
+- Les clés `BlePassCode` (code d'appairage BLE), `MAC` et `SN` ne sont
+  **jamais** exposées en entités — le repli brut les aurait persistées dans
+  la base HA et les diagnostics exportés.
+
 ### Added
 - **daedalus 0.4.0 — snapshot terrain Eletta Ultra intégré (mimasek71, #18)** :
   - `cloud_keys.py` : table de 66 champs cloud connus (état, alarmes,

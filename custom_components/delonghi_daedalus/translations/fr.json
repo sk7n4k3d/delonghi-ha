@@ -145,6 +145,15 @@
       },
       "cloud_steam_wand": {
         "name": "Buse vapeur"
+      },
+      "cloud_peripheral_tank_presence": {
+        "name": "Réservoir d'eau présent"
+      },
+      "cloud_accessory_none": {
+        "name": "Aucun accessoire"
+      },
+      "cloud_accessory_water": {
+        "name": "Accessoire eau"
       }
     },
     "sensor": {
@@ -246,6 +255,30 @@
       },
       "cloud_water_drain_support": {
         "name": "Prise en charge de la purge d'eau"
+      },
+      "cloud_step_description": {
+        "name": "Description de l'étape"
+      },
+      "cloud_wifi_firmware": {
+        "name": "Micrologiciel Wi-Fi"
+      },
+      "cloud_cloud_agent_version": {
+        "name": "Version agent cloud"
+      },
+      "cloud_machine_model_main": {
+        "name": "Modèle carte mère"
+      },
+      "cloud_machine_user_profiles": {
+        "name": "Profils utilisateur"
+      },
+      "cloud_user_profile_icons": {
+        "name": "Icônes de profil utilisateur"
+      },
+      "cloud_coffee_temperatures": {
+        "name": "Températures café"
+      },
+      "cloud_auto_turn_off_options": {
+        "name": "Extinction automatique (min)"
       }
     }
   }
