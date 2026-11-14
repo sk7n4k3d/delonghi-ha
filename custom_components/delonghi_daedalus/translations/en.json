@@ -37,6 +37,114 @@
     "binary_sensor": {
       "connected": {
         "name": "Connected"
+      },
+      "cloud_dispensing_error": {
+        "name": "Dispensing error"
+      },
+      "cloud_broken_grinder": {
+        "name": "Broken grinder"
+      },
+      "cloud_bubble": {
+        "name": "Air bubble"
+      },
+      "cloud_no_coffee_beans": {
+        "name": "No coffee beans"
+      },
+      "cloud_brew_unit_cleaning": {
+        "name": "Brew unit cleaning required"
+      },
+      "cloud_cleaning": {
+        "name": "Cleaning required"
+      },
+      "cloud_descale": {
+        "name": "Descaling required"
+      },
+      "cloud_drain": {
+        "name": "Drain required"
+      },
+      "cloud_fan": {
+        "name": "Fan"
+      },
+      "cloud_fridge": {
+        "name": "Fridge"
+      },
+      "cloud_ground_fine": {
+        "name": "Grind too fine"
+      },
+      "cloud_heater_ntc": {
+        "name": "Heater NTC fault"
+      },
+      "cloud_tank_level": {
+        "name": "Water tank level"
+      },
+      "cloud_imbocco": {
+        "name": "Spout clog (imbocco)"
+      },
+      "cloud_infuser": {
+        "name": "Infuser"
+      },
+      "cloud_motor_pos": {
+        "name": "Motor position fault"
+      },
+      "cloud_general_fault": {
+        "name": "General fault"
+      },
+      "cloud_tank_presence": {
+        "name": "Water tank missing"
+      },
+      "cloud_ui_memory": {
+        "name": "UI memory error"
+      },
+      "cloud_water_filter": {
+        "name": "Replace water filter"
+      },
+      "cloud_wifi_down": {
+        "name": "Wi-Fi disconnected"
+      },
+      "cloud_grounds_container": {
+        "name": "Grounds container full"
+      },
+      "cloud_grinder1_zsw": {
+        "name": "Grinder 1 switch"
+      },
+      "cloud_hot_jug": {
+        "name": "Hot milk jug"
+      },
+      "cloud_jug": {
+        "name": "Milk jug"
+      },
+      "cloud_motor_down_switch": {
+        "name": "Brew unit down switch"
+      },
+      "cloud_motor_up_switch": {
+        "name": "Brew unit up switch"
+      },
+      "cloud_low_water": {
+        "name": "Low water level"
+      },
+      "cloud_drip_tray_presence": {
+        "name": "Drip tray present"
+      },
+      "cloud_spout_presence": {
+        "name": "Water spout present"
+      },
+      "cloud_switch": {
+        "name": "Switch"
+      },
+      "cloud_clean_cold": {
+        "name": "Cold cleaning cycle"
+      },
+      "cloud_clean_hot": {
+        "name": "Hot cleaning cycle"
+      },
+      "cloud_idf_cold": {
+        "name": "Cold milk carafe (IDF)"
+      },
+      "cloud_idf_hot": {
+        "name": "Hot milk system (IDF)"
+      },
+      "cloud_steam_wand": {
+        "name": "Steam wand"
       }
     },
     "sensor": {
@@ -48,6 +156,96 @@
       },
       "lan_ip": {
         "name": "LAN IP address"
+      },
+      "cloud_operating_state": {
+        "name": "Operating state"
+      },
+      "cloud_current_mode": {
+        "name": "Current mode (raw code)"
+      },
+      "cloud_function_progress": {
+        "name": "Current function progress (raw code)"
+      },
+      "cloud_dispensing_value": {
+        "name": "Dispensing value (raw)"
+      },
+      "cloud_display_firmware": {
+        "name": "Display firmware"
+      },
+      "cloud_mainboard_firmware": {
+        "name": "Mainboard firmware"
+      },
+      "cloud_machine_model": {
+        "name": "Machine model"
+      },
+      "cloud_languages": {
+        "name": "Languages"
+      },
+      "cloud_grind_levels": {
+        "name": "Grind levels"
+      },
+      "cloud_drink_groups": {
+        "name": "Drink groups"
+      },
+      "cloud_custom_drinks": {
+        "name": "Custom drinks capacity"
+      },
+      "cloud_bean_adapt_type": {
+        "name": "Bean Adapt type"
+      },
+      "cloud_display_type": {
+        "name": "Display type"
+      },
+      "cloud_grinder_type": {
+        "name": "Grinder type"
+      },
+      "cloud_bean_hopper_type": {
+        "name": "Bean hopper type"
+      },
+      "cloud_graphics_version": {
+        "name": "Graphics version"
+      },
+      "cloud_water_hardness_options": {
+        "name": "Water hardness options"
+      },
+      "cloud_eco_mode_options": {
+        "name": "Eco mode options"
+      },
+      "cloud_sound_options": {
+        "name": "Sound options"
+      },
+      "cloud_dictionaries": {
+        "name": "Dictionaries"
+      },
+      "cloud_statistics_types": {
+        "name": "Statistics types"
+      },
+      "cloud_profile_colors": {
+        "name": "Profile colors"
+      },
+      "cloud_recipe_name_length": {
+        "name": "Recipe name length"
+      },
+      "cloud_user_profile_name_length": {
+        "name": "User profile name length"
+      },
+      "cloud_bean_profile_name_length": {
+        "name": "Bean profile name length"
+      },
+      "cloud_supported_accessories": {
+        "name": "Supported accessories"
+      },
+      "cloud_coffee_moments": {
+        "name": "Coffee Moments support"
+      },
+      "cloud_extra_shot": {
+        "name": "Extra Shot support"
+      },
+      "cloud_mug_to_go": {
+        "name": "Mug To Go support"
+      },
+      "cloud_water_drain_support": {
+        "name": "Water drain support"
       }
     }
   }

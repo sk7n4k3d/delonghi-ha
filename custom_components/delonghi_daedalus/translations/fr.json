@@ -37,6 +37,114 @@
     "binary_sensor": {
       "connected": {
         "name": "Connectée"
+      },
+      "cloud_dispensing_error": {
+        "name": "Erreur de distribution"
+      },
+      "cloud_broken_grinder": {
+        "name": "Broyeur cassé"
+      },
+      "cloud_bubble": {
+        "name": "Bulle d'air"
+      },
+      "cloud_no_coffee_beans": {
+        "name": "Réservoir à grains vide"
+      },
+      "cloud_brew_unit_cleaning": {
+        "name": "Nettoyage du groupe infuseur requis"
+      },
+      "cloud_cleaning": {
+        "name": "Nettoyage requis"
+      },
+      "cloud_descale": {
+        "name": "Détartrage requis"
+      },
+      "cloud_drain": {
+        "name": "Purge requise"
+      },
+      "cloud_fan": {
+        "name": "Ventilateur"
+      },
+      "cloud_fridge": {
+        "name": "Réfrigérateur à lait"
+      },
+      "cloud_ground_fine": {
+        "name": "Mouture trop fine"
+      },
+      "cloud_heater_ntc": {
+        "name": "Sonde de chauffe (NTC) HS"
+      },
+      "cloud_tank_level": {
+        "name": "Niveau du réservoir d'eau"
+      },
+      "cloud_imbocco": {
+        "name": "Buse bouchée (imbocco)"
+      },
+      "cloud_infuser": {
+        "name": "Infuseur"
+      },
+      "cloud_motor_pos": {
+        "name": "Défaut de position moteur"
+      },
+      "cloud_general_fault": {
+        "name": "Défaut général"
+      },
+      "cloud_tank_presence": {
+        "name": "Réservoir d'eau absent"
+      },
+      "cloud_ui_memory": {
+        "name": "Erreur mémoire de l'interface"
+      },
+      "cloud_water_filter": {
+        "name": "Filtre à eau à remplacer"
+      },
+      "cloud_wifi_down": {
+        "name": "Wi-Fi déconnecté"
+      },
+      "cloud_grounds_container": {
+        "name": "Conteneur à marc plein"
+      },
+      "cloud_grinder1_zsw": {
+        "name": "Contact broyeur 1"
+      },
+      "cloud_hot_jug": {
+        "name": "Pichet lait chaud"
+      },
+      "cloud_jug": {
+        "name": "Pichet à lait"
+      },
+      "cloud_motor_down_switch": {
+        "name": "Fin de course bas"
+      },
+      "cloud_motor_up_switch": {
+        "name": "Fin de course haut"
+      },
+      "cloud_low_water": {
+        "name": "Niveau d'eau bas"
+      },
+      "cloud_drip_tray_presence": {
+        "name": "Bac d'égouttage présent"
+      },
+      "cloud_spout_presence": {
+        "name": "Bec d'eau présent"
+      },
+      "cloud_switch": {
+        "name": "Interrupteur"
+      },
+      "cloud_clean_cold": {
+        "name": "Cycle de nettoyage à froid"
+      },
+      "cloud_clean_hot": {
+        "name": "Cycle de nettoyage à chaud"
+      },
+      "cloud_idf_cold": {
+        "name": "Carafe lait froid (IDF)"
+      },
+      "cloud_idf_hot": {
+        "name": "Système lait chaud (IDF)"
+      },
+      "cloud_steam_wand": {
+        "name": "Buse vapeur"
       }
     },
     "sensor": {
@@ -48,6 +156,96 @@
       },
       "lan_ip": {
         "name": "Adresse IP locale"
+      },
+      "cloud_operating_state": {
+        "name": "État de la machine"
+      },
+      "cloud_current_mode": {
+        "name": "Mode courant (code brut)"
+      },
+      "cloud_function_progress": {
+        "name": "Progression de la fonction en cours (code brut)"
+      },
+      "cloud_dispensing_value": {
+        "name": "Valeur de distribution (brute)"
+      },
+      "cloud_display_firmware": {
+        "name": "Micrologiciel de l'afficheur"
+      },
+      "cloud_mainboard_firmware": {
+        "name": "Micrologiciel de la carte mère"
+      },
+      "cloud_machine_model": {
+        "name": "Modèle de la machine"
+      },
+      "cloud_languages": {
+        "name": "Langues"
+      },
+      "cloud_grind_levels": {
+        "name": "Niveaux de mouture"
+      },
+      "cloud_drink_groups": {
+        "name": "Groupes de boissons"
+      },
+      "cloud_custom_drinks": {
+        "name": "Capacité de boissons personnalisées"
+      },
+      "cloud_bean_adapt_type": {
+        "name": "Type Bean Adapt"
+      },
+      "cloud_display_type": {
+        "name": "Type d'afficheur"
+      },
+      "cloud_grinder_type": {
+        "name": "Type de broyeur"
+      },
+      "cloud_bean_hopper_type": {
+        "name": "Type de trémie à grains"
+      },
+      "cloud_graphics_version": {
+        "name": "Version des graphismes"
+      },
+      "cloud_water_hardness_options": {
+        "name": "Options de dureté de l'eau"
+      },
+      "cloud_eco_mode_options": {
+        "name": "Options du mode éco"
+      },
+      "cloud_sound_options": {
+        "name": "Options sonores"
+      },
+      "cloud_dictionaries": {
+        "name": "Dictionnaires"
+      },
+      "cloud_statistics_types": {
+        "name": "Types de statistiques"
+      },
+      "cloud_profile_colors": {
+        "name": "Couleurs de profil"
+      },
+      "cloud_recipe_name_length": {
+        "name": "Longueur des noms de recettes"
+      },
+      "cloud_user_profile_name_length": {
+        "name": "Longueur des noms de profils utilisateur"
+      },
+      "cloud_bean_profile_name_length": {
+        "name": "Longueur des noms de profils grains"
+      },
+      "cloud_supported_accessories": {
+        "name": "Accessoires pris en charge"
+      },
+      "cloud_coffee_moments": {
+        "name": "Prise en charge Coffee Moments"
+      },
+      "cloud_extra_shot": {
+        "name": "Prise en charge Extra Shot"
+      },
+      "cloud_mug_to_go": {
+        "name": "Prise en charge Mug To Go"
+      },
+      "cloud_water_drain_support": {
+        "name": "Prise en charge de la purge d'eau"
       }
     }
   }

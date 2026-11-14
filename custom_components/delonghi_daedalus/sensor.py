@@ -12,12 +12,9 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .cloud_keys import KIND_CAPABILITY, CloudKey, lookup_cloud_key, plan_cloud_entities
 from .const import CONF_CLOUD_TELEMETRY, DOMAIN
 from .coordinator import DaedalusCoordinator
-
-# Cap mirrors cloud.flatten_shadow(max_entries): one sensor per flattened
-# MachineStatus key, never more.
-_MAX_CLOUD_SENSORS = 80
 
 
 async def async_setup_entry(
@@ -36,36 +33,32 @@ async def async_setup_entry(
     if not entry.data.get(CONF_CLOUD_TELEMETRY):
         return
     # Cloud shadows arrive late (first successful fetch) and their key set is
-    # only known at runtime: add each flattened MachineStatus key exactly
-    # once, on the first coordinator update that carries it. The listener
-    # self-unregisters once the data has arrived (same pattern as the
-    # delonghi_coffee button platform) — it must not fire on every 30 s
-    # update for the lifetime of the entry (review #18, F6).
-    added: set[str] = set()
+    # only known at runtime: add each planned shadow key exactly once, on the
+    # first coordinator update that carries it. The listener self-unregisters
+    # once the data has arrived (same pattern as the delonghi_coffee button
+    # platform) — it must not fire on every 30 s update for the lifetime of
+    # the entry (review #18, F6).
+    added: set[tuple[str, str]] = set()
     unsub: Callable[[], None] | None = None
 
     def _add_cloud_sensors() -> None:
         nonlocal unsub
         cloud = (coordinator.data or {}).get("cloud") or {}
-        flat: dict[str, Any] = cloud.get("status_flat") or {}
         new: list[DaedalusCloudSensor] = []
-        for key in flat:
-            # Audit #18 (E1): shadow keys are cloud-controlled — drop blank
-            # ones and cap the identity/display length so a hostile key
-            # cannot build a colliding or oversized entity id. The raw key
-            # stays the lookup key in status_flat.
-            display = str(key).strip()[:64]
-            if not display or key in added or len(added) >= _MAX_CLOUD_SENSORS:
+        # Mapped alarm/bool keys belong to the binary_sensor platform —
+        # plan_cloud_entities partitions the two platforms exactly.
+        for source, key, meta in plan_cloud_entities(cloud, want_binary=False):
+            if (source, key) in added:
                 continue
-            added.add(key)
-            new.append(DaedalusCloudSensor(coordinator, key, display))
+            added.add((source, key))
+            new.append(DaedalusCloudSensor(coordinator, source, key, meta=meta))
         if new:
             async_add_entities(new)
-        if flat and unsub is not None:
+        if any(cloud.get(s) for s in ("status_flat", "capabilities_flat")) and unsub is not None:
             unsub()
             unsub = None
 
-    if (coordinator.data or {}).get("cloud", {}).get("status_flat"):
+    if any((coordinator.data or {}).get("cloud", {}).get(s) for s in ("status_flat", "capabilities_flat")):
         # First refresh already carried the shadows — add directly, no listener.
         _add_cloud_sensors()
     else:
@@ -115,27 +108,46 @@ class DaedalusLanIpSensor(_DaedalusSensorBase):
 
 
 class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
-    """One flattened AWS IoT MachineStatus shadow key (issue #18).
+    """One flattened AWS IoT shadow key (issue #18).
 
-    Values are raw until each code is mapped for real — a bool becomes a
-    "true"/"false" string because native_value only accepts str/num. The
-    shadow key is exposed as an attribute so dashboards stay stable even
-    if the raw value shape changes later.
+    Known fields get a translated name from ``cloud_keys``; unknown ones keep
+    the v1.8.0 raw ``Cloud <key>`` fallback. Values are raw until each code
+    is mapped for real — a bool becomes a "true"/"false" string because
+    native_value only accepts str/num (mapped bools render as binary_sensors
+    instead). The shadow key is exposed as an attribute so dashboards stay
+    stable even if the raw value shape changes later.
     """
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator: DaedalusCoordinator, key: str, display: str | None = None) -> None:
+    def __init__(
+        self,
+        coordinator: DaedalusCoordinator,
+        source: str,
+        key: str,
+        meta: CloudKey | None = None,
+    ) -> None:
         super().__init__(coordinator)
+        self._source = source
         self._key = key
-        display = display or str(key).strip()[:64]
-        self._attr_unique_id = f"{coordinator.serial_number}_cloud_{display}"
-        self._attr_name = f"Cloud {display.replace('.', ' ').replace('_', ' ').strip()}"
+        display = str(key).strip()[:64]
+        if meta is None:
+            meta = lookup_cloud_key(key)
+        # capabilities_flat keys keep a distinct unique_id namespace so a same
+        # named status/capability key can never collide.
+        prefix = "cloud" if source == "status_flat" else "cloudcap"
+        self._attr_unique_id = f"{coordinator.serial_number}_{prefix}_{display}"
+        if meta is not None:
+            self._attr_translation_key = f"cloud_{meta.key}"
+        else:
+            self._attr_name = f"Cloud {display.replace('.', ' ').replace('_', ' ').strip()}"
+        if source == "capabilities_flat" or (meta is not None and meta.kind == KIND_CAPABILITY):
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def native_value(self) -> str | int | float | None:
         cloud = (self.coordinator.data or {}).get("cloud") or {}
-        value: Any = cloud.get("status_flat", {}).get(self._key)
+        value: Any = cloud.get(self._source, {}).get(self._key)
         if isinstance(value, bool):
             return "true" if value else "false"
         if isinstance(value, (int, float, str)):

@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+### Added
+- **daedalus 0.4.0 — snapshot terrain Eletta Ultra intégré (mimasek71, #18)** :
+  - `cloud_keys.py` : table de 66 champs cloud connus (état, alarmes,
+    périphériques, accessoires, capacités) → noms lisibles traduits EN/FR.
+    Les champs inconnus gardent le repli brut `Cloud <clé>` de la 0.3.0.
+  - Les champs booléens mappés deviennent des `binary_sensor` (alarmes en
+    `device_class=problem` : on = problème) au lieu de capteurs texte
+    `true`/`false`.
+  - Le shadow `MachineCapabilities` est désormais exposé (capteurs
+    Diagnostic) — il était récupéré mais jeté depuis la 0.3.0.
+  - Carte Lovelace compacte d'exemple : `docs/daedalus-cloud-card.yaml`.
+
+### Changed
+- Entités de télémétrie cloud existantes : renommage seul (unique_id
+  inchangé) pour les champs reconnus ; les champs devenus `binary_sensor`
+  changent de domaine — l'ancienne entité `sensor.cloud_*` correspondante
+  est orpheline et retirée par HA.
+
 ## [1.8.0] — 2026-11-13
 
 Support de la De'Longhi **Eletta Ultra** (pilet « Daedalus ») d'après le

@@ -1,0 +1,42 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Carte compacte pour la télémétrie cloud delonghi_daedalus (issue #18).
+#
+# Les entity_id dépendent du nom d'appareil choisi à l'ajout de l'intégration :
+# ouvrez Outils de développement → États, filtrez sur "delonghi" ou
+# "daedalus", et remplacez les lignes `entity:` ci-dessous par les vôtres.
+#
+# Rappels :
+#   - alarmes = binary_sensor device_class=problem → on = problème détecté ;
+#   - "unknown" ≠ "off" : une valeur inconnue (cloud muet) doit rester visible
+#     comme telle, ne pas la confondre avec une alarme inactive ;
+#   - les périphériques/accessoires (buse vapeur, carafe…) sont en catégorie
+#     Diagnostic — décommentez la section si vous les voulez sur la carte.
+# ─────────────────────────────────────────────────────────────────────────────
+type: entities
+title: Eletta Ultra
+show_header_toggle: false
+state_color: true
+entities:
+  - entity: binary_sensor.MACHINE_connected
+    name: Connexion locale
+  - entity: sensor.MACHINE_operating_state
+    name: État
+  - type: divider
+  - entity: binary_sensor.MACHINE_descaling_required
+    name: Détartrage
+  - entity: binary_sensor.MACHINE_cleaning_required
+    name: Nettoyage
+  - entity: binary_sensor.MACHINE_replace_water_filter
+    name: Filtre à eau
+  - entity: binary_sensor.MACHINE_grounds_container_full
+    name: Marc
+  - entity: binary_sensor.MACHINE_no_coffee_beans
+    name: Grains
+  - entity: binary_sensor.MACHINE_water_tank_missing
+    name: Réservoir d'eau
+    icon: mdi:water-off
+  # - type: divider
+  # - entity: binary_sensor.MACHINE_steam_wand
+  #   name: Buse vapeur
+  # - entity: binary_sensor.MACHINE_cold_milk_carafe_idf
+  #   name: Carafe lait (IDF)

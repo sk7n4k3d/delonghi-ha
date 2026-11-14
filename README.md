@@ -16,6 +16,11 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > stack (Gigya + AWS IoT instead of Ayla), shipped as a separate HACS repository because the two
 > stacks share nothing at the wire-protocol level. Source code lives in this monorepo under
 > `custom_components/delonghi_daedalus/`; the other repo is a packaging mirror.
+>
+> Daedalus ≥ 0.4.0 optional **cloud telemetry** (read-only, opt-in) maps the known AWS shadow
+> fields to named entities (EN/FR) — alarms surface as `binary_sensor` (`problem`). Field mapping
+> credits: @mimasek71 (issue #18). Example Lovelace card:
+> [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
 
 ## Features
 
