@@ -3,24 +3,44 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import time
 
+import aiohttp
 import pytest
 from aiohttp import web
 
+from custom_components.delonghi_daedalus import cloud
 from custom_components.delonghi_daedalus.cloud import (
     CloudTelemetryError,
+    MqttPacket,
     MqttStreamReader,
     ShadowClient,
     _shadow_from_topic,
     extract_machine_name,
     fetch_cloud_state,
     flatten_shadow,
+    lookup_machine_name,
     mqtt_connect_packet,
     mqtt_publish_packet,
     mqtt_subscribe_packet,
     shadow_accepted_topic,
 )
+from custom_components.delonghi_daedalus.const import (
+    AWS_REST_BASE_URL_LEGACY_PROD,
+    AWS_REST_BASE_URL_PROD,
+    AWS_REST_SOURCE_HEADER,
+)
+
+# Wire literals repeated here on purpose (not imported from the module): these
+# are the contract mimasek71 captured on the Eletta Ultra, and a test that
+# imports them from the code under test could not catch a regression.
+_APP_AUTHORIZER = "x-amz-customauthorizer-name=dlg-prod-token-authorizer"
+_APP_WS_PATH = f"/mqtt?{_APP_AUTHORIZER}"
+# Shaped like a real Gigya JWT so the redaction patterns actually fire.
+FAKE_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.ZmFrZXNpZ25hdHVyZTEyMzQ"
+
 
 # ---------------------------------------------------------- /devices parsing --
 
@@ -38,6 +58,37 @@ def test_extract_machine_name_wrapper_and_key_variants() -> None:
     assert extract_machine_name(payload, "SN1234") == "t1"
 
 
+def test_extract_machine_name_grouped_owned_by_me() -> None:
+    """Issue #18: the live answer is grouped under ownedByMe / sharedToMe."""
+    payload = {
+        "ownedByMe": [
+            {"serialNumber": "AAA", "machineName": "m-aaa"},
+            {"serialNumber": "SN1234", "machineName": "Eletta-Ultra_01"},
+        ],
+        "sharedToMe": [],
+    }
+    assert extract_machine_name(payload, "SN1234") == "Eletta-Ultra_01"
+
+
+def test_extract_machine_name_grouped_shared_to_me() -> None:
+    payload = {
+        "ownedByMe": [{"serialNumber": "AAA", "machineName": "m-aaa"}],
+        "sharedToMe": [{"serialNumber": "sn1234", "thingName": "shared-thing"}],
+    }
+    assert extract_machine_name(payload, "SN1234") == "shared-thing"
+
+
+def test_extract_machine_name_grouped_beats_wrapper_keys() -> None:
+    """A grouped body must not be mistaken for one of the older wrappers."""
+    payload = {"ownedByMe": [{"serialNumber": "SN1234", "machineName": "t1"}], "data": "not-a-list"}
+    assert extract_machine_name(payload, "SN1234") == "t1"
+
+
+def test_extract_machine_name_grouped_but_absent_raises() -> None:
+    with pytest.raises(CloudTelemetryError, match="not found"):
+        extract_machine_name({"ownedByMe": [], "sharedToMe": [{"serialNumber": "zzz"}]}, "SN1234")
+
+
 def test_extract_machine_name_not_found_raises() -> None:
     with pytest.raises(CloudTelemetryError, match="not found"):
         extract_machine_name([{"serialNumber": "other"}], "SN1234")
@@ -48,7 +99,252 @@ def test_extract_machine_name_bad_shape_raises() -> None:
         extract_machine_name({"unexpected": "shape"}, "SN1234")
 
 
+# ------------------------------------------------------------------ REST hop --
+
+
+def _devices_server(routes: dict[str, tuple[int, str]]) -> tuple[web.Application, list[dict]]:
+    """Stub device directory: first matching path prefix wins, everything else 404."""
+    seen: list[dict] = []
+    app = web.Application()
+
+    async def handler(request: web.Request) -> web.Response:
+        seen.append({"path": request.path, "headers": dict(request.headers)})
+        status, body = next((value for prefix, value in routes.items() if request.path.startswith(prefix)), (404, "{}"))
+        return web.Response(status=status, text=body)
+
+    app.router.add_route("*", "/{tail:.*}", handler)
+    return app, seen
+
+
+def _grouped(serial: str, name: str) -> str:
+    return json.dumps({"ownedByMe": [{"serialNumber": serial, "machineName": name}], "sharedToMe": []})
+
+
+def test_rest_constants_match_the_working_capture() -> None:
+    assert AWS_REST_BASE_URL_PROD == "https://8q8c9xktb0.execute-api.eu-central-1.amazonaws.com/dlg-prod/"
+    assert AWS_REST_BASE_URL_LEGACY_PROD == "https://bm5vp76k69.execute-api.eu-central-1.amazonaws.com/dlg-prod/"
+    assert AWS_REST_SOURCE_HEADER == "mycoffeelounge"
+
+
+def test_lookup_machine_name_defaults_to_both_stages() -> None:
+    """The fallback must stay wired by default, not only when a caller asks."""
+    signature = inspect.signature(lookup_machine_name)
+    assert signature.parameters["base_url"].default is AWS_REST_BASE_URL_PROD
+    assert signature.parameters["fallback_base_url"].default is AWS_REST_BASE_URL_LEGACY_PROD
+
+
+def test_lookup_machine_name_sends_bearer_and_source_header() -> None:
+    async def _run() -> None:
+        app, seen = _devices_server({"/new": (200, _grouped("SN1234", "thing-42"))})
+        runner, port = await _serve(app)
+        root = f"http://127.0.0.1:{port}"
+        session = aiohttp_session()
+        try:
+            name = await lookup_machine_name(
+                session, serial="SN1234", jwt="jwt", base_url=f"{root}/new", fallback_base_url=f"{root}/legacy"
+            )
+            assert name == "thing-42"
+            assert [entry["path"] for entry in seen] == ["/new/devices"]
+            headers = seen[0]["headers"]
+            assert headers["Authorization"] == "Bearer jwt"
+            assert headers["source"] == "mycoffeelounge"
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_lookup_machine_name_falls_back_to_legacy_stage_on_403() -> None:
+    async def _run() -> None:
+        app, seen = _devices_server(
+            {
+                "/new": (403, '{"message":"Forbidden"}'),
+                "/legacy": (200, _grouped("SN1234", "thing-42")),
+            }
+        )
+        runner, port = await _serve(app)
+        root = f"http://127.0.0.1:{port}"
+        session = aiohttp_session()
+        try:
+            name = await lookup_machine_name(
+                session, serial="SN1234", jwt="jwt", base_url=f"{root}/new", fallback_base_url=f"{root}/legacy"
+            )
+            assert name == "thing-42"
+            assert [entry["path"] for entry in seen] == ["/new/devices", "/legacy/devices"]
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_lookup_machine_name_does_not_retry_a_valid_answer() -> None:
+    """A 200 that simply lacks the serial is an answer, not a transport failure."""
+
+    async def _run() -> None:
+        app, seen = _devices_server({"/new": (200, _grouped("other", "t"))})
+        runner, port = await _serve(app)
+        root = f"http://127.0.0.1:{port}"
+        session = aiohttp_session()
+        try:
+            with pytest.raises(CloudTelemetryError, match="not found"):
+                await lookup_machine_name(
+                    session, serial="SN1234", jwt="jwt", base_url=f"{root}/new", fallback_base_url=f"{root}/legacy"
+                )
+            assert [entry["path"] for entry in seen] == ["/new/devices"]
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_lookup_machine_name_reports_every_failed_stage() -> None:
+    async def _run() -> None:
+        app, seen = _devices_server({"/new": (403, "{}"), "/legacy": (502, "{}")})
+        runner, port = await _serve(app)
+        root = f"http://127.0.0.1:{port}"
+        session = aiohttp_session()
+        try:
+            with pytest.raises(CloudTelemetryError, match="HTTP 403") as excinfo:
+                await lookup_machine_name(
+                    session, serial="SN1234", jwt="jwt", base_url=f"{root}/new", fallback_base_url=f"{root}/legacy"
+                )
+            assert "HTTP 502" in str(excinfo.value)
+            assert len(seen) == 2
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_lookup_machine_name_falls_back_on_unparsable_body() -> None:
+    """A gateway answering 200 + HTML must degrade like any other failure."""
+
+    async def _run() -> None:
+        app, seen = _devices_server({"/new": (200, "<html>whoops</html>"), "/legacy": (200, _grouped("SN1234", "t"))})
+        runner, port = await _serve(app)
+        root = f"http://127.0.0.1:{port}"
+        session = aiohttp_session()
+        try:
+            assert (
+                await lookup_machine_name(
+                    session, serial="SN1234", jwt="jwt", base_url=f"{root}/new", fallback_base_url=f"{root}/legacy"
+                )
+                == "t"
+            )
+            assert [entry["path"] for entry in seen] == ["/new/devices", "/legacy/devices"]
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_lookup_machine_name_falls_back_on_timeout() -> None:
+    """Audit #18: aiohttp's total timeout raises a bare asyncio.TimeoutError;
+    a hung primary stage must degrade to the fallback, not escape and skip it."""
+
+    async def _run() -> None:
+        seen: list[str] = []
+        app = web.Application()
+
+        async def handler(request: web.Request) -> web.Response:
+            seen.append(request.path)
+            if request.path.startswith("/new"):
+                await asyncio.sleep(0.5)  # past the patched total timeout
+                return web.Response(status=500, text="never reached")
+            return web.Response(status=200, text=_grouped("SN1234", "thing-42"))
+
+        app.router.add_route("*", "/{tail:.*}", handler)
+        runner, port = await _serve(app)
+        root = f"http://127.0.0.1:{port}"
+        session = aiohttp_session()
+        original = cloud._REQUEST_TIMEOUT
+        cloud._REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=0.15)
+        try:
+            name = await lookup_machine_name(
+                session, serial="SN1234", jwt="jwt", base_url=f"{root}/new", fallback_base_url=f"{root}/legacy"
+            )
+            assert name == "thing-42"
+            assert seen == ["/new/devices", "/legacy/devices"]
+        finally:
+            cloud._REQUEST_TIMEOUT = original
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_lookup_machine_name_timeout_message_when_every_stage_hangs() -> None:
+    """Both stages timing out must surface an explicit CloudTelemetryError."""
+
+    async def _run() -> None:
+        app = web.Application()
+
+        async def handler(request: web.Request) -> web.Response:
+            await asyncio.sleep(0.5)
+            return web.Response(status=200, text="{}")
+
+        app.router.add_route("*", "/{tail:.*}", handler)
+        runner, port = await _serve(app)
+        root = f"http://127.0.0.1:{port}"
+        session = aiohttp_session()
+        original = cloud._REQUEST_TIMEOUT
+        cloud._REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=0.15)
+        try:
+            with pytest.raises(CloudTelemetryError, match="timed out"):
+                await lookup_machine_name(
+                    session, serial="SN1234", jwt="jwt", base_url=f"{root}/new", fallback_base_url=f"{root}/legacy"
+                )
+        finally:
+            cloud._REQUEST_TIMEOUT = original
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
 # --------------------------------------------------------------- MQTT codec --
+
+
+def _decode(packet: bytes, *, protocol_version: int = 4) -> MqttPacket:
+    reader = MqttStreamReader(protocol_version=protocol_version)
+    reader.feed(packet)
+    pkt = reader.next_packet()
+    assert pkt is not None
+    return pkt
+
+
+def _parse_connect(body: bytes) -> dict[str, object]:
+    """Decode a CONNECT variable header (both levels) for assertions."""
+    name_len = int.from_bytes(body[:2], "big")
+    pos = 2 + name_len
+    level = body[pos]
+    flags = body[pos + 1]
+    pos += 4  # protocol level, connect flags, keepalive
+    if level >= 5:
+        while body[pos] & 0x80:  # skip the Properties length varint
+            pos += 1
+        pos += 1
+
+    def read_str() -> str:
+        nonlocal pos
+        length = int.from_bytes(body[pos : pos + 2], "big")
+        value = body[pos + 2 : pos + 2 + length].decode()
+        pos += 2 + length
+        return value
+
+    client_id = read_str()
+    return {
+        "level": level,
+        "flags": flags,
+        "client_id": client_id,
+        "username": read_str() if flags & 0x80 else None,
+        "password": read_str() if flags & 0x40 else None,
+    }
 
 
 def test_connect_packet_flag_bits() -> None:
@@ -59,6 +355,72 @@ def test_connect_packet_flag_bits() -> None:
     with_creds = mqtt_connect_packet(client_id="c1", username="u", password="p")
     assert with_creds[9] == 0x02 | 0x80 | 0x40
     assert b"u" in with_creds and b"p" in with_creds
+
+
+def test_connect_packet_mqtt5_inserts_empty_properties() -> None:
+    """MQTT 5 = level 5 + a (here empty) Properties section after the keepalive."""
+    v4 = mqtt_connect_packet(client_id="c1", username="u", password="p")
+    v5 = mqtt_connect_packet(client_id="c1", username="u", password="p", protocol_version=5)
+    assert (v4[8], v5[8]) == (4, 5)
+    assert v5[9] == v4[9]  # same connect flags
+    assert v5[12] == 0x00  # Properties length 0
+    assert len(v5) == len(v4) + 1
+    assert _parse_connect(_decode(v5).payload) == {
+        "level": 5,
+        "flags": 0x02 | 0x80 | 0x40,
+        "client_id": "c1",
+        "username": "u",
+        "password": "p",
+    }
+
+
+def test_subscribe_packet_mqtt5_inserts_empty_properties() -> None:
+    v4 = mqtt_subscribe_packet(1, ["a/b"])
+    v5 = mqtt_subscribe_packet(1, ["a/b"], protocol_version=5)
+    assert v5[0] == v4[0] == 0x82
+    assert len(v5) == len(v4) + 1
+    body = v5[2:]
+    assert body[:2] == b"\x00\x01"  # packet id
+    assert body[2] == 0x00  # Properties length 0
+    assert body[3:5] == b"\x00\x03"  # first topic filter length
+    assert _decode(v5, protocol_version=5).type == 8
+
+
+def test_publish_packet_mqtt5_roundtrip() -> None:
+    pkt = mqtt_publish_packet("t/x", '{"a":1}', protocol_version=5)
+    assert _decode(pkt, protocol_version=5).publish_parts() == ("t/x", '{"a":1}')
+    # Read as 3.1.1 the properties byte would pollute the payload — which is
+    # exactly why the reader has to know the negotiated level.
+    assert _decode(pkt).publish_parts()[1] == '\x00{"a":1}'
+
+
+def test_publish_parts_skips_qos_and_property_sections() -> None:
+    qos1 = MqttPacket(3, 0x02, b"\x00\x03t/x" + b"\x00\x07" + b'{"v":1}')
+    assert qos1.publish_parts() == ("t/x", '{"v":1}')
+    # MQTT 5 §3.3.2 Variable Header order: Topic → Packet Identifier → Properties.
+    mqtt5_qos1 = MqttPacket(3, 0x02, b"\x00\x03t/x" + b"\x00\x07" + b"\x00" + b"{}", protocol_version=5)
+    assert mqtt5_qos1.publish_parts() == ("t/x", "{}")
+
+
+def test_publish_parts_mqtt5_qos1_property_order() -> None:
+    """Non-empty properties prove the real §3.3.2 order (topic|pid|props).
+
+    With empty properties (single 0x00 byte) the wrong order props-before-pid
+    self-cancels and a naive test stays green; a Message Expiry Interval
+    property (0x17, Four Byte Integer) makes the two orders differ by 4 bytes.
+    """
+    props = b"\x05\x17\x00\x00\x00\x0a"  # length 5: Message Expiry Interval (Four Byte Integer) = 10 s
+    pkt = MqttPacket(3, 0x02, b"\x00\x03t/x" + b"\x00\x07" + props + b"{}", protocol_version=5)
+    assert pkt.publish_parts() == ("t/x", "{}")
+
+
+def test_publish_parts_rejects_truncated_packets() -> None:
+    with pytest.raises(CloudTelemetryError, match="truncated"):
+        MqttPacket(3, 0, b"\x01").publish_parts()
+    with pytest.raises(CloudTelemetryError, match="truncated"):
+        MqttPacket(3, 0, b"\x00\x09ab").publish_parts()  # topic longer than the packet
+    with pytest.raises(CloudTelemetryError, match="truncated"):
+        MqttPacket(3, 0, b"\x00\x01t\x05abc", protocol_version=5).publish_parts()  # properties past the end
 
 
 def test_subscribe_and_publish_roundtrip() -> None:
@@ -83,6 +445,12 @@ def test_reader_handles_fragmented_and_coalesced_frames() -> None:
     assert len(out) == 2
     assert out[0].publish_parts()[0] == "t"
     assert out[1].publish_parts()[1] == "2"
+
+
+def test_reader_tags_packets_with_the_negotiated_level() -> None:
+    reader = MqttStreamReader(protocol_version=5)
+    reader.feed(mqtt_publish_packet("t", "1", protocol_version=5))
+    assert reader.next_packet().protocol_version == 5
 
 
 def test_reader_rejects_burst_of_continuation_bytes() -> None:
@@ -155,45 +523,73 @@ def test_flatten_shadow_survives_pathological_depth() -> None:
 # --------------------------------------------------------- ShadowClient e2e --
 
 
-def _mqtt_server(reject_usernames: bool = False, reject_all: bool = False) -> tuple[web.Application, dict]:
+async def _serve(app: web.Application) -> tuple[web.AppRunner, int]:
+    """Start `app` on an ephemeral port; returns (runner, port)."""
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    return runner, site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+
+
+def _mqtt_server(
+    *,
+    reject_all: bool = False,
+    reject_levels: set[int] | None = None,
+    reject_usernames: set[str] | None = None,
+    drop_socket: bool = False,
+) -> tuple[web.Application, dict]:
     """Minimal MQTT-over-WS broker stub: CONNACK, SUBACK, then one accepted
-    PUBLISH per shadow get."""
-    seen: dict[str, object] = {"connects": []}
+    PUBLISH per shadow get, encoded in the level the client connected with.
+
+    ``reject_*`` model the authorizer refusing a spelling, ``drop_socket``
+    models the broker closing the WebSocket without any CONNACK (what
+    mimasek71 saw for the non-app-style connects).
+    """
+    seen: dict[str, list] = {"connects": [], "paths": [], "publishes": []}
 
     app = web.Application()
 
     async def handler(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(autoping=False)
         await ws.prepare(request)
+        seen["paths"].append(str(request.rel_url))
         reader = MqttStreamReader()
-        shadows_answered = 0
         async for msg in ws:
             if msg.type != web.WSMsgType.BINARY:
                 continue
             reader.feed(msg.data)
             while (pkt := reader.next_packet()) is not None:
                 if pkt.type == 1:  # CONNECT
-                    body = pkt.payload
-                    # username/password presence via flags
-                    flags = body[7]
-                    seen["connects"].append(bool(flags & 0x80))
-                    if reject_all:
-                        rc = 5
-                    else:
-                        rc = 5 if (reject_usernames and flags & 0x80) else 0
-                    await ws.send_bytes(bytes([0x20, 0x02, 0x00, rc]))
+                    connect = _parse_connect(pkt.payload)
+                    seen["connects"].append(connect)
+                    level = int(connect["level"])
+                    reader.protocol_version = level
+                    if drop_socket:
+                        await ws.close()
+                        return ws
+                    refused = (
+                        reject_all
+                        or (reject_levels is not None and level in reject_levels)
+                        or (reject_usernames is not None and connect["username"] in reject_usernames)
+                    )
+                    await ws.send_bytes(bytes([0x20, 0x02, 0x00, 5 if refused else 0]))
                 elif pkt.type == 8:  # SUBSCRIBE → SUBACK
                     pid = pkt.payload[:2]
                     await ws.send_bytes(bytes([0x90, 0x03]) + pid + bytes([0x00]))
                 elif pkt.type == 3:  # PUBLISH get → answer accepted
                     topic, _ = pkt.publish_parts()
+                    seen["publishes"].append(topic)
                     if topic.endswith("/get"):
                         shadow = topic.split("/")[5]
                         doc = {"state": {"reported": {"shadow": shadow}}}
                         await ws.send_bytes(
-                            mqtt_publish_packet(shadow_accepted_topic("thing1", shadow), json.dumps(doc))
+                            mqtt_publish_packet(
+                                shadow_accepted_topic("thing1", shadow),
+                                json.dumps(doc),
+                                protocol_version=reader.protocol_version,
+                            )
                         )
-                        shadows_answered += 1
         return ws
 
     app.router.add_get("/mqtt", handler)
@@ -203,18 +599,14 @@ def _mqtt_server(reject_usernames: bool = False, reject_all: bool = False) -> tu
 def test_shadow_client_fetches_both_shadows() -> None:
     async def _run() -> None:
         app, seen = _mqtt_server()
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        runner, port = await _serve(app)
         session = aiohttp_session()
         try:
             client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
             docs = await client.fetch(timeout=5)
             assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
             assert docs["MachineCapabilities"]["state"]["reported"]["shadow"] == "MachineCapabilities"
-            assert seen["connects"] == [True]  # first attempt used the username form
+            assert [c["level"] for c in seen["connects"]] == [5]  # app style first, no retry needed
         finally:
             await session.close()
             await runner.cleanup()
@@ -222,21 +614,66 @@ def test_shadow_client_fetches_both_shadows() -> None:
     asyncio.run(_run())
 
 
-def test_shadow_client_retries_with_password_form() -> None:
+def test_shadow_client_connects_app_style_first() -> None:
+    """Issue #18 (mimasek71): MQTT 5, authorizer in the path *and* the username,
+    JWT as password, app client-id prefix — that is the accepted spelling."""
+
     async def _run() -> None:
-        app, seen = _mqtt_server(reject_usernames=True)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        app, seen = _mqtt_server()
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
+            await client.fetch(timeout=5)
+            assert seen["paths"] == [_APP_WS_PATH]
+            connect = seen["connects"][0]
+            assert connect["level"] == 5
+            assert connect["username"] == _APP_AUTHORIZER
+            assert connect["password"] == "jwt"
+            assert str(connect["client_id"]).startswith("dlg-appliance-kit-android-")
+            # the get topics survived the MQTT 5 property sections both ways
+            assert seen["publishes"] == [
+                "$aws/things/thing1/shadow/name/MachineStatus/get",
+                "$aws/things/thing1/shadow/name/MachineCapabilities/get",
+            ]
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_shadow_client_falls_back_to_legacy_username_form() -> None:
+    async def _run() -> None:
+        app, seen = _mqtt_server(reject_levels={5})
+        runner, port = await _serve(app)
         session = aiohttp_session()
         try:
             client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
             docs = await client.fetch(timeout=5)
             assert "MachineStatus" in docs
-            # first (username) refused, second (password) accepted
-            assert seen["connects"] == [True, False]
+            assert [c["level"] for c in seen["connects"]] == [5, 4]
+            assert seen["connects"][1]["username"] == "?authorizer=jwt"
+            assert seen["paths"] == [_APP_WS_PATH, "/mqtt"]
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_shadow_client_falls_back_to_password_form() -> None:
+    async def _run() -> None:
+        app, seen = _mqtt_server(reject_levels={5}, reject_usernames={"?authorizer=jwt"})
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
+            docs = await client.fetch(timeout=5)
+            assert "MachineStatus" in docs
+            assert [c["level"] for c in seen["connects"]] == [5, 4, 4]
+            assert seen["connects"][2]["username"] is None
+            assert seen["connects"][2]["password"] == "jwt"
         finally:
             await session.close()
             await runner.cleanup()
@@ -247,23 +684,95 @@ def test_shadow_client_retries_with_password_form() -> None:
 def test_shadow_client_raises_when_broker_refuses_jwt() -> None:
     async def _run() -> None:
         app, seen = _mqtt_server(reject_all=True)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        runner, port = await _serve(app)
         session = aiohttp_session()
         try:
             client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
             with pytest.raises(CloudTelemetryError, match="refused the JWT"):
                 await client.fetch(timeout=2)
-            # both credential spellings tried, both refused
-            assert seen["connects"] == [True, False]
+            # every spelling tried, every one refused
+            assert [c["level"] for c in seen["connects"]] == [5, 4, 4]
         finally:
             await session.close()
             await runner.cleanup()
 
     asyncio.run(_run())
+
+
+def test_shadow_client_retries_when_broker_drops_socket() -> None:
+    """No CONNACK at all (the old spellings' failure mode) must not abort the
+    remaining attempts, and must surface as a cloud error, not a crash."""
+
+    async def _run() -> None:
+        app, seen = _mqtt_server(drop_socket=True)
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
+            with pytest.raises(CloudTelemetryError, match="MQTT WS connect failed"):
+                await client.fetch(timeout=2)
+            assert len(seen["connects"]) == 3
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_connect_budget_bounds_a_black_holed_broker() -> None:
+    """Audit #18: three spellings × (15 s ws_receive + 10 s receive) could
+    burn 75 s on a broker that accepts the socket but never answers the
+    CONNECT; the shared connect budget must stop the loop and say so."""
+
+    async def _run() -> None:
+        app = web.Application()
+
+        async def silent(request: web.Request) -> web.WebSocketResponse:
+            ws = web.WebSocketResponse(autoping=False)
+            await ws.prepare(request)
+            async for _ in ws:  # accepts the WebSocket, never sends a CONNACK
+                pass
+            return ws
+
+        app.router.add_get("/mqtt", silent)
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
+            started = time.monotonic()
+            with pytest.raises(CloudTelemetryError, match="connect budget exhausted"):
+                await client._connect(connect_budget=0.5)
+            # bounded by the budget, not by 3 × (15 s + 10 s)
+            assert time.monotonic() - started < 5.0
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_shadow_client_errors_never_leak_the_jwt() -> None:
+    """Whatever the broker answers, the JWT stays out of the error text
+    (it ends up in logs and in the diagnostics dump)."""
+
+    async def _run(reject_all: bool) -> None:
+        app, _seen = _mqtt_server(reject_all=reject_all, drop_socket=not reject_all)
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(
+                session, thing_name="thing1", jwt=FAKE_JWT, broker="127.0.0.1", scheme="ws", port=port
+            )
+            with pytest.raises(CloudTelemetryError) as excinfo:
+                await client.fetch(timeout=2)
+            assert FAKE_JWT not in str(excinfo.value)
+            assert "eyJ" not in str(excinfo.value)
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run(reject_all=True))
+    asyncio.run(_run(reject_all=False))
 
 
 def aiohttp_session():  # noqa: ANN201 — tiny helper

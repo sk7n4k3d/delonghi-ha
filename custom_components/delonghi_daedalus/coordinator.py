@@ -199,11 +199,12 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         # only a different value means a real cloud thing name.
                         machine_name=stored_name if stored_name and stored_name != self.serial_number else None,
                     ),
-                    # Global budget for the whole cloud hop (REST + 2 MQTT
-                    # connects + shadow wait): without it a black-holed broker
-                    # could hold _cloud_lock — and delay the coordinator
-                    # refresh — on aiohttp's 300 s session default
-                    # (audit #18, D1).
+                    # Global budget for the whole cloud hop (2 REST stages +
+                    # 3 MQTT connect spellings + shadow wait; the MQTT phase
+                    # is itself capped by ShadowClient._connect's 30 s budget):
+                    # without it a black-holed broker could hold _cloud_lock —
+                    # and delay the coordinator refresh — on aiohttp's 300 s
+                    # session default (audit #18, D1).
                     timeout=CLOUD_FETCH_TIMEOUT_SECONDS,
                 )
                 cloud_data = {

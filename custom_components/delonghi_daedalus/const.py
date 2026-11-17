@@ -33,7 +33,15 @@ GIGYA_API_KEYS: Final[dict[str, str]] = {
 GIGYA_API_KEY_PROD: Final = GIGYA_API_KEYS[GIGYA_POOL_EU]
 
 # --- AWS API Gateway (REST — devices list, pairing, OTA jobs) ----------------
-AWS_REST_BASE_URL_PROD: Final = "https://bm5vp76k69.execute-api.eu-central-1.amazonaws.com/dlg-prod/"
+# ``8q8c9xktb0`` is the stage the current My Coffee Lounge app talks to; it is
+# the one that answers for mimasek71's account (issue #18) and it insists on
+# the static ``source: mycoffeelounge`` header. ``bm5vp76k69`` came out of the
+# older APK dump and now answers HTTP 403 for everything — kept only as a
+# fallback in case the two stage hosts ever swap back.
+AWS_REST_BASE_URL_PROD: Final = "https://8q8c9xktb0.execute-api.eu-central-1.amazonaws.com/dlg-prod/"
+AWS_REST_BASE_URL_LEGACY_PROD: Final = "https://bm5vp76k69.execute-api.eu-central-1.amazonaws.com/dlg-prod/"
+# Static header the gateway expects next to the bearer token (issue #18).
+AWS_REST_SOURCE_HEADER: Final = "mycoffeelounge"
 
 # --- AWS IoT Core (MQTT 5 over WSS:443) --------------------------------------
 # Custom Lambda token authorizer; password = JWT Gigya.
