@@ -5,6 +5,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-11-18
+
+### Added
+- **État piloté par le LAN (#50, PrimaDonna Soul / DL-millcore)** : quand la
+  machine pousse son moniteur par la connexion LAN (session vivante), c'est
+  cette valeur fraîche qui fait `machine_state`, alarmes et profil — plus le
+  moniteur cloud, figé tant que l'app Coffee Link est fermée sur ce
+  firmware. L'overlay reste collant tant que le cloud ne bouge pas (pas de
+  flicker Ready→Off entre deux pushes), et ne remplace jamais un cloud qui
+  respire. `monitor_source` (lan/cloud) exposé dans les données.
+- **Extraction routée par le LAN (#50)** : si la session LAN est vivante, la
+  commande de boisson part par le socket LAN (double-shape firmware, comme
+  power on/off) au lieu du `data_request` cloud que le firmware millcore
+  encaisse sans réagir. Le pré-brew check utilise l'état LAN corrigé ; le
+  fallback cloud reste la norme sur les autres modèles.
+- **Sensor `API usage` (#45)** : compteur d'appels cloud dédié
+  (`TOTAL_INCREASING`, catégorie diagnostic, désactivé par défaut) — les
+  compteurs ne polluent plus les attributes du sensor d'état.
+
+### Fixed
+- **Une erreur réseau transitoire ne rend plus tout indisponible (#46)** :
+  le plein refresh qui échoue est rejoué une fois après 2 s ; seules les
+  erreurs persistantes ou d'auth remontent (les erreurs auth ne sont
+  jamais retryées, le brew non plus — jamais de double extraction).
+- **Alarmes d'un moniteur LAN jamais masquées (#50)** : le garde
+  « monitor figé ⇒ alarmes supprimées » ne s'applique plus quand l'état
+  vient du socket LAN.
+- **Sélection de profil (#36)** : le paquet ECAM 0xA9 était mal framé
+  (`0D 05 A9 <profil>` — le numéro de profil à la place des flags).
+  Format corrigé `0D 06 A9 F0 <profil> CRC` conforme au framing utilisé par
+  toutes les autres commandes. Si le Wi-Fi firmware ignore malgré tout cet
+  opcode (documenté sur captures BLE), le profil continue de voyager dans
+  l'octet profile_save de chaque brew.
+
+## [0.4.2] — 2026-11-18
+
+### Fixed
+- **Connexion cloud Eletta Ultra (#18, mimasek71)** : l'annuaire REST
+  `/devices` utilisait un stage mort (HTTP 403) sans le header
+  `source: mycoffeelounge` — basculé sur le stage qui répond, header
+  ajouté, l'ancien stage gardé en fallback ; parsing des réponses groupées
+  `ownedByMe`/`sharedToMe`.
+- **MQTT shadow** : le broker ferme les connexions MQTT 3.1.1 à la
+  authorizer custom — la connexion « app-style » (MQTT 5, path
+  `/mqtt?x-amz-customauthorizer-name=dlg-prod-token-authorizer`, username
+  de l'authorizer, JWT en password, client-id `dlg-appliance-kit-android-*`)
+  est tentée en premier, les deux spellings 3.1.1 restent fallback. Codec
+  MQTT 5 complet (sections Properties au bon ordre, spec §3.3.2), budget de
+  connexion borné à 30 s pour rester sous le budget global du coordinator,
+  timeouts REST qui jouent enfin le fallback de stage.
+
 ## [0.4.1] — 2026-11-14
 
 ### Changed
