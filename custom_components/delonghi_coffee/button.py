@@ -142,11 +142,18 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         return state not in ("Off", "Going to sleep")
 
     async def async_press(self) -> None:
-        """Brew the beverage using the selected profile's recipe."""
+        """Brew the beverage using the selected profile's recipe.
+
+        Goes through the coordinator so the command is served on the machine's
+        LAN poll when that session is alive — the cloud ``data_request`` path
+        is silently ignored by DL-millcore machines (issue #50). The pre-brew
+        safety check inside also sees the LAN-corrected state instead of the
+        frozen cloud monitor.
+        """
         profile = self.coordinator.selected_profile or 1
         _LOGGER.info("Brewing %s on %s (profile %d)", self._beverage_key, self._dsn, profile)
         try:
-            await self.hass.async_add_executor_job(self._api.brew_beverage, self._dsn, self._beverage_key, profile)
+            await self.coordinator.async_brew(self._beverage_key, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             raise HomeAssistantError(f"Failed to brew {self._beverage_key}: {err}") from err
 

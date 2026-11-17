@@ -1,5 +1,7 @@
 """Test ECAM command building — length bytes, format, CRC."""
 
+from unittest.mock import MagicMock
+
 from custom_components.delonghi_coffee.api import DeLonghiApi
 
 
@@ -20,18 +22,33 @@ class TestCommandLengthBytes:
         assert cmd[2] == 0x8F
 
     def test_sync_recipes_profile1(self):
-        """Sync recipes (0xA9) profile 1: 6 bytes total, len=5."""
-        body = bytes([0x0D, 0x05, 0xA9, 0x01])
+        """Select profile (0xA9): 7 bytes total, len=6.
+
+        Standard ECAM framing ``[0x0D][len][cmd][0xF0 flags][params][CRC]``
+        (barista PROTOCOL, same layout as the brew builder) — the profile is
+        a PARAM after the flags byte, not the flags byte itself (issue #36).
+        """
+        body = bytes([0x0D, 0x06, 0xA9, 0xF0, 0x01])
         cmd = self._build_and_check(body)
-        assert len(cmd) == 6
+        assert len(cmd) == 7
         assert cmd[2] == 0xA9
-        assert cmd[3] == 0x01  # profile
+        assert cmd[3] == 0xF0  # flags
+        assert cmd[4] == 0x01  # profile
 
     def test_sync_recipes_profile4(self):
         """Sync recipes profile 4."""
-        body = bytes([0x0D, 0x05, 0xA9, 0x04])
+        body = bytes([0x0D, 0x06, 0xA9, 0xF0, 0x04])
         cmd = self._build_and_check(body)
-        assert cmd[3] == 0x04
+        assert cmd[3] == 0xF0  # flags
+        assert cmd[4] == 0x04  # profile
+
+    def test_set_active_profile_emits_the_framed_packet(self):
+        """The shipped builder must emit exactly the frame asserted above (issue #36)."""
+        api = MagicMock(spec=DeLonghiApi)
+        api._crc16 = DeLonghiApi._crc16  # real CRC, only send_command is mocked
+        DeLonghiApi.set_active_profile(api, "DSN", 3)
+        body = bytes([0x0D, 0x06, 0xA9, 0xF0, 0x03])
+        api.send_command.assert_called_once_with("DSN", body + DeLonghiApi._crc16(body))
 
     def test_monitor_command(self):
         """Monitor (0x84): 8 bytes total, len=7."""

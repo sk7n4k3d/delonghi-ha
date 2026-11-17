@@ -1,5 +1,7 @@
 """Test MonitorDataV2 parsing."""
 
+import pytest
+
 from custom_components.delonghi_coffee.api import DeLonghiApi
 
 
@@ -110,3 +112,52 @@ class TestMonitorV2:
         assert result["action"] == 0
         assert result["progress"] == 0
         assert [a["name"] for a in result["alarms"]] == ["Cleaning Needed"]
+
+
+class TestMonitorPayloadDecoding:
+    """decode_monitor_payload / parse_monitor_hex / parse_monitor_value.
+
+    The same MonitorDataV2 frame reaches us base64-encoded from the Ayla
+    cloud and (per the issue #10 LAN logs) hex-encoded on the LAN socket, so
+    the decoder has to tell the two apart — issue #50.
+    """
+
+    HEX_FRAME = "d012750f010100000007000001000000003ae46ad0aae1"
+    B64_FRAME = "0BJ1DwEBAAAABwAAAQAAAAA65GrQquE="
+
+    def test_hex_frame(self):
+        result = DeLonghiApi.parse_monitor_hex(self.HEX_FRAME)
+        assert result["machine_state"] == "Ready"
+        assert result["monitor_raw"] == self.HEX_FRAME
+        assert [a["name"] for a in result["alarms"]] == ["Cleaning Needed"]
+
+    def test_base64_frame(self):
+        result = DeLonghiApi.parse_monitor_hex(self.B64_FRAME)
+        assert result["machine_state"] == "Ready"
+        assert result["monitor_raw"] == self.HEX_FRAME
+
+    def test_raw_bytes_pass_through(self):
+        result = DeLonghiApi.parse_monitor_hex(bytes.fromhex(self.HEX_FRAME))
+        assert result["machine_state"] == "Ready"
+
+    def test_decode_prefers_the_monitor_looking_candidate(self):
+        """A string that decodes both ways must yield the real frame."""
+        assert DeLonghiApi.decode_monitor_payload(self.B64_FRAME) == bytes.fromhex(self.HEX_FRAME)
+        assert DeLonghiApi.decode_monitor_payload(self.HEX_FRAME) == bytes.fromhex(self.HEX_FRAME)
+
+    def test_decode_rejects_undersized_and_garbage(self):
+        assert DeLonghiApi.decode_monitor_payload("AAA=") is None  # 1 byte
+        assert DeLonghiApi.decode_monitor_payload("0d1784cafebabe") is None  # 7 bytes as hex
+        assert DeLonghiApi.decode_monitor_payload("not a monitor") is None
+        assert DeLonghiApi.decode_monitor_payload("") is None
+        assert DeLonghiApi.decode_monitor_payload(None) is None
+        assert DeLonghiApi.decode_monitor_payload(1234) is None
+
+    def test_parse_monitor_hex_raises_on_garbage(self):
+        with pytest.raises(ValueError):
+            DeLonghiApi.parse_monitor_hex("zzzz")
+
+    def test_parse_monitor_value_never_raises(self):
+        assert DeLonghiApi.parse_monitor_value("zzzz") is None
+        assert DeLonghiApi.parse_monitor_value(None) is None
+        assert DeLonghiApi.parse_monitor_value(self.B64_FRAME)["machine_state"] == "Ready"

@@ -8,12 +8,18 @@ diagnostic mode, error paths).
 
 import asyncio
 from time import monotonic
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import requests
 
 from custom_components.delonghi_coffee import coordinator as coord_mod  # noqa: E402
-from custom_components.delonghi_coffee.api import DeLonghiApiError, DeLonghiAuthError  # noqa: E402
+from custom_components.delonghi_coffee.api import (  # noqa: E402
+    DeLonghiApi,
+    DeLonghiApiError,
+    DeLonghiAuthError,
+    DeLonghiUnsupportedError,
+)
 from custom_components.delonghi_coffee.const import (  # noqa: E402
     FULL_REFRESH_INTERVAL,
     MQTT_KEEPALIVE_INTERVAL,
@@ -78,7 +84,33 @@ def _make_coord(api=None, dsn="DSN-1"):
     # _GenericBase stub in conftest does not assign self.hass; production
     # HA's DataUpdateCoordinator would. Set it manually so async_add_executor_job works.
     coord.hass = hass
+    # Issue #46 added a 2s pause before the single retry of a failed fetch.
+    # Collapse it so the error-path tests stay instant; the delay itself is
+    # covered by TestTransientRetry.test_retry_pause_is_bounded.
+    coord._transient_retry_delay = 0.0
     return coord, hass, api
+
+
+def _make_lan_server(alive: bool = True):
+    """LAN server double: session present, liveness scripted."""
+    server = MagicMock()
+    server.session = object()
+    server.is_session_alive = MagicMock(return_value=alive)
+    server.enqueue_command = AsyncMock()
+    return server
+
+
+def _lan_monitor_coord(frame_b64: str, alive: bool = True):
+    """Coordinator whose machine pushes ``frame_b64`` on the LAN socket."""
+    coord, _, api = _make_coord()
+    now = monotonic()
+    coord._last_full_refresh = now
+    coord._last_keepalive = now
+    # Use the real parser on the mock so LAN frames decode exactly as in prod.
+    api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+    coord._lan_server = _make_lan_server(alive)
+    coord._lan_properties = {"d302_monitor": frame_b64}
+    return coord, api
 
 
 # ───────────────────────────── __init__ ─────────────────────────────
@@ -960,3 +992,431 @@ class TestFastPollWindow:
         _run(coord._async_update_data())
         assert coord.update_interval.total_seconds() == SCAN_INTERVAL_SECONDS
         assert coord._fast_poll_until is None
+
+
+# ───────────────── issue #46: transient cloud errors ────────────────
+
+
+class TestTransientRetry:
+    """One hiccup must not turn every entity unavailable for a poll cycle.
+
+    Before the fix a single ``requests`` ConnectionError propagated straight
+    out of ``_async_update_data`` as UpdateFailed (~1.1x/day in the reporter's
+    logs). The coordinator now retries the failed fetch once after a short
+    pause and only gives up when that second attempt fails too.
+
+    The retry lives on the full-refresh ``get_properties`` fetch — the only
+    cloud call in the cycle that can still raise. ``api.get_status`` swallows
+    transport errors internally (its ``@_retry``-wrapped ``get_properties``
+    call ends as a swallowed ``DeLonghiApiError``) and returns
+    ``status=UNKNOWN``, so wrapping it would be dead code (audit #46).
+    """
+
+    def _full_refresh(self, coord):
+        """Force the next poll down the full-refresh path."""
+        coord._last_full_refresh = -coord_mod.FULL_REFRESH_INTERVAL - 1
+        coord._last_keepalive = monotonic()
+
+    def test_retry_pause_is_bounded(self):
+        assert 0 < coord_mod.TRANSIENT_RETRY_DELAY_SECONDS <= 5
+
+    def test_status_is_fetched_directly(self):
+        """get_status is called bare — no retry wrap (it never raises in prod)."""
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = monotonic()
+        coord._last_keepalive = monotonic()
+        api.get_status.side_effect = DeLonghiApiError("Connection aborted")
+        # The swallowed-error contract means prod get_status returns UNKNOWN
+        # instead of raising; if a mock does raise, it maps straight to
+        # UpdateFailed with exactly one call (no retry).
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        with pytest.raises(UpdateFailed, match="Error fetching data"):
+            _run(coord._async_update_data())
+        assert api.get_status.call_count == 1
+
+    def test_requests_error_is_retried(self):
+        """The literal shape from the issue log: requests.ConnectionError."""
+        coord, _, api = _make_coord()
+        self._full_refresh(coord)
+        api.get_properties.side_effect = [
+            requests.ConnectionError("HTTPSConnectionPool host=adla-ayla-com"),
+            {"d270_serialnumber": {"value": "ECAM61075MBXYZ"}},
+        ]
+        _run(coord._async_update_data())
+        assert api.get_properties.call_count == 2
+        assert coord._last_full_refresh > 0
+
+    def test_auth_error_is_not_retried(self):
+        """Auth semantics are unchanged: straight to ConfigEntryAuthFailed.
+
+        DeLonghiAuthError is the one error api.get_status can still raise in
+        production (it is not a DeLonghiApiError subclass, so get_status's
+        swallow does not catch it) — and it must never be retried.
+        """
+        from homeassistant.exceptions import ConfigEntryAuthFailed
+
+        coord, _, api = _make_coord()
+        api.get_status.side_effect = DeLonghiAuthError("expired")
+        with pytest.raises(ConfigEntryAuthFailed):
+            _run(coord._async_update_data())
+        assert api.get_status.call_count == 1
+
+    def test_unsupported_error_is_not_retried(self):
+        """A definitive 404 (DeLonghiUnsupportedError) gains nothing from a retry."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        self._full_refresh(coord)
+        api.get_properties.side_effect = DeLonghiUnsupportedError("no such property")
+        with pytest.raises(UpdateFailed):
+            _run(coord._async_update_data())
+        assert api.get_properties.call_count == 1
+
+    def test_properties_recovers_on_retry(self):
+        """Full-refresh get_properties gets the same single retry."""
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = -coord_mod.FULL_REFRESH_INTERVAL - 1
+        coord._last_keepalive = monotonic()
+        api.get_properties.side_effect = [DeLonghiApiError("Connection reset"), {}]
+        _run(coord._async_update_data())
+        assert api.get_properties.call_count == 2
+        assert coord._last_full_refresh > 0
+
+    def test_properties_failure_after_retry_raises(self):
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = -coord_mod.FULL_REFRESH_INTERVAL - 1
+        coord._last_keepalive = monotonic()
+        api.get_properties.side_effect = DeLonghiApiError("still down")
+        with pytest.raises(UpdateFailed):
+            _run(coord._async_update_data())
+        assert api.get_properties.call_count == 2
+
+
+# ────────────────── issue #50: LAN monitor overlay ──────────────────
+
+LAN_READY = "0Ayk8AECAAAABwAAAAA="  # d00ca4f001020000000700000000 → Ready, profile 1
+LAN_OFF = "0Ayk8AIAAAAAAAAAAAA="  # d00ca4f002000000000000000000 → Off
+LAN_BREWING = "0Ayk8AECAAAAAwUeAAA="  # state 3, action 5, progress 30
+LAN_CLEANING = "0BJ1DwEBAAAABwAAAQAAAAA65GrQquE="  # Ready + Cleaning Needed
+
+
+class TestLanMonitorOverlay:
+    """The cloud monitor on DL-millcore only refreshes while the Coffee Link
+    app is open, so the machine's own LAN push must win when that session is
+    alive — otherwise _pre_brew_check and every sensor read a frozen state."""
+
+    def _cloud_stale(self, api, raw="ffffffffffff"):
+        api.get_status.return_value = {
+            "status": "RUN",
+            "machine_state": "Off",
+            "profile": 0,
+            "monitor_raw": raw,
+            "alarms": [],
+            "alarm_word": 0,
+        }
+
+    def test_no_lan_server_keeps_cloud_state(self):
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = monotonic()
+        coord._last_keepalive = monotonic()
+        self._cloud_stale(api)
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Off"
+        assert result["monitor_source"] == "cloud"
+
+    def test_stale_session_keeps_cloud_state(self):
+        coord, _ = _lan_monitor_coord(LAN_READY, alive=False)
+        self._cloud_stale(coord.api)
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Off"
+        assert result["monitor_source"] == "cloud"
+        coord._lan_server.is_session_alive.assert_called_once_with(coord_mod.LAN_SESSION_STALE_SECONDS)
+
+    def test_lan_monitor_overrides_frozen_cloud(self):
+        """The #50 symptom: power-on via HA, cloud still says Off, LAN says Ready."""
+        coord, _ = _lan_monitor_coord(LAN_READY)
+        self._cloud_stale(coord.api)
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Ready"
+        assert result["monitor_source"] == "lan"
+        assert result["profile"] == 1
+
+    def test_lan_action_and_progress_reach_the_data_dict(self):
+        coord, _ = _lan_monitor_coord(LAN_BREWING)
+        self._cloud_stale(coord.api)
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Brewing"
+        assert result["monitor_action"] == 5
+        assert result["monitor_progress"] == 30
+
+    def test_identical_lan_value_changes_nothing(self):
+        """Healthy-cloud models keep byte-identical behaviour."""
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = monotonic()
+        coord._last_keepalive = monotonic()
+        api.get_status.return_value = {
+            "status": "RUN",
+            "machine_state": "Ready",
+            "profile": 1,
+            "monitor_raw": bytes.fromhex("d00ca4f001020000000700000000").hex(),
+            "alarms": [],
+            "alarm_word": 0,
+        }
+        coord._lan_server = _make_lan_server(True)
+        coord._lan_properties = {"d302_monitor": LAN_READY}
+        coord.api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Ready"
+        assert result["profile"] == 1
+        assert result["alarms"] == []
+
+    def test_undecodable_lan_frame_falls_back_to_cloud(self):
+        coord, _ = _lan_monitor_coord("not-a-monitor")
+        self._cloud_stale(coord.api)
+        result = _run(coord._async_update_data())  # must not raise
+        assert result["machine_state"] == "Off"
+        assert result["monitor_source"] == "cloud"
+
+    def test_parser_blowup_never_breaks_the_refresh(self):
+        coord, api = _lan_monitor_coord(LAN_READY)
+        self._cloud_stale(api)
+        api.parse_monitor_value = MagicMock(side_effect=RuntimeError("boom"))
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Off"
+        assert result["monitor_source"] == "cloud"
+
+    def test_lan_alarms_survive_without_cloud_status(self):
+        """PD Soul has no app_device_status → cloud=UNKNOWN, which normally
+        suppresses alarms. A LAN-pushed alarm is fresh evidence, keep it."""
+        coord, api = _lan_monitor_coord(LAN_CLEANING)
+        api.get_status.return_value = {
+            "status": "UNKNOWN",
+            "machine_state": "Off",
+            "profile": 0,
+            "monitor_raw": "ffffffffffff",
+            "alarms": [],
+            "alarm_word": None,
+        }
+        result = _run(coord._async_update_data())
+        assert [a["name"] for a in result["alarms"]] == ["Cleaning Needed"]
+
+        # Same machine without the LAN session: suppression still applies.
+        coord2, _, api2 = _make_coord()
+        coord2._last_full_refresh = monotonic()
+        coord2._last_keepalive = monotonic()
+        api2.get_status.return_value = {
+            "status": "UNKNOWN",
+            "machine_state": "Ready",
+            "profile": 1,
+            "monitor_raw": "aabb",
+            "alarms": [{"bit": 16, "name": "Cleaning Needed"}],
+            "alarm_word": 1 << 16,
+        }
+        result2 = _run(coord2._async_update_data())
+        assert result2["alarms"] == []
+
+    def test_live_lan_session_prevents_the_assume_off_override(self):
+        """An idle-but-connected machine keeps pushing the same Ready frame.
+
+        "Unchanged for 45 min" must not be read as "Off" while the LAN
+        session proves the machine is awake.
+        """
+        coord, api = _lan_monitor_coord(LAN_READY)
+        self._cloud_stale(api)
+        # The LAN frame equals the tracked raw → the staleness clock is not reset
+        coord._last_monitor_raw = bytes.fromhex("d00ca4f001020000000700000000").hex()
+        coord._monitor_last_changed = monotonic() - (coord._monitor_stale_timeout + 10)
+        result = _run(coord._async_update_data())
+        assert result["monitor_stale"] is True
+        assert result["machine_state"] == "Ready"
+
+    def test_stale_monitor_still_assumes_off_without_lan(self):
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = monotonic()
+        coord._last_keepalive = monotonic()
+        api.get_status.return_value = {
+            "status": "RUN",
+            "machine_state": "Ready",
+            "profile": 1,
+            "monitor_raw": "aabb",
+            "alarms": [],
+            "alarm_word": 0,
+        }
+        coord._last_monitor_raw = "aabb"  # unchanged → does not reset the clock
+        coord._monitor_last_changed = monotonic() - (coord._monitor_stale_timeout + 10)
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Off"
+
+    def test_lan_alarms_survive_monitor_timeout(self):
+        """#50: the timed_out suppression rule must not bite LAN frames either.
+
+        An idle machine keeps pushing the same frame, so the staleness clock
+        can pass the timeout while the LAN evidence is perfectly fresh.
+        """
+        coord, api = _lan_monitor_coord(LAN_CLEANING)
+        api.get_status.return_value = {
+            "status": "RUN",
+            "machine_state": "Off",
+            "profile": 0,
+            "monitor_raw": "ffffffffffff",
+            "alarms": [],
+            "alarm_word": 0,
+        }
+        # LAN frame equals the tracked raw → the staleness clock is not reset
+        coord._last_monitor_raw = "d012750f010100000007000001000000003ae46ad0aae1"
+        coord._monitor_last_changed = monotonic() - (coord._monitor_stale_timeout + 10)
+        result = _run(coord._async_update_data())
+        assert result["monitor_stale"] is True
+        assert [a["name"] for a in result["alarms"]] == ["Cleaning Needed"]
+
+    def test_overlay_sticks_across_a_stale_session_gap(self):
+        """#50 flicker: a push gap past LAN_SESSION_STALE_SECONDS must not
+        flip Ready→Off while the cloud datapoint is frozen."""
+        coord, api = _lan_monitor_coord(LAN_READY)
+        self._cloud_stale(api)
+        first = _run(coord._async_update_data())
+        assert first["machine_state"] == "Ready"
+        assert first["monitor_source"] == "lan"
+
+        # Machine stops pushing: session goes stale, cloud still frozen Off.
+        coord._lan_server.is_session_alive = MagicMock(return_value=False)
+        second = _run(coord._async_update_data())
+        assert second["machine_state"] == "Ready"
+        assert second["monitor_source"] == "lan"
+
+    def test_sticky_overlay_dropped_when_cloud_moves(self):
+        """The cloud moving again is fresh evidence — it wins over the sticky LAN."""
+        coord, api = _lan_monitor_coord(LAN_READY)
+        self._cloud_stale(api)
+        _run(coord._async_update_data())  # overlay applied over the frozen cloud raw
+        coord._lan_server.is_session_alive = MagicMock(return_value=False)
+        api.get_status.return_value = {
+            "status": "RUN",
+            "machine_state": "Off",
+            "profile": 0,
+            "monitor_raw": "aabbccddeeff",
+            "alarms": [],
+            "alarm_word": 0,
+        }
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Off"
+        assert result["monitor_source"] == "cloud"
+
+    def test_sticky_overlay_superseded_by_newer_push(self):
+        """A newer LAN frame replaces the sticky one (Ready → Brewing)."""
+        coord, api = _lan_monitor_coord(LAN_READY)
+        self._cloud_stale(api)
+        _run(coord._async_update_data())
+        coord._lan_server.is_session_alive = MagicMock(return_value=False)
+        assert _run(coord._async_update_data())["machine_state"] == "Ready"  # sticky
+        # Machine wakes up and pushes a Brewing frame — session alive again.
+        coord._lan_server.is_session_alive = MagicMock(return_value=True)
+        coord._lan_properties = {"d302_monitor": LAN_BREWING}
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Brewing"
+        assert result["monitor_action"] == 5
+
+    def test_push_becomes_the_sticky_overlay(self):
+        """A socket push protects later stale-session polls even when no poll
+        has observed the cloud raw yet."""
+        coord, api = _lan_monitor_coord(LAN_READY)
+        coord.data = {"machine_state": "Off", "monitor_source": "cloud"}
+        coord.async_set_updated_data = MagicMock()
+        _run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": LAN_READY}}))
+        # Session goes stale right after the push; the next poll sees the
+        # frozen cloud again — the pushed frame must win.
+        coord._lan_server.is_session_alive = MagicMock(return_value=False)
+        self._cloud_stale(api)
+        result = _run(coord._async_update_data())
+        assert result["machine_state"] == "Ready"
+        assert result["monitor_source"] == "lan"
+
+    def test_push_applies_state_immediately(self):
+        """The socket push must update entities without waiting for the poll."""
+        coord, api = _lan_monitor_coord(LAN_READY)
+        api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+        coord.data = {"machine_state": "Off", "monitor_source": "cloud"}
+        coord.async_set_updated_data = MagicMock()
+
+        _run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": LAN_READY}}))
+
+        pushed = coord.async_set_updated_data.call_args.args[0]
+        assert pushed["machine_state"] == "Ready"
+        assert pushed["monitor_source"] == "lan"
+        assert pushed["monitor_stale"] is False
+        # staleness bookkeeping follows the LAN frame
+        assert coord._monitor_stale_count == 0
+
+    def test_push_without_monitor_leaves_state_alone(self):
+        coord, _ = _lan_monitor_coord(LAN_READY)
+        coord.data = {"machine_state": "Off"}
+        coord.async_set_updated_data = MagicMock()
+        _run(coord._on_lan_property({"property": {"name": "d701_tot_bev_b", "value": 42}}))
+        pushed = coord.async_set_updated_data.call_args.args[0]
+        assert pushed["machine_state"] == "Off"
+        assert pushed["lan_properties"]["d701_tot_bev_b"] == 42
+
+    def test_async_get_status_overlays_lan(self):
+        coord, api = _lan_monitor_coord(LAN_READY)
+        self._cloud_stale(api)
+        status = _run(coord.async_get_status())
+        assert status["machine_state"] == "Ready"
+        assert status["monitor_source"] == "lan"
+
+    def test_async_get_status_swallows_cloud_errors(self):
+        """A cloud wobble must not block a brew — state falls back to Unknown."""
+        coord, _, api = _make_coord()
+        api.get_status.side_effect = DeLonghiApiError("down")
+        status = _run(coord.async_get_status())
+        assert status == {}
+
+    def test_async_get_status_uses_lan_when_cloud_is_down(self):
+        coord, api = _lan_monitor_coord(LAN_READY)
+        api.get_status.side_effect = DeLonghiApiError("down")
+        status = _run(coord.async_get_status())
+        assert status["machine_state"] == "Ready"
+
+
+class TestBrewDelivery:
+    """Issue #50: a DL-millcore machine ignores the cloud data_request brew."""
+
+    def _brew_coord(self, lan_ok: bool):
+        coord, _, api = _make_coord()
+        api.build_brew_command = MagicMock(return_value=b"\x0d\x0f\x83\xf0")
+        api.send_command = MagicMock(return_value=True)
+        coord.send_command_lan = AsyncMock(return_value=lan_ok)
+        return coord, api
+
+    def test_lan_brew_skips_cloud(self):
+        coord, api = self._brew_coord(True)
+        coord._lan_server = _make_lan_server(True)
+        coord.api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+        coord._lan_properties = {"d302_monitor": LAN_READY}
+        assert _run(coord.async_brew("espresso", 2)) is True
+        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0")
+        api.send_command.assert_not_called()
+
+    def test_cloud_fallback_when_lan_unavailable(self):
+        coord, api = self._brew_coord(False)
+        assert _run(coord.async_brew("espresso", 2)) is True
+        coord.send_command_lan.assert_awaited_once()
+        api.send_command.assert_called_once_with("DSN-1", b"\x0d\x0f\x83\xf0")
+
+    def test_pre_brew_check_sees_the_lan_state(self):
+        """The builder must receive the LAN-corrected status, not the stale cloud."""
+        coord, api = self._brew_coord(True)
+        coord._lan_server = _make_lan_server(True)
+        coord.api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+        coord._lan_properties = {"d302_monitor": LAN_READY}
+        coord.api.get_status.return_value = {"status": "RUN", "machine_state": "Off", "alarms": []}
+        _run(coord.async_brew("espresso", 2))
+        passed_status = api.build_brew_command.call_args.args[3]
+        assert passed_status["machine_state"] == "Ready"
+
+    def test_send_brew_command_lan_true_short_circuits(self):
+        coord, api = self._brew_coord(True)
+        assert _run(coord.async_send_brew_command(b"\x01")) is True
+        api.send_command.assert_not_called()

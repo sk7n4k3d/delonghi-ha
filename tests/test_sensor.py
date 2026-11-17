@@ -10,12 +10,16 @@ word for the relevant bit.
 import asyncio
 from unittest.mock import MagicMock
 
+from homeassistant.components.sensor import SensorStateClass
+from homeassistant.helpers.entity import EntityCategory
+
 from custom_components.delonghi_coffee import binary_sensor as binary_sensor_mod
 from custom_components.delonghi_coffee import sensor as sensor_mod
 from custom_components.delonghi_coffee.binary_sensor import DeLonghiAlarmSensor
 from custom_components.delonghi_coffee.const import ALARMS
 from custom_components.delonghi_coffee.sensor import (
     COUNTER_SENSORS,
+    DeLonghiApiUsageSensor,
     DeLonghiBeanSensor,
     DeLonghiBlockingAlarmsSensor,
     DeLonghiCounterSensor,
@@ -179,10 +183,22 @@ class TestStatusSensor:
         assert attrs["profile"] == 0
         assert attrs["active_alarms"] == []
         assert attrs["alarm_count"] == 0
-        assert attrs["api_calls_hour"] == 0
-        assert attrs["api_total_calls"] == 0
         # No lan_config block → no lan_enabled key
         assert "lan_enabled" not in attrs
+
+    def test_extra_state_attributes_expose_no_api_counters(self):
+        """Issue #45: per-poll counters must not live on the status sensor.
+
+        ``api_calls_hour`` / ``api_total_calls`` moved on nearly every 60 s
+        refresh, so HA fired a state_changed (and the recorder wrote a row)
+        every minute with the machine Off. The counters now belong to
+        ``DeLonghiApiUsageSensor``.
+        """
+        s = self._make({"api_rate": 12, "api_total_calls": 4567})
+        attrs = s.extra_state_attributes
+        assert "api_calls_hour" not in attrs
+        assert "api_total_calls" not in attrs
+        assert "calls_last_hour" not in attrs
 
     def test_extra_state_attributes_full(self):
         s = self._make(
@@ -201,11 +217,67 @@ class TestStatusSensor:
         assert attrs["profile"] == 2
         assert attrs["active_alarms"] == ["Water tank empty", "Grounds full"]
         assert attrs["alarm_count"] == 2
-        assert attrs["api_calls_hour"] == 12
-        assert attrs["api_total_calls"] == 4567
         assert attrs["lan_enabled"] is True
         assert attrs["lan_ip"] == "10.0.0.42"
         assert attrs["contentstack_drinks"] == 3
+        # Counters present in the coordinator data stay out (#45).
+        assert "api_calls_hour" not in attrs
+        assert "api_total_calls" not in attrs
+
+    def test_attributes_stable_across_polls(self):
+        """Issue #45: an idle machine must produce byte-identical attributes.
+
+        Simulates two refreshes where only the API counters moved (which is
+        what happens every 60 s while the machine sits Off): if the status
+        sensor's attributes are equal, HA skips the state write entirely and
+        the recorder stores nothing.
+        """
+        coord = MagicMock()
+        coord.data = {
+            "machine_state": "Off",
+            "status": "RUN",
+            "profile": 7,
+            "alarms": [],
+            "api_rate": 48,
+            "api_total_calls": 48,
+        }
+        s = self._make(coord.data)
+        first = dict(s.extra_state_attributes)
+        coord.data.update({"api_rate": 49, "api_total_calls": 49})
+        assert s.extra_state_attributes == first
+
+
+class TestApiUsageSensor:
+    """Issue #45: the API counters live on their own diagnostic entity."""
+
+    def _make(self, data=None):
+        coord = MagicMock()
+        coord.data = data or {}
+        return DeLonghiApiUsageSensor(coord, "DSN-X", "Eletta", "Coffee", "1.0")
+
+    def test_init_attributes(self):
+        s = self._make()
+        assert s._attr_unique_id == "DSN-X_api_usage"
+        assert s._attr_name == "API usage"
+        assert s._attr_entity_category == EntityCategory.DIAGNOSTIC
+        # Opt-in: no recorder rows for users who never look at API traffic.
+        assert s._attr_entity_registry_enabled_default is False
+        assert s._attr_native_unit_of_measurement == "calls"
+        assert s._attr_state_class == SensorStateClass.TOTAL_INCREASING
+
+    def test_native_value_defaults_to_zero(self):
+        assert self._make({}).native_value == 0
+
+    def test_native_value_is_total_calls(self):
+        s = self._make({"api_total_calls": 4567, "api_rate": 12})
+        assert s.native_value == 4567
+
+    def test_rate_is_an_attribute(self):
+        s = self._make({"api_total_calls": 4567, "api_rate": 12})
+        assert s.extra_state_attributes == {"calls_last_hour": 12}
+
+    def test_rate_defaults_to_zero(self):
+        assert self._make({}).extra_state_attributes == {"calls_last_hour": 0}
 
 
 class TestProfileSensor:
@@ -445,14 +517,16 @@ class TestSetupEntry:
         async_add = MagicMock(side_effect=lambda ents: added.extend(ents))
         asyncio.run(sensor_mod.async_setup_entry(hass, entry, async_add))
 
-        # 4 named sensors (Status, Profile, Bean, BlockingAlarms) + every counter
-        assert len(added) == 4 + len(COUNTER_SENSORS)
+        # 5 named sensors (Status, Profile, Bean, BlockingAlarms, ApiUsage)
+        # + every counter
+        assert len(added) == 5 + len(COUNTER_SENSORS)
         kinds = {type(e).__name__ for e in added}
         assert {
             "DeLonghiStatusSensor",
             "DeLonghiProfileSensor",
             "DeLonghiBeanSensor",
             "DeLonghiBlockingAlarmsSensor",
+            "DeLonghiApiUsageSensor",
         } <= kinds
         assert sum(1 for e in added if isinstance(e, DeLonghiCounterSensor)) == len(COUNTER_SENSORS)
 

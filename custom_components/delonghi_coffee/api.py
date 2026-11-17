@@ -1059,11 +1059,16 @@ class DeLonghiApi:
                     result.get("profile", 0),
                 )
         except (DeLonghiApiError, KeyError, ValueError) as err:
-            # Parse/property errors degrade to defaults — the monitor may be
-            # legitimately absent. But transport failures
-            # (requests.RequestException) propagate so the coordinator
-            # raises UpdateFailed and last_update_success reflects the cloud
-            # outage instead of serving stale cache as fresh data (audit M2).
+            # Everything degrades to defaults here: the monitor may be
+            # legitimately absent, and transport failures never surface as
+            # raw requests exceptions — get_properties' @_retry decorator
+            # converts an exhausted backoff into DeLonghiApiError, which
+            # this handler swallows too. So get_status ALWAYS returns a
+            # dict (status=UNKNOWN on failure); the coordinator's outage
+            # detection (#46 retry → UpdateFailed) therefore lives on the
+            # full-refresh get_properties call, not on this method.
+            # DeLonghiAuthError is deliberately not caught: it must reach
+            # the coordinator so HA opens the reauth flow.
             _LOGGER.debug("Status/monitor parse error: %s", err)
 
         return result
@@ -1122,6 +1127,85 @@ class DeLonghiApi:
         result["alarms"] = active_alarms
         result["alarm_word"] = alarm_word
         return result
+
+    # MonitorDataV2 frames always start with 0xD0 (see _parse_monitor_v2).
+    # Used to disambiguate base64 vs hex when both decode.
+    _MONITOR_HEADER: int = 0xD0
+    _MONITOR_MIN_LEN: int = 14
+
+    @staticmethod
+    def decode_monitor_payload(value: Any) -> bytes | None:
+        """Decode a monitor datapoint value into raw MonitorDataV2 bytes.
+
+        Accepts every encoding seen in the wild for the ``d302_monitor`` /
+        ``d302_monitor_machine`` datapoints:
+
+        - ``bytes``/``bytearray`` — already raw (unit tests, LAN decrypt)
+        - base64 ``str`` — what the Ayla cloud returns (``get_status``)
+        - hex ``str`` — what LAN datapoint dumps show (issue #10 logs)
+
+        A string can be valid in *both* text encodings ("0d1784cafebabe" is
+        hex and decodes as base64 too), so candidates are ranked: a frame
+        that looks like a monitor (length >= 14 and 0xD0 header) wins, then
+        any candidate long enough to parse. Returns ``None`` when nothing
+        plausible remains — callers must treat that as "no monitor".
+        """
+        if isinstance(value, (bytes, bytearray)):
+            raw = bytes(value)
+            return raw if len(raw) >= DeLonghiApi._MONITOR_MIN_LEN else None
+        if not isinstance(value, str):
+            return None
+
+        text = value.strip()
+        if not text:
+            return None
+
+        candidates: list[bytes] = []
+        with contextlib.suppress(binascii.Error, ValueError):
+            candidates.append(base64.b64decode(text, validate=True))
+        if len(text) % 2 == 0:
+            with contextlib.suppress(ValueError):
+                candidates.append(bytes.fromhex(text))
+
+        for candidate in candidates:
+            if len(candidate) >= DeLonghiApi._MONITOR_MIN_LEN and candidate[0] == DeLonghiApi._MONITOR_HEADER:
+                return candidate
+        for candidate in candidates:
+            if len(candidate) >= DeLonghiApi._MONITOR_MIN_LEN:
+                return candidate
+        return None
+
+    @classmethod
+    def parse_monitor_hex(cls, monitor_hex: str | bytes) -> dict[str, Any]:
+        """Parse a monitor datapoint (hex or base64 text) into a status dict.
+
+        Factored out of :meth:`get_status` so the coordinator can run the
+        *same* parser over the monitor the machine pushes on the LAN socket
+        (issue #50: the cloud monitor only refreshes while the Coffee Link
+        app is open, so cloud-only state is stale on DL-millcore models).
+        Accepts raw ``bytes`` too — see :meth:`decode_monitor_payload`.
+
+        Raises:
+            ValueError: the payload is not a decodable monitor frame.
+        """
+        raw = cls.decode_monitor_payload(monitor_hex)
+        if raw is None:
+            raise ValueError("monitor payload is not a decodable MonitorDataV2 frame")
+        result = cls._parse_monitor_v2(raw)
+        result["monitor_raw"] = raw.hex()
+        return result
+
+    @classmethod
+    def parse_monitor_value(cls, value: Any) -> dict[str, Any] | None:
+        """Tolerant wrapper around :meth:`parse_monitor_hex`.
+
+        Returns ``None`` instead of raising when the value cannot be parsed,
+        so a malformed LAN datapoint can never break a refresh cycle.
+        """
+        try:
+            return cls.parse_monitor_hex(value)
+        except (TypeError, ValueError, binascii.Error):
+            return None
 
     def get_counters(self, dsn: str) -> dict[str, Any]:
         """Get counters (fetches properties)."""
@@ -1319,8 +1403,31 @@ class DeLonghiApi:
 
         return counters
 
-    def brew_beverage(self, dsn: str, beverage_key: str, profile: int = 2) -> bool:
+    def brew_beverage(
+        self, dsn: str, beverage_key: str, profile: int = 2, status: dict[str, Any] | None = None
+    ) -> bool:
         """Brew a beverage by converting stored recipe to brew command.
+
+        Thin wrapper: build the command, then push it through the cloud.
+        Callers that can deliver over the LAN socket (see
+        ``coordinator.async_brew``) should use :meth:`build_brew_command` +
+        their own transport instead, so the machine is not left waiting on a
+        cloud ``data_request`` it ignores (issue #50).
+
+        Args:
+            dsn: Device serial number.
+            beverage_key: Beverage identifier (e.g. "espresso").
+            profile: User profile number (1-5, default 2).
+            status: Optional pre-fetched status dict used for the pre-brew
+                safety check (lets the caller inject LAN-corrected state
+                instead of a second, stale cloud read).
+        """
+        return self.send_command(dsn, self.build_brew_command(dsn, beverage_key, profile, status))
+
+    def build_brew_command(
+        self, dsn: str, beverage_key: str, profile: int = 2, status: dict[str, Any] | None = None
+    ) -> bytes:
+        """Build the ECAM brew command for a beverage — do not send it.
 
         Universal conversion verified against 9 MITM captures:
         - Normal drinks: all recipe params except VISIBLE(25)
@@ -1332,6 +1439,7 @@ class DeLonghiApi:
             dsn: Device serial number.
             beverage_key: Beverage identifier (e.g. "espresso").
             profile: User profile number (1-5, default 2).
+            status: Optional pre-fetched status dict for the pre-brew check.
         """
         _LOGGER.debug("brew_beverage: fetching all properties for %s", dsn)
         props = self.get_properties(dsn)
@@ -1407,7 +1515,7 @@ class DeLonghiApi:
             raise DeLonghiApiError(f"Recipe {beverage_key} too short: {len(recipe_data)} bytes")
 
         # Pre-brew checks: alarms and accessory
-        self._pre_brew_check(dsn, recipe_data, beverage_key)
+        self._pre_brew_check(dsn, recipe_data, beverage_key, status)
 
         # Ping machine to ensure push channel is active (app does this before every brew)
         try:
@@ -1428,14 +1536,14 @@ class DeLonghiApi:
             recipe_data, is_iced=is_iced, is_cold_brew=is_cold_brew, profile=profile
         )
         _LOGGER.info(
-            "Brewing %s (profile=%d, iced=%s, cold=%s): %s",
+            "Brew command built for %s (profile=%d, iced=%s, cold=%s): %s",
             beverage_key,
             profile,
             is_iced,
             is_cold_brew,
             brew_cmd.hex(),
         )
-        return self.send_command(dsn, brew_cmd)
+        return brew_cmd
 
     # Beverage name → ID mapping for custom brew — derived from the single
     # source of truth (const.BEVERAGES) so the two can never diverge again;
@@ -1560,11 +1668,23 @@ class DeLonghiApi:
         with the profile number as single payload byte. The machine also
         uploads its recipes for that profile to the cloud as a side effect,
         which is why this opcode was previously mislabeled READ_RECIPES.
+
+        Framing is the standard ECAM layout verified against the barista
+        PROTOCOL and used by every other command in this file (see the brew
+        builder): ``[0x0D][len][cmd][0xF0 flags][params][CRC]`` →
+        ``0D 06 A9 F0 <profile> CRC``. The previous shape
+        (``0D 05 A9 <profile> CRC``) put the profile number in the flags
+        byte — not valid ECAM framing.
+
+        Caveat: opcode 0xA9 is documented from BLE captures only (longshot);
+        WiFi support is unverified in the field. If a machine ignores the
+        corrected packet, the profile still travels in the profile_save byte
+        of every brew command, so profile selection keeps working via brews.
         """
         if not 1 <= profile <= 5:
             raise DeLonghiApiError(f"Profile must be 1-5, got {profile}")
-        # len = total(6) - 1 = 5: [0x0D][0x05][0xA9][profile] + CRC(2)
-        body = bytes([0x0D, 0x05, 0xA9, profile])
+        # len = total(7) - 1 = 6: [0x0D][0x06][0xA9][0xF0 flags][profile] + CRC(2)
+        body = bytes([0x0D, 0x06, 0xA9, 0xF0, profile])
         _LOGGER.info("Setting active profile to %d on %s", profile, dsn)
         return self.send_command(dsn, body + self._crc16(body))
 
@@ -1698,11 +1818,18 @@ class DeLonghiApi:
         )
         return self.send_command(dsn, cmd)
 
-    def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str) -> None:
-        """Check machine state before brewing. Raises DeLonghiApiError on problems."""
+    def _pre_brew_check(self, dsn: str, recipe: bytes, beverage_key: str, status: dict[str, Any] | None = None) -> None:
+        """Check machine state before brewing. Raises DeLonghiApiError on problems.
+
+        ``status`` may carry a pre-fetched (and LAN-corrected) status dict so
+        the check does not run against a stale cloud monitor — on
+        DL-millcore/PD Soul the cloud only refreshes while the Coffee Link
+        app is open, so a cloud-only read here refuses valid brews (issue #50).
+        """
         _LOGGER.debug("_pre_brew_check: checking machine state for %s", beverage_key)
         try:
-            status = self.get_status(dsn)
+            if status is None:
+                status = self.get_status(dsn)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             _LOGGER.warning(
                 "Pre-brew safety check skipped for %s: status fetch failed (%s). "

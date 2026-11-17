@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -113,6 +114,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # complete Turning On (or to brew) instead of leaving the user guessing.
     entities.append(DeLonghiBlockingAlarmsSensor(coordinator, dsn, model, device_name, sw_version))
 
+    # API rate/total counters — diagnostic, disabled by default (issue #45).
+    entities.append(DeLonghiApiUsageSensor(coordinator, dsn, model, device_name, sw_version))
+
     # Counter sensors — always create all; unsupported ones show as "unavailable"
     for key, meta in COUNTER_SENSORS.items():
         entities.append(DeLonghiCounterSensor(coordinator, dsn, model, device_name, sw_version, key, meta))
@@ -146,7 +150,17 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
+        """Return additional state attributes.
+
+        Issue #45: this dict used to carry ``api_calls_hour`` and
+        ``api_total_calls``. Both move on almost every 60 s poll, and HA
+        treats an attribute-only change as a state change — so the recorder
+        stored a row per minute even with the machine Off (one reporter:
+        128k rows / 90 days, 128k of them attribute-only). Everything here
+        must therefore stay stable while the machine idles; the API counters
+        moved to ``DeLonghiApiUsageSensor``, an entity whose whole job is to
+        count and that is disabled by default.
+        """
         alarms: list[dict[str, Any]] = self.coordinator.data.get("alarms", [])
         lan: dict[str, Any] = self.coordinator.data.get("lan_config", {})
         attrs: dict[str, Any] = {
@@ -154,8 +168,6 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
             "profile": self.coordinator.data.get("profile", 0),
             "active_alarms": [a["name"] for a in alarms],
             "alarm_count": len(alarms),
-            "api_calls_hour": self.coordinator.data.get("api_rate", 0),
-            "api_total_calls": self.coordinator.data.get("api_total_calls", 0),
         }
         action = self.coordinator.data.get("monitor_action")
         if action is not None:
@@ -170,6 +182,51 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
         if catalog:
             attrs["contentstack_drinks"] = len(catalog)
         return attrs
+
+
+class DeLonghiApiUsageSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
+    """Cloud API usage counters (issue #45).
+
+    Split out of the status sensor on purpose: a counter is *supposed* to
+    change on every poll, so it belongs on an entity that is allowed to
+    churn, not on the machine-state sensor whose attributes the recorder has
+    to be able to dedupe. Diagnostic category and disabled by default — the
+    numbers exist to triage rate-limit / ban reports, not to be dashboard
+    material. Users who enable it get the per-poll history they asked for.
+
+    Named with ``_attr_name`` instead of a ``translation_key`` on purpose:
+    adding a key here would mean touching every file in ``translations/``,
+    and an opt-in debug entity does not earn that.
+    """
+
+    def __init__(
+        self,
+        coordinator: DeLonghiCoordinator,
+        dsn: str,
+        model: str,
+        device_name: str,
+        sw_version: str | None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._dsn = dsn
+        self._attr_unique_id = f"{dsn}_api_usage"
+        self._attr_name = "API usage"
+        self._attr_icon = "mdi:cloud-sync"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_registry_enabled_default = False
+        self._attr_native_unit_of_measurement = "calls"
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def native_value(self) -> int:
+        """Total cloud API calls since HA started (RateLimitTracker)."""
+        return self.coordinator.data.get("api_total_calls", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Calls inside the rate limiter's sliding window (1 h)."""
+        return {"calls_last_hour": self.coordinator.data.get("api_rate", 0)}
 
 
 # Percentage sensors that go down (not monotonically increasing)

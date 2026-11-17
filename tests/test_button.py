@@ -175,6 +175,9 @@ def _make_coord(machine_state: str = "Ready", selected_profile: int = 1) -> Magi
     coord.beverages = []
     coord.async_refresh_after_command = AsyncMock()
     coord.async_refresh_after_command = AsyncMock()
+    # Issue #50: the button delegates to the coordinator so the brew can be
+    # served on the machine's LAN poll instead of the cloud data_request.
+    coord.async_brew = AsyncMock(return_value=True)
     coord.request_fast_poll = MagicMock()
     coord.async_request_refresh = AsyncMock()
     return coord
@@ -230,25 +233,28 @@ class TestBrewButtonEntity:
         entity, _ = self._entity("Going to sleep")
         assert entity.available is False
 
-    def test_press_dispatches_brew_beverage(self):
+    def test_press_dispatches_coordinator_brew(self):
+        """Issue #50: the press must go through the coordinator (LAN-aware),
+        not straight to api.brew_beverage (cloud-only, ignored by millcore)."""
         entity, api = self._entity("Ready")
         _run(entity.async_press())
-        api.brew_beverage.assert_called_once_with("DSN", "espresso", 1)
+        entity.coordinator.async_brew.assert_awaited_once_with("espresso", 1)
+        api.brew_beverage.assert_not_called()
 
     def test_press_raises_home_assistant_error_on_api_error(self):
         from homeassistant.exceptions import HomeAssistantError
 
-        entity, api = self._entity("Ready")
-        api.brew_beverage.side_effect = DeLonghiApiError("boom")
+        entity, _ = self._entity("Ready")
+        entity.coordinator.async_brew.side_effect = DeLonghiApiError("boom")
         with pytest.raises(HomeAssistantError) as exc_info:
             _run(entity.async_press())
         assert "boom" in str(exc_info.value) or "espresso" in str(exc_info.value)
 
     def test_press_uses_selected_profile_from_coordinator(self):
-        entity, api = self._entity("Ready")
+        entity, _ = self._entity("Ready")
         entity.coordinator.selected_profile = 4
         _run(entity.async_press())
-        api.brew_beverage.assert_called_once_with("DSN", "espresso", 4)
+        entity.coordinator.async_brew.assert_awaited_once_with("espresso", 4)
 
 
 class TestCancelButtonEntity:

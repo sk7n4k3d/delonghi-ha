@@ -1288,3 +1288,92 @@ class TestFinalDefensiveBranches:
         assert "espresso" in beverages
         # The weird property must NOT leak through
         assert "something" not in beverages
+
+
+# ---------------------------------------------------------------------------
+# build_brew_command / _pre_brew_check status injection — issue #50
+# ---------------------------------------------------------------------------
+
+
+class TestBuildBrewCommand:
+    """The brew command is built separately from its delivery so the caller
+    can serve it on the LAN queue instead of the cloud data_request."""
+
+    def test_returns_the_frame_without_sending(self):
+        api = _make_api()
+        props = {"d302_rec_2_espresso": {"value": _fake_recipe_prop()}}
+        with (
+            patch.object(api, "get_properties", return_value=props),
+            patch.object(api, "ping_connected", return_value=True),
+            patch.object(api, "_pre_brew_check"),
+            patch.object(api, "send_command") as mock_send,
+        ):
+            cmd = api.build_brew_command("DSN", "espresso", profile=2)
+        assert isinstance(cmd, bytes)
+        assert cmd[0] == 0x0D and cmd[2] == 0x83
+        mock_send.assert_not_called()
+
+    def test_injected_status_reaches_the_pre_brew_check(self):
+        api = _make_api()
+        props = {"d302_rec_2_espresso": {"value": _fake_recipe_prop()}}
+        live = {"machine_state": "Ready", "alarms": [], "monitor_raw": "d00ca4f001020000000700000000"}
+        with (
+            patch.object(api, "get_properties", return_value=props),
+            patch.object(api, "ping_connected", return_value=True),
+            patch.object(api, "get_status") as mock_status,
+            patch.object(api, "_pre_brew_check") as mock_check,
+            patch.object(api, "send_command"),
+        ):
+            api.build_brew_command("DSN", "espresso", 2, live)
+        # No second (stale) cloud read when the caller already knows the state
+        mock_status.assert_not_called()
+        assert mock_check.call_args.args[3] is live
+
+    def test_brew_beverage_still_delivers_via_cloud(self):
+        api = _make_api()
+        props = {"d302_rec_2_espresso": {"value": _fake_recipe_prop()}}
+        with (
+            patch.object(api, "get_properties", return_value=props),
+            patch.object(api, "ping_connected", return_value=True),
+            patch.object(api, "_pre_brew_check"),
+            patch.object(api, "send_command", return_value=True) as mock_send,
+        ):
+            assert api.brew_beverage("DSN", "espresso", profile=2) is True
+        assert mock_send.call_args.args[1][2] == 0x83
+
+
+class TestPreBrewCheckInjectedStatus:
+    """_pre_brew_check must trust a caller-supplied (LAN-corrected) status."""
+
+    _RECIPE = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
+
+    def test_injected_status_short_circuits_the_cloud_read(self):
+        api = _make_api()
+        with (
+            patch.object(api, "get_status") as mock_status,
+            pytest.raises(DeLonghiApiError, match="machine is off"),
+        ):
+            api._pre_brew_check("DSN", self._RECIPE, "espresso", {"machine_state": "Off", "alarms": []})
+        mock_status.assert_not_called()
+
+    def test_injected_live_state_allows_the_brew(self):
+        """The #50 case: cloud says Off (frozen), LAN says Ready → brew allowed."""
+        api = _make_api()
+        with patch.object(api, "get_status") as mock_status:
+            api._pre_brew_check("DSN", self._RECIPE, "espresso", {"machine_state": "Ready", "alarms": []})
+        mock_status.assert_not_called()
+
+    def test_injected_blocking_alarm_still_blocks(self):
+        api = _make_api()
+        status = {
+            "machine_state": "Ready",
+            "alarms": [{"bit": 0, "name": "Water Tank Empty", "severity": "error"}],
+        }
+        with patch.object(api, "get_status"), pytest.raises(DeLonghiApiError, match="Water Tank Empty"):
+            api._pre_brew_check("DSN", self._RECIPE, "espresso", status)
+
+    def test_no_status_still_reads_the_cloud(self):
+        api = _make_api()
+        with patch.object(api, "get_status", return_value={"machine_state": "Ready", "alarms": []}) as mock_status:
+            api._pre_brew_check("DSN", self._RECIPE, "espresso")
+        mock_status.assert_called_once_with("DSN")

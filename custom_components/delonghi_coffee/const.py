@@ -97,12 +97,16 @@ POWER_RETRY_DELAY: Final = 180.0  # Seconds before re-sending power-on if machin
 POWER_STALE_THRESHOLD: Final = 3  # Consecutive polls before trusting assumed state over monitor
 
 # LAN session freshness — a handshake is only trustworthy while the device
-# keeps polling /local_lan/commands.json. cremalink-compatible devices poll
-# every few seconds; 30s gives generous margin for jitter/GC pauses while
-# still detecting a silently-dropped device (WiFi reassociation, reboot,
-# firmware falling back to cloud-only) well before a user notices commands
-# going nowhere (issue #23 candidate root cause).
-LAN_SESSION_STALE_SECONDS: Final = 30.0
+# keeps polling /local_lan/commands.json and pushing datapoints. The
+# observed push cadence on ECAM610.75 is "every 12s-minutes" (lan.py
+# datapoint handler, audit 2026-10-03): the old 30s window was shorter than
+# the natural gap between pushes, so the monitor overlay flickered on/off
+# between polls and machine_state flip-flopped Ready↔Off every cycle
+# (issue #50). 120s absorbs the observed gap while still detecting a
+# silently-dropped device (WiFi reassociation, reboot, firmware falling
+# back to cloud-only) soon enough that commands do not sit on a dead
+# session for long (issue #23 candidate root cause).
+LAN_SESSION_STALE_SECONDS: Final = 120.0
 
 # 401-triggered re-authentication dedup window (F-API-04). Several threads
 # can hit 401 on the same stale token at nearly the same time; without a

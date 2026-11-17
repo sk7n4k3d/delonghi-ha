@@ -26,7 +26,9 @@ def _make_coordinator(selected_profile=2, custom_recipe_names=None, beverages=No
     coord.data = {"machine_state": machine_state}
     coord.async_add_listener = MagicMock(return_value=lambda: None)
     coord.async_refresh_after_command = AsyncMock()
-    coord.async_refresh_after_command = AsyncMock()
+    # Issue #50: brews are delivered by the coordinator so the LAN command
+    # queue wins over the cloud data_request the millcore firmware ignores.
+    coord.async_brew = AsyncMock(return_value=True)
     coord.request_fast_poll = MagicMock()
     coord.async_request_refresh = AsyncMock()
     return coord
@@ -123,7 +125,9 @@ class TestBrewButtonPress:
         btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
         btn.hass = _make_hass_with_executor()
         _run(btn.async_press())
-        api.brew_beverage.assert_called_once_with("DSN", "espresso", 3)
+        coord.async_brew.assert_awaited_once_with("espresso", 3)
+        # issue #50: no direct cloud-only brew anymore
+        api.brew_beverage.assert_not_called()
 
     def test_falls_back_to_profile_1_when_none(self):
         coord = _make_coordinator(selected_profile=None)
@@ -131,14 +135,14 @@ class TestBrewButtonPress:
         btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
         btn.hass = _make_hass_with_executor()
         _run(btn.async_press())
-        api.brew_beverage.assert_called_once_with("DSN", "espresso", 1)
+        coord.async_brew.assert_awaited_once_with("espresso", 1)
 
     def test_api_error_raises_home_assistant_error(self):
         from homeassistant.exceptions import HomeAssistantError
 
         coord = _make_coordinator()
         api = _make_api()
-        api.brew_beverage.side_effect = DeLonghiApiError("water tank empty")
+        coord.async_brew.side_effect = DeLonghiApiError("water tank empty")
         btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
         btn.hass = _make_hass_with_executor()
         with pytest.raises(HomeAssistantError, match="Failed to brew espresso"):
@@ -160,7 +164,7 @@ class TestBrewButtonPress:
         """A failed brew must not arm fast-poll / refresh (command never sent)."""
         coord = _make_coordinator(selected_profile=1)
         api = _make_api()
-        api.brew_beverage.side_effect = DeLonghiApiError("boom")
+        coord.async_brew.side_effect = DeLonghiApiError("boom")
         btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
         btn.hass = _make_hass_with_executor()
         from homeassistant.exceptions import HomeAssistantError

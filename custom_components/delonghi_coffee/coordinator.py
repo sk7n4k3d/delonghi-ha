@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
+from collections.abc import Callable
 from datetime import timedelta
 from time import monotonic
 from typing import Any
 
+import requests
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
+from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError, DeLonghiUnsupportedError
 from .const import (
     ACTIVE_MACHINE_STATES,
     ACTIVE_SCAN_INTERVAL_SECONDS,
@@ -30,6 +33,32 @@ from .local_baseline import LocalBaselineStore
 from .logger import get_diagnostic_dump, get_logger, sanitize
 
 _LOGGER = get_logger(__name__)
+
+# Property names that carry the MonitorDataV2 datapoint. The cloud exposes
+# ``d302_monitor_machine`` (Eletta) or ``d302_monitor`` (PrimaDonna Soul),
+# and the machine pushes the same names on the LAN socket.
+LAN_MONITOR_PROPERTIES: tuple[str, ...] = ("d302_monitor_machine", "d302_monitor")
+
+# Issue #46: one transient cloud hiccup (requests ConnectionError seen
+# ~1.1x/day in user logs) used to mark every entity unavailable for a full
+# poll cycle. Before giving up, retry the failed fetch once after a short
+# pause — long enough to ride out a Wi-Fi/AP blip, short enough to stay well
+# inside the 60s poll budget. This applies to the full-refresh
+# ``get_properties`` fetch — the only cloud call in the poll cycle that can
+# still raise (``api.get_status`` swallows transport errors internally and
+# returns ``status=UNKNOWN``, so wrapping it would be dead code).
+TRANSIENT_RETRY_DELAY_SECONDS: float = 2.0
+
+# Keys a parsed monitor frame may override in the status / data dicts.
+_LAN_MONITOR_STATUS_KEYS: tuple[str, ...] = (
+    "machine_state",
+    "action",
+    "progress",
+    "alarms",
+    "alarm_word",
+    "profile",
+    "monitor_raw",
+)
 
 
 class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -68,6 +97,19 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cached_beans: list[dict[str, Any]] = []
         self._cached_bean_system_par: dict[str, Any] = {}
         self._lan_config: dict[str, Any] | None = None
+        # Issue #50 stickiness — the last LAN monitor overlay, when it was
+        # applied, and the cloud monitor raw it was applied over. While the
+        # cloud raw stays unchanged (frozen cache) the overlay is kept even
+        # if the LAN session goes stale, so a push gap cannot flicker
+        # machine_state back to the frozen cloud value.
+        self._lan_sticky: dict[str, Any] | None = None
+        self._lan_sticky_at: float = 0.0  # monotonic() of the last LAN application
+        self._lan_sticky_cloud_raw: str | None = None  # None = cloud raw not observed yet
+        self._last_cloud_monitor_raw: str | None = None  # raw from get_status, pre-overlay
+        # Issue #46 — pause before the single retry of a failed cloud fetch.
+        # Instance attribute (not just the module constant) so tests can
+        # collapse the wait to 0 without patching asyncio.sleep.
+        self._transient_retry_delay: float = TRANSIENT_RETRY_DELAY_SECONDS
         self.selected_profile: int | None = None  # Set from machine on first refresh
         self.seen_alarm_bits: set[int] = set()  # Track which inverted bits the machine supports
         self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
@@ -155,6 +197,180 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.request_fast_poll(duration_s=duration_s, interval_s=interval_s)
         await self.async_request_refresh()
 
+    # ── transient-error retry (issue #46) ──────────────────────────────
+
+    async def _async_fetch_with_retry(self, label: str, func: Callable[..., Any], *args: Any) -> Any:
+        """Run a blocking cloud fetch, retrying one transient failure.
+
+        A single ``requests`` ConnectionError on the Ayla ADS used to bubble
+        out of the whole refresh and mark every entity unavailable for the
+        next 60s (issue #46). One extra attempt after a short pause absorbs
+        those one-off hiccups.
+
+        Only the full-refresh ``get_properties`` fetch goes through here:
+        ``api.get_status`` converts every transport failure into a
+        ``DeLonghiApiError`` inside its own ``@_retry`` decorator and then
+        swallows it (returning ``status=UNKNOWN``), so a retry wrap around
+        it could never fire.
+
+        Auth errors are never retried: they must reach
+        :class:`ConfigEntryAuthFailed` immediately so HA opens the reauth
+        flow. ``DeLonghiUnsupportedError`` (definitive 404) is likewise not
+        worth a second attempt.
+        """
+        try:
+            return await self.hass.async_add_executor_job(func, *args)
+        except (DeLonghiApiError, requests.RequestException) as err:
+            if isinstance(err, DeLonghiUnsupportedError):
+                raise
+            _LOGGER.debug(
+                "%s failed (%s) — retrying once in %.0fs before declaring the cloud unreachable",
+                label,
+                sanitize(err),
+                self._transient_retry_delay,
+            )
+            await asyncio.sleep(self._transient_retry_delay)
+            return await self.hass.async_add_executor_job(func, *args)
+
+    # ── LAN monitor overlay (issue #50) ────────────────────────────────
+
+    def _lan_monitor_status(self) -> dict[str, Any] | None:
+        """Parse the monitor the machine pushed on the LAN socket.
+
+        Returns the parsed datapoint (machine_state / alarms / profile /
+        action / progress / monitor_raw) or ``None`` when there is nothing
+        trustworthy to use: no server, stale session, no monitor pushed yet,
+        or an undecodable payload. A bad LAN frame must never break a refresh
+        cycle — the caller keeps the cloud values.
+        """
+        server = self._lan_server
+        if server is None:
+            return None
+        try:
+            if not server.is_session_alive(LAN_SESSION_STALE_SECONDS):
+                return None
+            for name in LAN_MONITOR_PROPERTIES:
+                value = self._lan_properties.get(name)
+                if not value:
+                    continue
+                parsed = self.api.parse_monitor_value(value)
+                if parsed:
+                    return parsed
+        except Exception:  # noqa: BLE001 — LAN data is an optimisation, never fatal
+            _LOGGER.debug("LAN monitor overlay skipped (parse/session error)", exc_info=True)
+        return None
+
+    @staticmethod
+    def _merge_lan_overlay(status: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+        """Copy the parsed LAN datapoint over a status dict (no mutation)."""
+        merged = dict(status)
+        for key in _LAN_MONITOR_STATUS_KEYS:
+            if key in overlay:
+                merged[key] = overlay[key]
+        merged["monitor_source"] = "lan"
+        return merged
+
+    def _apply_lan_monitor(self, status: dict[str, Any]) -> dict[str, Any]:
+        """Overlay a live LAN monitor on top of the (possibly stale) cloud status.
+
+        When the LAN value matches the cloud value the result is identical to
+        ``status``, so models with a healthy cloud monitor are unaffected.
+
+        Stickiness (issue #50): once a LAN overlay has been applied it is
+        kept on later polls whose LAN session went stale, as long as the
+        cloud monitor raw has not moved since the overlay was applied. A
+        frozen cloud datapoint is no evidence of a state change, and
+        dropping the overlay there would flicker machine_state
+        Ready→Off→Ready every time the machine's push gap crosses
+        LAN_SESSION_STALE_SECONDS (one recorder row per flip — the #45
+        regression this avoids). The overlay is dropped only when the cloud
+        monitor changes again (fresh cloud evidence) or when a newer LAN
+        frame supersedes it.
+        """
+        cloud_raw = status.get("monitor_raw")
+        overlay = self._lan_monitor_status()
+        if overlay:
+            self._lan_sticky = overlay
+            self._lan_sticky_at = monotonic()
+            self._lan_sticky_cloud_raw = cloud_raw
+            return self._merge_lan_overlay(status, overlay)
+        sticky = self._lan_sticky
+        if sticky is not None and (self._lan_sticky_cloud_raw is None or cloud_raw == self._lan_sticky_cloud_raw):
+            # Session stale but the cloud has not moved since the last LAN
+            # frame was applied: frozen cache, keep the LAN truth. A None
+            # sticky raw means the overlay came from a socket push before
+            # any poll observed the cloud — accept it and pin the raw now.
+            self._lan_sticky_cloud_raw = cloud_raw
+            return self._merge_lan_overlay(status, sticky)
+        return status
+
+    def _apply_lan_monitor_to_data(self, data: dict[str, Any], overlay: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Same overlay, mapped onto the coordinator ``data`` dict keys."""
+        if overlay is None:
+            overlay = self._lan_monitor_status()
+        if not overlay:
+            return data
+        merged = dict(data)
+        if "machine_state" in overlay:
+            merged["machine_state"] = overlay["machine_state"]
+        if "action" in overlay:
+            merged["monitor_action"] = overlay["action"]
+        if "progress" in overlay:
+            merged["monitor_progress"] = overlay["progress"]
+        for key in ("alarms", "alarm_word", "profile"):
+            if key in overlay:
+                merged[key] = overlay[key]
+        merged["monitor_source"] = "lan"
+        # A datapoint that just arrived over the socket is by definition fresh.
+        merged["monitor_stale"] = False
+        return merged
+
+    async def async_get_status(self) -> dict[str, Any]:
+        """Fresh status dict with the LAN monitor overlaid when available.
+
+        Never raises: a cloud wobble must not block a brew. The pre-brew
+        safety check treats an unknown state as "send anyway", exactly like
+        ``api.get_status`` does when its own fetch fails.
+        """
+        status: dict[str, Any] = {}
+        try:
+            status = await self.hass.async_add_executor_job(self.api.get_status, self.dsn)
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            _LOGGER.debug("Status fetch failed (%s), falling back to LAN/unknown state", sanitize(err))
+        except Exception:  # noqa: BLE001 — caller decides what to do with an unknown state
+            _LOGGER.exception("Unexpected error fetching status")
+        if not isinstance(status, dict):
+            status = {}
+        return self._apply_lan_monitor(status)
+
+    # ── brew delivery (issue #50) ──────────────────────────────────────
+
+    async def async_send_brew_command(self, brew_cmd: bytes) -> bool:
+        """Deliver a brew command on the LAN when the machine polls us.
+
+        On DL-millcore (PrimaDonna Soul) the machine ignores the brew pushed
+        through the cloud ``data_request`` while it happily executes the same
+        ECAM frame served on its LAN poll, so LAN wins whenever the session
+        is alive. Cloud remains the fallback.
+        """
+        if await self.send_command_lan(brew_cmd):
+            _LOGGER.info("Brew command queued on LAN socket (cloud data_request skipped)")
+            return True
+        return await self.hass.async_add_executor_job(self.api.send_command, self.dsn, brew_cmd)
+
+    async def async_brew(self, beverage_key: str, profile: int) -> bool:
+        """Build a brew command from the machine recipe and deliver it.
+
+        The pre-brew safety check runs first, against the LAN-corrected
+        status, so a stale cloud monitor can no longer refuse a valid brew
+        (issue #50).
+        """
+        status = await self.async_get_status()
+        brew_cmd = await self.hass.async_add_executor_job(
+            self.api.build_brew_command, self.dsn, beverage_key, profile, status
+        )
+        return await self.async_send_brew_command(brew_cmd)
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
         try:
@@ -199,8 +415,21 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
 
-            # Read status (monitor property from cloud cache)
+            # Read status (monitor property from cloud cache), then overlay
+            # the monitor the machine pushes on the LAN socket when that
+            # session is alive. On DL-millcore / PrimaDonna Soul the cloud
+            # datapoint only refreshes while the Coffee Link app is open, so
+            # cloud-only state is frozen (issue #50).
+            #
+            # Deliberately NOT wrapped in _async_fetch_with_retry (#46):
+            # api.get_status swallows every transport/parse failure inside
+            # its own except block and returns status=UNKNOWN, so the retry
+            # could never fire here. The #46 retry lives on the full-refresh
+            # get_properties call below — the only fetch in this cycle that
+            # can still raise.
             status: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_status, self.dsn)
+            self._last_cloud_monitor_raw = status.get("monitor_raw")
+            status = self._apply_lan_monitor(status)
 
             # Seed selected_profile from the monitor ONCE (first refresh only).
             # After that, selected_profile is the authoritative user override
@@ -271,7 +500,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.debug("Refresh wake failed, continuing with cached data")
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
-                all_props: dict[str, Any] = await self.hass.async_add_executor_job(self.api.get_properties, self.dsn)
+                all_props: dict[str, Any] = await self._async_fetch_with_retry(
+                    "get_properties", self.api.get_properties, self.dsn
+                )
                 self._last_all_props = all_props
 
                 # Parse everything from the single fetch
@@ -336,11 +567,15 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # - timed out (30+ min unchanged) AND machine assumed off, OR
             # - no cloud status (model has no app_device_status — monitor always cached)
             # Note: stale monitor alone is normal when machine is idle (cloud=RUN)
+            # Neither rule applies when the monitor came from the LAN socket:
+            # the machine pushed it itself, so it is fresh evidence regardless
+            # of what the cloud cache or app_device_status says (issue #50).
             alarms = status.get("alarms", [])
             alarm_word = status.get("alarm_word")
             cloud_status = status.get("status", "UNKNOWN")
+            monitor_from_lan = status.get("monitor_source") == "lan"
             no_cloud = cloud_status == "UNKNOWN"
-            if (monitor_timed_out or no_cloud) and alarms:
+            if not monitor_from_lan and (monitor_timed_out or no_cloud) and alarms:
                 _LOGGER.debug(
                     "Suppressing %d alarms (timed_out=%s, no_cloud=%s)",
                     len(alarms),
@@ -359,8 +594,17 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # switch entity into logging fake "monitor confirmed Off state"
             # right after a turn_off, even though the command never reached the
             # machine (cloud accepted, MQTT never relayed).
+            # Skipped when the monitor is LAN-sourced: a live LAN session
+            # proves the machine is awake and its last pushed frame says
+            # Ready/Brewing outright, so "unchanged for 45 min" means "idle",
+            # not "off".
             machine_state = status.get("machine_state", "Unknown")
-            if monitor_timed_out and cloud_status == "RUN" and machine_state not in ("Unknown", "Off"):
+            if (
+                monitor_timed_out
+                and not monitor_from_lan
+                and cloud_status == "RUN"
+                and machine_state not in ("Unknown", "Off")
+            ):
                 _LOGGER.debug(
                     "Monitor unchanged for %.0f min (cloud=RUN), assuming machine is Off",
                     stale_duration / 60,
@@ -389,6 +633,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "alarms": alarms,
                 "alarm_word": alarm_word,
                 "monitor_stale": monitor_timed_out,
+                # "lan" when the state above came from the machine's own
+                # socket push rather than the cloud cache (issue #50) —
+                # surfaced for diagnostics and for the sensor entities.
+                "monitor_source": status.get("monitor_source", "cloud"),
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,
                 "beverages": self.beverages,
@@ -525,6 +773,33 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._lan_properties:
             merged = dict(self.data) if isinstance(self.data, dict) else {}
             merged["lan_properties"] = dict(self._lan_properties)
+            # A monitor pushed on the socket is the freshest state there is —
+            # apply it immediately instead of waiting for the next 60s cloud
+            # poll, which on DL-millcore would keep showing the frozen value
+            # (issue #50: power-on via HA left the machine "Off" until the
+            # Coffee Link app was opened).
+            pushed_monitor = any(name in LAN_MONITOR_PROPERTIES for name, _ in cached)
+            if pushed_monitor:
+                before = merged.get("machine_state")
+                overlay = self._lan_monitor_status()
+                if overlay:
+                    merged = self._apply_lan_monitor_to_data(merged, overlay)
+                    # A socket push is the freshest LAN evidence — it becomes
+                    # the sticky overlay, so a later poll whose session went
+                    # stale keeps this state instead of flickering back to
+                    # the frozen cloud value (issue #50).
+                    self._lan_sticky = overlay
+                    self._lan_sticky_at = monotonic()
+                    self._lan_sticky_cloud_raw = self._last_cloud_monitor_raw
+                    if overlay.get("monitor_raw"):
+                        # Keep the staleness bookkeeping aligned with the
+                        # LAN frame, otherwise the next cloud poll would
+                        # compare against a cloud raw it never saw.
+                        self._last_monitor_raw = overlay["monitor_raw"]
+                        self._monitor_last_changed = monotonic()
+                        self._monitor_stale_count = 0
+                    if merged.get("machine_state") != before:
+                        _LAN_LOGGER.info("LAN monitor: machine state %s → %s", before, merged.get("machine_state"))
             self.async_set_updated_data(merged)
         else:
             self.async_set_updated_data(self.data if self.data else {})
