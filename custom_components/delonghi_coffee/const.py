@@ -96,6 +96,39 @@ POWER_WAKE_DELAY: Final = 15.0  # Seconds between keepalive ping and power-on co
 POWER_RETRY_DELAY: Final = 180.0  # Seconds before re-sending power-on if machine didn't wake
 POWER_STALE_THRESHOLD: Final = 3  # Consecutive polls before trusting assumed state over monitor
 
+# Issue #47 — fast power-on confirmation ("did the machine actually hear us?").
+#
+# The old flow lied: turn_on set the switch ON immediately and only re-sent
+# POWER_ON after 180 s, so an ignored command left HA claiming "on" for three
+# minutes (reporter: switch flipped on at 13:20:34, machine stone cold).
+# The confirmation ladder replaces that blind wait: after each POWER_ON we
+# watch ``coordinator.data`` for evidence the machine answered — a monitor
+# frame carrying an embedded timestamp at/after the wake ping (see
+# ``DeLonghiApi.monitor_timestamp``) while the state is not off-ish.
+#
+# One watch window per send, in seconds — so POWER_ON leaves at t=0/20/45/75
+# and the ladder ends at t=105 s. The budget is sized on the reporter's own
+# *successful* latency (13:20:34 → 13:21:44 = 70 s): the previous 3-sends-in-
+# 60-s ladder expired before the machine's real answer time and raised a false
+# alarm on a machine that was coming up. The last send must stay at ≥70 s, and
+# the failure notification is raised only after the last window burns out.
+POWER_CONFIRM_WINDOWS: Final[tuple[float, ...]] = (20.0, 25.0, 30.0, 30.0)
+POWER_CONFIRM_POLL: Final = 1.0  # Seconds between two reads of coordinator.data
+POWER_ON_RETRIES: Final = len(POWER_CONFIRM_WINDOWS) - 1  # Re-sends after the first one
+# Tolerance for the machine clock vs the HA clock: the embedded timestamp is
+# produced by the coffee machine, not by Ayla, and we assume it is UTC. The
+# trailer is real (CRC-verified on both real captures) but UTC vs local time
+# is not settled: if a firmware stamps local time (EU offsets are ahead of
+# UTC) the timestamp gate passes trivially and the state gate carries the
+# discrimination alone. 120 s absorbs the guess until the debug logs attached
+# to #47 settle it (compare embedded ts vs Ayla created_at).
+POWER_CONFIRM_CLOCK_SKEW: Final = 120  # Seconds of tolerated clock skew
+# Fast polling while the ladder runs: the whole ladder (sum of the windows,
+# 105 s) plus margin, at a granularity fine enough that a cloud push is seen
+# at once.
+POWER_CONFIRM_FAST_POLL_DURATION: Final = 150.0  # Seconds of fast polling during the ladder
+POWER_CONFIRM_FAST_POLL_INTERVAL: Final = 5.0  # Poll interval during the ladder
+
 # LAN session freshness — a handshake is only trustworthy while the device
 # keeps polling /local_lan/commands.json and pushing datapoints. The
 # observed push cadence on ECAM610.75 is "every 12s-minutes" (lan.py

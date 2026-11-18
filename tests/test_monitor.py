@@ -1,5 +1,7 @@
 """Test MonitorDataV2 parsing."""
 
+import base64
+
 import pytest
 
 from custom_components.delonghi_coffee.api import DeLonghiApi
@@ -161,3 +163,75 @@ class TestMonitorPayloadDecoding:
         assert DeLonghiApi.parse_monitor_value("zzzz") is None
         assert DeLonghiApi.parse_monitor_value(None) is None
         assert DeLonghiApi.parse_monitor_value(self.B64_FRAME)["machine_state"] == "Ready"
+
+
+class TestMonitorTimestamp:
+    """Issue #47 — the unix clock sitting in the MonitorDataV2 trailer.
+
+    The power-on confirmation can only tell a fresh frame from a frozen cloud
+    cache if the frame carries its own clock: ``[payload…][CRC-16 2][unix ts BE 4]``.
+
+    Both *real* frames this suite carries prove the layout, and the CRC is the
+    proof that it is a layout and not a coincidence — on each one,
+    ``_crc16(raw[:-6])`` reproduces the two bytes at ``[-6:-4]`` exactly, and
+    the four bytes after them are the day the frame was captured:
+
+    * millcore ``d302_monitor`` (issues #3/#10 dump) → 2026-04-02;
+    * live Eletta Explore frame → 2026-10-15.
+
+    The second one is the answer to the open question of issue #47: the striker
+    family really does stamp its monitor, so the confirmation can rely on the
+    clock and not only on raw-change comparison.
+    """
+
+    MILLREAL_FRAME = "d012750f00000000000700000000000000d6a369ceb82b"
+    STRIKER_FRAME = "d012750f010100000007000001000000003ae46ad0aae1"
+    MILLREAL_TS = 1775155243  # 2026-04-02T18:40:43Z
+    STRIKER_TS = 1792060129  # 2026-10-15T10:28:49Z
+
+    def test_millcore_dump_is_stamped_with_its_capture_date(self):
+        raw = bytes.fromhex(self.MILLREAL_FRAME)
+        assert DeLonghiApi._crc16(raw[:-6]) == raw[-6:-4]
+        assert DeLonghiApi.monitor_timestamp(raw) == self.MILLREAL_TS
+
+    def test_striker_frame_is_stamped_too(self):
+        """The Eletta Explore (the #47 machine) embeds the same trailer."""
+        raw = bytes.fromhex(self.STRIKER_FRAME)
+        assert DeLonghiApi._crc16(raw[:-6]) == raw[-6:-4]
+        assert DeLonghiApi.monitor_timestamp(raw) == self.STRIKER_TS
+
+    def test_short_or_absent_frame_has_no_timestamp(self):
+        assert DeLonghiApi.monitor_timestamp(None) is None
+        assert DeLonghiApi.monitor_timestamp(b"") is None
+        # 14 bytes: parseable monitor, no room for CRC + clock.
+        assert DeLonghiApi.monitor_timestamp(bytes.fromhex("d00ca4f001020000000700000000")) is None
+        # The synthetic Eletta fixture of properties_eletta.json (15 bytes,
+        # zero tail) proves nothing about the real machine — it is not a capture.
+        assert DeLonghiApi.monitor_timestamp(base64.b64decode("0AwkpPABAgAAAQcAAAAA")) is None
+
+    def test_filler_tails_are_not_dates(self):
+        payload = bytes.fromhex("d012750f010100000007000001000000")  # 17 B, no trailer
+        assert DeLonghiApi.monitor_timestamp(payload + b"\x00\x00\x00\x00\x00\x00") is None
+        assert DeLonghiApi.monitor_timestamp(payload + b"\x00\x00\xff\xff\xff\xff") is None
+
+    def test_counter_below_the_wallclock_floor_is_rejected(self):
+        """An uptime counter (or any pre-2020 value) is not a date."""
+        payload = bytes.fromhex("d012750f010100000007000001000000")
+        assert DeLonghiApi.monitor_timestamp(payload + b"\x00\x00" + (12345).to_bytes(4, "big")) is None
+
+    def test_app_signature_tail_shifts_the_clock(self):
+        """Command-echo frames append the app id *after* the clock → read [-8:-4]."""
+        payload = bytes.fromhex("d012750f0101000000070000010000")
+        frame = payload + b"\x00\x00" + self.STRIKER_TS.to_bytes(4, "big") + bytes([0x20, 0x40, 0x35, 0xEF])
+        assert DeLonghiApi.monitor_timestamp(frame) == self.STRIKER_TS
+
+    def test_parse_monitor_v2_exposes_monitor_ts(self):
+        assert DeLonghiApi._parse_monitor_v2(bytes.fromhex(self.STRIKER_FRAME))["monitor_ts"] == self.STRIKER_TS
+        # The key always exists, even when there is nothing to parse.
+        assert DeLonghiApi._parse_monitor_v2(bytes.fromhex("d00ca4f001"))["monitor_ts"] is None
+        assert DeLonghiApi._parse_monitor_v2(bytes.fromhex("d00ca4f001020000000700000000"))["monitor_ts"] is None
+
+    def test_parse_monitor_hex_carries_monitor_ts(self):
+        """The LAN path (``parse_monitor_value``) gets the clock for free."""
+        assert DeLonghiApi.parse_monitor_hex(self.STRIKER_FRAME)["monitor_ts"] == self.STRIKER_TS
+        assert DeLonghiApi.parse_monitor_value(self.STRIKER_FRAME)["monitor_ts"] == self.STRIKER_TS

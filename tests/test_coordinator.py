@@ -394,6 +394,30 @@ class TestAsyncUpdateDataLight:
         api.ping_connected.assert_not_called()
         api.request_monitor.assert_not_called()
 
+    def test_data_exposes_monitor_raw_and_ts(self):
+        """Issue #47: the power-on confirmation reads the frame and its embedded
+        clock straight off ``coordinator.data`` — both must be plumbed through."""
+        coord, api = self._setup_light_poll()
+        api.get_status.return_value = {
+            "machine_state": "Off",
+            "profile": 0,
+            "monitor_raw": "d012750f010100000007000001000000003ae46ad0aae1",
+            "monitor_ts": 1792060129,
+            "status": "RUN",
+            "alarms": [],
+            "alarm_word": None,
+        }
+        result = _run(coord._async_update_data())
+        assert result["monitor_raw"] == "d012750f010100000007000001000000003ae46ad0aae1"
+        assert result["monitor_ts"] == 1792060129
+
+    def test_data_monitor_keys_are_none_without_a_monitor(self):
+        """The keys always exist so the switch never has to guess."""
+        coord, _ = self._setup_light_poll()
+        result = _run(coord._async_update_data())
+        assert result["monitor_raw"] is None
+        assert result["monitor_ts"] is None
+
     def test_selected_profile_not_overwritten_by_zero(self):
         coord, api = self._setup_light_poll()
         coord.selected_profile = 3  # already set
@@ -1333,6 +1357,39 @@ class TestLanMonitorOverlay:
         result = _run(coord._async_update_data())
         assert result["machine_state"] == "Ready"
         assert result["monitor_source"] == "lan"
+
+    def test_push_carries_monitor_ts_and_raw(self):
+        """Issue #47: the switch reads the frame and its embedded clock off the
+        pushed data dict — a LAN frame is the freshest witness of both."""
+        coord, api = _lan_monitor_coord(LAN_CLEANING)
+        api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+        coord.data = {"machine_state": "Off", "monitor_source": "cloud", "monitor_ts": None, "monitor_raw": "cloud"}
+        coord.async_set_updated_data = MagicMock()
+
+        _run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": LAN_CLEANING}}))
+
+        pushed = coord.async_set_updated_data.call_args.args[0]
+        assert pushed["monitor_source"] == "lan"
+        assert pushed["monitor_raw"] == "d012750f010100000007000001000000003ae46ad0aae1"
+        assert pushed["monitor_ts"] == 1792060129  # 2026-10-15, capture date of that frame
+
+    def test_push_without_embedded_clock_clears_monitor_ts(self):
+        """An unstamped LAN frame must not leave a stale cloud clock behind."""
+        coord, api = _lan_monitor_coord(LAN_READY)
+        api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+        coord.data = {
+            "machine_state": "Off",
+            "monitor_source": "cloud",
+            "monitor_ts": 1792060129,
+            "monitor_raw": "cloud",
+        }
+        coord.async_set_updated_data = MagicMock()
+
+        _run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": LAN_READY}}))
+
+        pushed = coord.async_set_updated_data.call_args.args[0]
+        assert pushed["monitor_ts"] is None
+        assert pushed["monitor_raw"] == "d00ca4f001020000000700000000"
 
     def test_push_applies_state_immediately(self):
         """The socket push must update entities without waiting for the poll."""

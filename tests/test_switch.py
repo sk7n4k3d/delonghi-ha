@@ -10,7 +10,16 @@ import pytest
 
 from custom_components.delonghi_coffee import switch as switch_mod  # noqa: E402
 from custom_components.delonghi_coffee.api import DeLonghiApiError  # noqa: E402
+from custom_components.delonghi_coffee.const import (  # noqa: E402
+    POWER_CONFIRM_POLL,
+    POWER_CONFIRM_WINDOWS,
+    POWER_ON_RETRIES,
+)
 from custom_components.delonghi_coffee.switch import DeLonghiPowerSwitch  # noqa: E402
+
+# Total 1 s reads the confirmation ladder performs before its safety-net sleep
+# (one window per send, mirrors the implementation).
+LADDER_TICKS = sum(int(w / POWER_CONFIRM_POLL) for w in POWER_CONFIRM_WINDOWS)
 
 
 def _make_switch() -> DeLonghiPowerSwitch:
@@ -279,8 +288,12 @@ class TestAsyncTurnOnFlow:
 
         asyncio.run(_go())
         sw._api.send_command.assert_called_once()
-        assert sw._assumed_on is True
+        # Issue #47: turn_on no longer claims success. ``_assumed_on`` stays
+        # False until the confirmation ladder sees the machine answer, and the
+        # ladder is what the background task in ``_retry_task`` now is.
+        assert sw._assumed_on is False
         assert sw._last_commanded_on is True
+        assert sw._retry_task is not None
 
     def test_concurrent_call_skipped_when_locked(self):
         sw = _make_switch()
@@ -529,10 +542,24 @@ async def _noop_sleep(*_args, **_kwargs):
     return None
 
 
-class TestRetryPowerOn:
-    """Cover _retry_power_on background task — both confirmed and retry paths."""
+class TestConfirmPowerOn:
+    """Cover the ``_confirm_power_on`` ladder — re-send, abort and safety-net paths.
 
-    def test_retry_skipped_when_machine_confirms_on(self):
+    Renamed from ``TestRetryPowerOn`` for issue #47: the blind "sleep 180 s and
+    re-send once" became a confirmation ladder, so the old "1 re-send after
+    180 s" expectation is now "one re-send per ``POWER_CONFIRM_WINDOWS`` entry
+    (sends at t=0/20/45/75 s), then the legacy 180 s safety net". The
+    2026-05-01 regression these tests
+    guard (re-illuminating a machine the user had just switched off) is
+    unchanged and still covered by ``test_aborts_after_user_turned_off``.
+
+    What is left here is the lifecycle that predates #47 (user aborts, monitor
+    already agreeing, transport errors, request_monitor fallback). The
+    confirmation semantics themselves — which evidence counts, what a failure
+    means per model family — live in ``tests/test_power_confirm.py``.
+    """
+
+    def test_confirmation_skipped_when_machine_confirms_on(self):
         sw = _make_switch()
         hass = _make_hass()
         sw.hass = hass
@@ -542,31 +569,35 @@ class TestRetryPowerOn:
 
         async def _go():
             with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
-                await sw._retry_power_on()
+                await sw._confirm_power_on()
 
         asyncio.run(_go())
-        # No retry sent because monitor confirmed ON
+        # Nothing to confirm: the staleness machine already cleared
+        # _last_commanded_on when the monitor agreed with the command.
         sw._api.send_command.assert_not_called()
 
-    def test_retry_sent_when_machine_still_off(self):
+    def test_resends_once_per_window_then_safety_net_when_machine_still_off(self):
         sw = _make_switch()
         hass = _make_hass()
         sw.hass = hass
         sw._api.ping_connected = MagicMock(return_value=True)
         sw._api.send_command = MagicMock()
         sw._last_commanded_on = True
-        sw.coordinator.data = {"machine_state": "Off"}
+        sw._power_ping_wall = 1_700_000_000.0
+        sw._power_baseline_raw = "d00ca4f001020000000700000000"
+        sw.coordinator.data = {"machine_state": "Off", "monitor_raw": "d00ca4f001020000000700000000"}
 
         async def _go():
             with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
-                await sw._retry_power_on()
+                await sw._confirm_power_on()
 
         asyncio.run(_go())
-        sw._api.send_command.assert_called_once()
-        # ping called twice (pre + post)
-        assert sw._api.ping_connected.call_count == 2
+        # POWER_ON_RETRIES ladder re-sends + 1 safety-net send.
+        assert sw._api.send_command.call_count == POWER_ON_RETRIES + 1
+        # 1 ping per ladder re-send + pre/post pair in the safety net.
+        assert sw._api.ping_connected.call_count == POWER_ON_RETRIES + 2
 
-    def test_retry_falls_back_to_request_monitor(self):
+    def test_falls_back_to_request_monitor(self):
         sw = _make_switch()
         hass = _make_hass()
         sw.hass = hass
@@ -578,12 +609,12 @@ class TestRetryPowerOn:
 
         async def _go():
             with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
-                await sw._retry_power_on()
+                await sw._confirm_power_on()
 
         asyncio.run(_go())
         assert sw._api.request_monitor.call_count >= 1
 
-    def test_retry_swallows_api_error(self):
+    def test_swallows_api_error(self):
         sw = _make_switch()
         hass = _make_hass()
         sw.hass = hass
@@ -595,13 +626,13 @@ class TestRetryPowerOn:
         async def _go():
             with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
                 # Must NOT raise — error is logged + swallowed
-                await sw._retry_power_on()
+                await sw._confirm_power_on()
 
         asyncio.run(_go())
 
-    def test_retry_aborts_after_user_turned_off(self):
+    def test_aborts_after_user_turned_off(self):
         """Regression: if the user issued a turn_off after the original turn_on,
-        the retry must NOT renvoie POWER_ON_CMD even if state == Off — that's
+        the ladder must NOT renvoie POWER_ON_CMD even if state == Off — that's
         what the user explicitly asked for. Before the fix, the retry re-allumait
         the machine 3 min after a turn_off, ignoring user intent."""
         sw = _make_switch()
@@ -616,7 +647,7 @@ class TestRetryPowerOn:
 
         async def _go():
             with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
-                await sw._retry_power_on()
+                await sw._confirm_power_on()
 
         asyncio.run(_go())
         # No POWER_ON_CMD must have been sent
@@ -624,23 +655,37 @@ class TestRetryPowerOn:
         # ping not called either
         sw._api.ping_connected.assert_not_called()
 
-    def test_retry_proceeds_when_last_commanded_still_on(self):
-        """Symmetry check: when last_commanded_on==True (real case), retry
-        proceeds normally if monitor still says Off."""
+    def test_safety_net_skipped_when_monitor_settled_on(self):
+        """The 180 s net re-reads the monitor: a machine that woke up in the
+        meantime must not get a fourth POWER_ON."""
         sw = _make_switch()
         hass = _make_hass()
         sw.hass = hass
         sw._api.ping_connected = MagicMock(return_value=True)
         sw._api.send_command = MagicMock()
         sw._last_commanded_on = True
-        sw.coordinator.data = {"machine_state": "Off"}
+        sw._power_baseline_raw = "d00ca4f001020000000700000000"
+        sw.coordinator.data = {"machine_state": "Off", "monitor_raw": "d00ca4f001020000000700000000"}
+
+        ticks = {"n": 0}
+
+        async def _wake_after_ladder(*_args, **_kwargs):
+            ticks["n"] += 1
+            # Last ladder tick was LADDER_TICKS; this one is the net's sleep.
+            if ticks["n"] == LADDER_TICKS + 1:
+                sw.coordinator.data = {
+                    "machine_state": "Ready",
+                    "monitor_raw": "d00ca4f001020000000700000001",
+                }
 
         async def _go():
-            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_noop_sleep):
-                await sw._retry_power_on()
+            with patch("custom_components.delonghi_coffee.switch.asyncio.sleep", new=_wake_after_ladder):
+                await sw._confirm_power_on()
 
         asyncio.run(_go())
-        sw._api.send_command.assert_called_once()
+        # One ladder re-send per window, no safety-net send: the monitor woke
+        # up first.
+        assert sw._api.send_command.call_count == POWER_ON_RETRIES
 
 
 class TestPowerOnExceptionPaths:
@@ -681,8 +726,10 @@ class TestPowerOnExceptionPaths:
                     await sw._retry_task
 
         asyncio.run(_go())
-        # Still completes successfully — _assumed_on flips
-        assert sw._assumed_on is True
+        # Still completes successfully — the command went out, but issue #47
+        # means the switch is not flipped until the monitor confirms.
+        assert sw._api.send_command.call_count == 1
+        assert sw._assumed_on is False
 
     def test_existing_retry_task_cancelled_before_new_one(self):
         """Phase 4: a pending retry from a previous power-on is cancelled."""

@@ -344,6 +344,47 @@ class TestGetStatus:
         assert status["status"] == "UNKNOWN"
         assert status["machine_state"] == "Unknown"
 
+    def test_status_always_exposes_monitor_ts_key(self):
+        """Issue #47: the key exists even with no monitor at all (value None)."""
+        api = self._make_api()
+        api._session.get.return_value = _mock_response(
+            200,
+            [{"property": {"name": "app_device_status", "value": "RUN"}}],
+        )
+        assert api.get_status("DSN")["monitor_ts"] is None
+
+    def test_status_carries_monitor_ts(self):
+        """A stamped frame surfaces its clock through get_status."""
+        api = self._make_api()
+        frame = bytes.fromhex("d012750f010100000007000001000000003ae46ad0aae1")
+        api._session.get.return_value = _mock_response(
+            200,
+            [
+                {"property": {"name": "app_device_status", "value": "RUN"}},
+                {"property": {"name": "d302_monitor_machine", "value": base64.b64encode(frame).decode()}},
+            ],
+        )
+        status = api.get_status("DSN")
+        assert status["machine_state"] == "Ready"
+        assert status["monitor_ts"] == 1792060129
+
+
+class TestCloudMonitorReliable:
+    """Issue #47 — which models may be told "you were ignored"."""
+
+    @pytest.mark.parametrize(
+        ("cmd_property", "expected"),
+        [
+            ("app_data_request", True),  # striker / Eletta: machine pushes its monitor
+            ("data_request", False),  # PD Soul / millcore: cloud monitor frozen (#50)
+            (None, False),  # model not identified yet: never accuse
+        ],
+    )
+    def test_cmd_property_drives_the_verdict(self, cmd_property, expected):
+        api = DeLonghiApi("test@example.com", "password", region="EU")
+        api._cmd_property = cmd_property
+        assert api.cloud_monitor_reliable is expected
+
 
 class TestGetLanConfig:
     """Test LAN configuration fetching."""

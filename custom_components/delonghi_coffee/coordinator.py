@@ -58,6 +58,10 @@ _LAN_MONITOR_STATUS_KEYS: tuple[str, ...] = (
     "alarm_word",
     "profile",
     "monitor_raw",
+    # Issue #47: a frame the machine pushed itself carries its own clock, and
+    # it must win over whatever the cloud cache says — the LAN is the fresher
+    # witness of the two.
+    "monitor_ts",
 )
 
 
@@ -317,9 +321,14 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             merged["monitor_action"] = overlay["action"]
         if "progress" in overlay:
             merged["monitor_progress"] = overlay["progress"]
-        for key in ("alarms", "alarm_word", "profile"):
+        for key in ("alarms", "alarm_word", "profile", "monitor_raw"):
             if key in overlay:
                 merged[key] = overlay[key]
+        # Issue #47: the switch's power-on confirmation reads the embedded
+        # monitor clock straight off ``data``; a LAN frame is the freshest
+        # source for it, so the overlay overwrites the cloud value.
+        if "monitor_ts" in overlay:
+            merged["monitor_ts"] = overlay["monitor_ts"]
         merged["monitor_source"] = "lan"
         # A datapoint that just arrived over the socket is by definition fresh.
         merged["monitor_stale"] = False
@@ -637,6 +646,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # socket push rather than the cloud cache (issue #50) —
                 # surfaced for diagnostics and for the sensor entities.
                 "monitor_source": status.get("monitor_source", "cloud"),
+                # Issue #47 — the power-on confirmation needs to tell a fresh
+                # monitor from a frozen one, and the only witnesses it has are
+                # the frame itself and the clock embedded in its trailer.
+                # Both were cloud-only internals of ``get_status`` until now.
+                "monitor_raw": status.get("monitor_raw"),
+                "monitor_ts": status.get("monitor_ts"),
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,
                 "beverages": self.beverages,
@@ -803,6 +818,23 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_set_updated_data(merged)
         else:
             self.async_set_updated_data(self.data if self.data else {})
+
+    def lan_session_alive(self) -> bool:
+        """True when a LAN server is running and its session is fresh.
+
+        Issue #47 (review finding 4): the power switch asks this before
+        arming its confirmation ladder — a frozen cloud monitor is bearable
+        while a live LAN session still pushes fresh frames, but with neither
+        witness the ladder could never confirm and must not run at all.
+        """
+        server = self._lan_server
+        if server is None:
+            return False
+        try:
+            return bool(server.is_session_alive(LAN_SESSION_STALE_SECONDS))
+        except Exception:  # noqa: BLE001 — a probe must never raise into the switch
+            _LOGGER.debug("lan_session_alive probe failed", exc_info=True)
+            return False
 
     async def send_command_lan(self, ecam_bytes: bytes) -> bool:
         """Enqueue an ECAM command for delivery on the next device LAN poll.

@@ -325,6 +325,21 @@ class DeLonghiApi:
         return self._model_info
 
     @property
+    def cloud_monitor_reliable(self) -> bool:
+        """True when the machine keeps its cloud monitor pushed alive.
+
+        Issue #47: the power-on confirmation ladder only dares to leave the
+        switch OFF when a silent machine really means "ignored". On the
+        striker family (Eletta Explore, ``app_data_request``) the cloud
+        monitor is pushed by the machine itself — a healthy monitor is proven
+        by the reporter's own logs. On DL-pd-*/DL-millcore (PrimaDonna Soul,
+        ``data_request``) the cloud monitor is frozen until the Coffee Link
+        app opens a session (issue #50), so "no fresh monitor" proves
+        nothing there and the legacy assumed-on behaviour must stay.
+        """
+        return self._cmd_property == "app_data_request"
+
+    @property
     def device_name(self) -> str | None:
         """Return device product name from last get_devices call."""
         return self._device_name
@@ -1030,6 +1045,9 @@ class DeLonghiApi:
             "machine_state": "Unknown",
             "alarms": [],
             "profile": 0,
+            # Always present (issue #47): None when no monitor frame was read,
+            # so downstream ``.get("monitor_ts")`` never has to guess.
+            "monitor_ts": None,
         }
 
         try:
@@ -1088,11 +1106,18 @@ class DeLonghiApi:
         [11]   Progress (0-100 while dispensing)
         [12]   Alarm byte 2 (bits 16-23)
         [13]   Alarm byte 3 (bits 24-31)
-        [14+]  Additional data + timestamp
+        [14+]  Additional data + timestamp — the trailer is
+               ``[CRC-16 2 bytes][unix timestamp BE 4 bytes]``. Verified on the
+               two real captures in the test suite (millcore dump of issues
+               #3/#10 *and* a live Eletta Explore frame): ``_crc16(raw[:-6])``
+               reproduces the two CRC bytes exactly, and the last 4 bytes
+               decode to the date each frame was captured (assumed UTC — the
+               CRC proves the structure, not the timezone; see
+               :meth:`monitor_timestamp`). Exposed as ``monitor_ts``.
         """
         from .const import ALARMS, MACHINE_STATES
 
-        result: dict[str, Any] = {"alarms": [], "machine_state": "Unknown", "profile": 0}
+        result: dict[str, Any] = {"alarms": [], "machine_state": "Unknown", "profile": 0, "monitor_ts": None}
 
         if len(raw) < 14:
             return result
@@ -1126,12 +1151,63 @@ class DeLonghiApi:
 
         result["alarms"] = active_alarms
         result["alarm_word"] = alarm_word
+        result["monitor_ts"] = DeLonghiApi.monitor_timestamp(raw)
         return result
 
     # MonitorDataV2 frames always start with 0xD0 (see _parse_monitor_v2).
     # Used to disambiguate base64 vs hex when both decode.
     _MONITOR_HEADER: int = 0xD0
     _MONITOR_MIN_LEN: int = 14
+
+    # Plausible unix-clock window for the monitor trailer. Lower bound is
+    # 2020-09 (well after any shipped firmware), upper bound matches
+    # ``lan.NON_WALLCLOCK_TIME1_THRESHOLD``: above it the 4 bytes are an
+    # uptime counter, not a date.
+    _MONITOR_TS_MIN: int = 1_600_000_000
+    _MONITOR_TS_MAX: int = 5_000_000_000
+
+    @staticmethod
+    def monitor_timestamp(raw: bytes | None) -> int | None:
+        """Extract the unix timestamp (last 4 bytes, big-endian) of a MonitorDataV2 frame.
+
+        Structure — ``[payload…][CRC-16 2 bytes][timestamp BE 4 bytes]`` — is
+        verified on *both* real captures the test suite carries, so it holds on
+        the two model families that matter for issue #47:
+
+        * millcore ``d302_monitor`` dump of issues #3/#10
+          (``properties_primadonna_soul_real.json``): trailer ``69ceb82b`` is
+          2026-04-02, the day the dump was taken;
+        * the live Eletta Explore (striker) frame of ``tests/test_monitor.py``:
+          trailer ``6ad0aae1`` is 2026-10-15, again the capture date.
+
+        In both, ``_crc16(raw[:-6])`` reproduces the two bytes at ``[-6:-4]``
+        byte for byte — the trailer really is CRC + clock and not a coincidence.
+
+        What is *not* proven is the timezone: the value is treated as UTC (the
+        confirmation tolerates ``POWER_CONFIRM_CLOCK_SKEW`` seconds of skew).
+        If a firmware were ever found stamping local time, the tolerance plus
+        the state gate of the confirmation absorb it — the clock witness alone
+        is never the whole story.
+
+        Returns ``None`` when the trailer is absent or illogical: frame too
+        short to carry one, an all-zero tail (synthetic fixtures), an all-ones
+        filler, or a counter outside the plausible wall-clock range. A ``None``
+        here is *not* an error — it only means this frame carries no clock
+        witness, so the power-on confirmation (issue #47) will not treat it as
+        an answer to POWER_ON.
+        """
+        if raw is None or len(raw) < 18:  # 14 payload + 2 CRC + 4 timestamp
+            return None
+        ts = int.from_bytes(raw[-4:], "big")
+        if ts == int.from_bytes(APP_SIGNATURE, "big"):  # 0x204035EF: app_id tail
+            # Command-echo style frames append the app signature *after* the
+            # timestamp, so the clock sits one slot earlier.
+            ts = int.from_bytes(raw[-8:-4], "big")
+        if ts == 0xFFFFFFFF:  # all-ones filler, never a date
+            return None
+        if DeLonghiApi._MONITOR_TS_MIN <= ts <= DeLonghiApi._MONITOR_TS_MAX:
+            return ts
+        return None
 
     @staticmethod
     def decode_monitor_payload(value: Any) -> bytes | None:
