@@ -468,7 +468,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.selected_profile is None and monitor_profile > 0:
                 self.selected_profile = monitor_profile
             elif self.selected_profile is not None:
-                machine_profile = self._cached_profiles.get("active")
+                # Fresh per-poll value first (60 s), full-refresh cache as
+                # fallback for firmwares that do not expose d286.
+                machine_profile = status.get("active_profile") or self._cached_profiles.get("active")
                 if (
                     isinstance(machine_profile, int)
                     and machine_profile > 0
@@ -688,7 +690,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,
                 "beverages": self.beverages,
-                "active_profile": self._cached_profiles.get("active", 1),
+                "active_profile": status.get("active_profile") or self._cached_profiles.get("active", 1),
                 "profiles": self._cached_profiles.get("profiles", {}),
                 "beans": self._cached_beans,
                 "bean_system_par": self._cached_bean_system_par,

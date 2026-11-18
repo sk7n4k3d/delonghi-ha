@@ -321,6 +321,33 @@ class TestGetStatus:
         assert status["machine_state"] == "Ready"
         assert status["profile"] == 1
 
+    def test_status_active_profile_from_d286(self):
+        """d286_mach_sett_profile rides the light poll (60 s) so machine-side
+        profile changes surface without waiting for the 10-min full refresh."""
+        api = self._make_api()
+        monitor_b64 = base64.b64encode(bytes.fromhex("d00ca4f001020000000700000000")).decode()
+        d286_b64 = base64.b64encode(bytes.fromhex("d00b95f004ee00000000")).decode()
+        api._session.get.return_value = _mock_response(
+            200,
+            [
+                {"property": {"name": "app_device_status", "value": "RUN"}},
+                {"property": {"name": "d302_monitor_machine", "value": monitor_b64}},
+                {"property": {"name": "d286_mach_sett_profile", "value": d286_b64}},
+            ],
+        )
+        status = api.get_status("DSN")
+        assert status["active_profile"] == 4  # raw[4] of the d286 payload
+
+    def test_status_active_profile_absent_key(self):
+        """Firmwares without d286: no active_profile key, no crash."""
+        api = self._make_api()
+        api._session.get.return_value = _mock_response(
+            200,
+            [{"property": {"name": "app_device_status", "value": "RUN"}}],
+        )
+        status = api.get_status("DSN")
+        assert "active_profile" not in status
+
     def test_status_no_monitor(self):
         """Status without monitor data returns defaults."""
         api = self._make_api()

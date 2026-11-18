@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.3] — 2026-11-18
+
+### Changed
+- **Suivi du profil en 60 s au lieu de 10 min** : la propriété cloud
+  `d286_mach_sett_profile` (profil actif) est désormais lue à chaque poll
+  léger, pas seulement au refresh complet. Un profil changé sur la machine
+  est reflété par le select et le sensor dès le cycle suivant.
+
+### Fixed
+- **0xA9 : verdict terrain** — sur Eletta Explore (ECAM450.65.S), le paquet
+  corrigé est accepté par le cloud mais ignoré par la machine : la
+  sélection directe de profil est en réalité BLE-only. Documenté dans le
+  code ; le profil continue de voyager dans chaque brew (fonctionne).
+
+
 ## [1.9.2] — 2026-11-18
 
 ### Fixed

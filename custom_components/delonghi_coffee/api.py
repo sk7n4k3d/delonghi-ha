@@ -1051,9 +1051,26 @@ class DeLonghiApi:
         }
 
         try:
-            props = self.get_properties(dsn, names=["app_device_status", "d302_monitor_machine", "d302_monitor"])
+            props = self.get_properties(
+                dsn,
+                names=["app_device_status", "d302_monitor_machine", "d302_monitor", "d286_mach_sett_profile"],
+            )
 
             result["status"] = props.get("app_device_status", {}).get("value", "UNKNOWN")
+
+            # Active profile from the cloud settings property, read on the
+            # LIGHT cycle (every poll) instead of waiting for the 10-min full
+            # refresh. This is what makes machine-side (touchscreen) profile
+            # changes visible within ~60 s; the monitor byte cannot play
+            # this role — it reports the last-brewed profile.
+            d286 = props.get("d286_mach_sett_profile", {}).get("value")
+            if d286:
+                try:
+                    raw = base64.b64decode(d286)
+                    if len(raw) > 4:
+                        result["active_profile"] = raw[4]
+                except (ValueError, IndexError):
+                    pass
 
             has_d302 = "d302_monitor_machine" in props
             has_d302_legacy = "d302_monitor" in props
@@ -1752,10 +1769,13 @@ class DeLonghiApi:
         (``0D 05 A9 <profile> CRC``) put the profile number in the flags
         byte — not valid ECAM framing.
 
-        Caveat: opcode 0xA9 is documented from BLE captures only (longshot);
-        WiFi support is unverified in the field. If a machine ignores the
-        corrected packet, the profile still travels in the profile_save byte
-        of every brew command, so profile selection keeps working via brews.
+        Field result (2026-11-18, owner's Eletta Explore ECAM450.65.S):
+        the corrected packet is accepted by the cloud (201) but the machine
+        ignores it — d286_mach_sett_profile never moved. The opcode is
+        documented from BLE captures only (longshot); treat direct profile
+        selection as BLE-only. The profile still travels in the
+        profile_save byte of every brew command, which is how profile
+        selection works on WiFi machines.
         """
         if not 1 <= profile <= 5:
             raise DeLonghiApiError(f"Profile must be 1-5, got {profile}")
