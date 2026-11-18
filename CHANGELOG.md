@@ -86,6 +86,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
   opcode (documenté sur captures BLE), le profil continue de voyager dans
   l'octet profile_save de chaque brew.
 
+## [0.4.4] — 2026-11-18
+
+### Fixed
+- **Télémétrie cloud : les shadows partiels sont conservés** (#18, retest
+  mimasek71) : un shadow nommé qui ne répond ni en accepted ni en rejected
+  (ex. `MachineCapabilities` absent sur certaines machines) ne fait plus
+  échouer le fetch entier — les shadows bien reçus sont désormais exploités.
+- **`cloud_error` n'est plus jamais vide** : les timeouts et les exceptions
+  sans message produisent un texte descriptif (type d'erreur, rc CONNACK)
+  au lieu de la chaîne vide observée dans les exports de diagnostic.
+- **Le budget de connexion borne tout le handshake** (DNS + TLS + upgrade
+  MQTT5), plus seulement la lecture du CONNACK.
+- **Appels SSL bloquants supprimés de l'event loop** : le contexte de
+  confiance était construit à chaque connexion (scan du magasin de certs
+  signalé par HA) ; il est désormais bâti une fois hors de la boucle et caché.
+
+### Added
+- **Section `cloud` complète dans les diagnostics** : erreur sanitizée
+  (JWT, mots de passe et numéros de série ne fuiteront jamais), catégorie
+  de tri (auth, mqtt_connect, shadow_rejected, no_shadow, parse,
+  device_lookup, timeout), codes structurés (rc CONNACK, statut HTTP),
+  horodatage exact de la tentative échouée, topics abonnés (nom de thing
+  masqué) et état de connexion cloud. Un retest à distance est désormais
+  diagnostiquable sans accès à la machine.
+
 ## [0.4.3] — 2026-11-18
 
 ### Added
