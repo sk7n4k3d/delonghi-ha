@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.2] — 2026-11-18
+
 ### Fixed
 - **Le select suit enfin la machine (F-COORD-01)** : un profil changé sur
   l'écran tactile est désormais reflété par l'entité select — le suivi se
