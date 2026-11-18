@@ -16,6 +16,11 @@ def _run(coro):
 def _make_coordinator(profiles=None, selected_profile=None, api_ok=True):
     coord = MagicMock()
     coord.selected_profile = selected_profile
+
+    def _mark(pid):
+        coord.selected_profile = pid
+
+    coord.mark_profile_selection = MagicMock(side_effect=_mark)
     coord.data = {"profiles": profiles or {}}
     coord.api.set_active_profile = MagicMock(return_value=api_ok)
     coord.async_refresh_after_command = AsyncMock()

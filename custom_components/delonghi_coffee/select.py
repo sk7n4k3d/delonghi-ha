@@ -117,7 +117,7 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
         if not ok:
             _LOGGER.warning("Profile selection failed: machine did not accept profile %d", pid)
             return
-        self.coordinator.selected_profile = pid
+        self.coordinator.mark_profile_selection(pid)
         _LOGGER.info("Profile switched to %d (%s)", pid, option)
         # Reactive refresh: pick up the machine's new active profile
         # immediately instead of waiting for the next 60s poll.

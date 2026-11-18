@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 ## [Unreleased]
 
 ### Fixed
+- **Le select suit enfin la machine (F-COORD-01)** : un profil changé sur
+  l'écran tactile est désormais reflété par l'entité select — le suivi se
+  base sur la propriété cloud `active_profile` (autoritaire), jamais sur
+  l'octet du monitor qui traîne et écrasait les choix HA (le bug
+  d'origine). Une fenêtre de grâce de 90 s après une sélection depuis HA
+  absorbe l'écho retardé de la propre commande.
 - **Select de profil borné à 4** : le dropdown et le parsing de secours
   s'arrêtaient à « Profile 4 » alors que certaines machines (retour #50)
   déclarent 5 profils et que la commande accepte 1–5. Les deux chemins

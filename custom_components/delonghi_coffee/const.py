@@ -129,6 +129,12 @@ POWER_CONFIRM_CLOCK_SKEW: Final = 120  # Seconds of tolerated clock skew
 POWER_CONFIRM_FAST_POLL_DURATION: Final = 150.0  # Seconds of fast polling during the ladder
 POWER_CONFIRM_FAST_POLL_INTERVAL: Final = 5.0  # Poll interval during the ladder
 
+# Grace window after an HA-side profile selection during which the cloud
+# active_profile echo is ignored (the machine's own property update lags
+# the command). Outside it, a differing cloud value is a touchscreen
+# change and the select follows (F-COORD-01 follow-up).
+PROFILE_TRACK_GRACE_SECONDS: Final = 90.0
+
 # LAN session freshness — a handshake is only trustworthy while the device
 # keeps polling /local_lan/commands.json and pushing datapoints. The
 # observed push cadence on ECAM610.75 is "every 12s-minutes" (lan.py

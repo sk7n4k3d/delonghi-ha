@@ -1477,3 +1477,50 @@ class TestBrewDelivery:
         coord, api = self._brew_coord(True)
         assert _run(coord.async_send_brew_command(b"\x01")) is True
         api.send_command.assert_not_called()
+
+
+class TestProfileTracking:
+    """F-COORD-01 follow-up: the select follows machine-side profile changes.
+
+    The cloud ``active_profile`` property (authoritative, refreshed on the
+    full cycle) is followed outside a grace window opened by an HA-side
+    selection; the monitor byte is never used for this (it lags and reports
+    the last-brewed profile — the original stomping bug).
+    """
+
+    def _settle(self, coord):
+        """Skip full-refresh and keepalive side effects for a light cycle."""
+        coord._last_full_refresh = monotonic()
+        coord._last_keepalive = monotonic()
+
+    def test_mark_profile_selection_stamps(self):
+        coord, _, _ = _make_coord()
+        coord.mark_profile_selection(4)
+        assert coord.selected_profile == 4
+        assert coord._selected_profile_set_at is not None
+
+    def test_follows_machine_profile_outside_grace(self):
+        coord, _, _ = _make_coord()
+        coord.selected_profile = 2
+        coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
+        coord._cached_profiles = {"active": 3, "profiles": {}}
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 3
+
+    def test_grace_window_absorbs_own_command_echo(self):
+        coord, _, _ = _make_coord()
+        coord.mark_profile_selection(3)
+        coord._cached_profiles = {"active": 2, "profiles": {}}  # stale echo of our own command
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 3
+
+    def test_missing_cloud_active_never_stomps(self):
+        coord, _, _ = _make_coord()
+        coord.selected_profile = 2
+        coord._selected_profile_set_at = None
+        coord._cached_profiles = {"profiles": {}}  # no "active" key at all
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 2

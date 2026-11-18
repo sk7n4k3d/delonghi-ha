@@ -25,6 +25,7 @@ from .const import (
     LAN_SESSION_STALE_SECONDS,
     MONITOR_STALE_TIMEOUT,
     MQTT_KEEPALIVE_INTERVAL,
+    PROFILE_TRACK_GRACE_SECONDS,
     SCAN_INTERVAL_SECONDS,
 )
 from .contentstack import fetch_bean_adapt, fetch_coffee_beans, fetch_drink_catalog
@@ -115,6 +116,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # collapse the wait to 0 without patching asyncio.sleep.
         self._transient_retry_delay: float = TRANSIENT_RETRY_DELAY_SECONDS
         self.selected_profile: int | None = None  # Set from machine on first refresh
+        # monotonic stamp of the last HA-side selection — the grace window
+        # that lets us follow machine-side profile changes without stomping
+        # a just-issued command whose cloud echo lags (F-COORD-01 follow-up).
+        self._selected_profile_set_at: float | None = None
         self.seen_alarm_bits: set[int] = set()  # Track which inverted bits the machine supports
         self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
         self.drink_catalog: dict[int, dict] = {}  # ContentStack drink_id → {name, clusters, ingredients}
@@ -380,6 +385,15 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         return await self.async_send_brew_command(brew_cmd)
 
+    def mark_profile_selection(self, pid: int) -> None:
+        """Record an HA-side profile selection (called by select.py).
+
+        Opens the grace window during which the cloud echo of this very
+        command must not be mistaken for a machine-side change.
+        """
+        self.selected_profile = pid
+        self._selected_profile_set_at = monotonic()
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
         try:
@@ -440,17 +454,36 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_cloud_monitor_raw = status.get("monitor_raw")
             status = self._apply_lan_monitor(status)
 
-            # Seed selected_profile from the monitor ONCE (first refresh only).
-            # After that, selected_profile is the authoritative user override
-            # (set by the profile select entity) and must NOT be stomped on
-            # every poll — the monitor byte lags and reports the last-brewed
-            # profile, which would silently revert the user's choice (F-COORD-01).
-            # select.py already falls back to data["active_profile"]/["profile"]
-            # when selected_profile is None, so live machine-side tracking is
-            # preserved without overwriting an explicit selection.
+            # selected_profile tracking (F-COORD-01 follow-up).
+            #
+            # Seed from the monitor once so the dropdown starts on the
+            # machine's truth. Then FOLLOW the machine — but only the cloud
+            # ``active_profile`` property (authoritative), never the monitor
+            # byte, which lags and reports the last-brewed profile and used
+            # to silently revert HA selections (the original F-COORD-01 bug).
+            # A grace window after an HA-side selection absorbs the echo lag
+            # of our own command; outside it, a differing cloud value means
+            # the user moved on the touchscreen and the select must follow.
             monitor_profile = status.get("profile", 0)
             if self.selected_profile is None and monitor_profile > 0:
                 self.selected_profile = monitor_profile
+            elif self.selected_profile is not None:
+                machine_profile = self._cached_profiles.get("active")
+                if (
+                    isinstance(machine_profile, int)
+                    and machine_profile > 0
+                    and machine_profile != self.selected_profile
+                    and (
+                        self._selected_profile_set_at is None
+                        or (now - self._selected_profile_set_at) > PROFILE_TRACK_GRACE_SECONDS
+                    )
+                ):
+                    _LOGGER.info(
+                        "Profile %d seen from machine (cloud), was %d in HA — following",
+                        machine_profile,
+                        self.selected_profile,
+                    )
+                    self.selected_profile = machine_profile
 
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.
             # Without this, the MQTT session dies after ~5 min and commands

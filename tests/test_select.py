@@ -17,6 +17,11 @@ def _make_coord(profiles: dict | None = None, selected: int | None = None) -> Ma
     coord.selected_profile = selected
     coord.api.set_active_profile = MagicMock(return_value=True)
     coord.async_refresh_after_command = AsyncMock()
+
+    def _mark(pid):
+        coord.selected_profile = pid
+
+    coord.mark_profile_selection = MagicMock(side_effect=_mark)
     return coord
 
 
