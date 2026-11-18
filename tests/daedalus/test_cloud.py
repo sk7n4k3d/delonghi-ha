@@ -543,6 +543,7 @@ def _mqtt_server(
     drop_socket: bool = False,
     answer_shadows: set[str] | None = None,
     require_subprotocol: bool = False,
+    deny_subscriptions: bool = False,
 ) -> tuple[web.Application, dict]:
     """Minimal MQTT-over-WS broker stub: CONNACK, SUBACK, then one accepted
     PUBLISH per shadow get, encoded in the level the client connected with.
@@ -593,10 +594,31 @@ def _mqtt_server(
                     await ws.send_bytes(bytes([0x20, 0x02, 0x00, 5 if refused else 0]))
                 elif pkt.type == 8:  # SUBSCRIBE → SUBACK
                     pid = pkt.payload[:2]
-                    await ws.send_bytes(bytes([0x90, 0x03]) + pid + bytes([0x00]))
+                    # count the topic filters in the SUBSCRIBE payload:
+                    # pid, [MQTT5 properties], then 2-byte-len + topic + qos
+                    pos = 2
+                    if level >= 5:
+                        pos += 1 + pkt.payload[pos]  # skip properties length byte(s)
+                    n = 0
+                    while pos < len(pkt.payload):
+                        tlen = int.from_bytes(pkt.payload[pos : pos + 2], "big")
+                        pos += 2 + tlen + 1
+                        n += 1
+                    n = max(1, n)
+                    if level >= 5:
+                        codes = bytes([0x87] * n) if deny_subscriptions else bytes([0x00] * n)
+                        body = pid + bytes([0x00]) + codes  # empty properties
+                    else:
+                        codes = bytes([0x80] * n) if deny_subscriptions else bytes([0x00] * n)
+                        body = pid + codes
+                    await ws.send_bytes(bytes([0x90, len(body)]) + body)
                 elif pkt.type == 3:  # PUBLISH get → answer accepted
                     topic, _ = pkt.publish_parts()
                     seen["publishes"].append(topic)
+                    if deny_subscriptions:
+                        # policy-refused topics: the get goes nowhere, the
+                        # shadow service never answers — like the real ATS.
+                        continue
                     if topic.endswith("/get"):
                         # $aws/things/<thing>/shadow/name/<shadow>/get — answer
                         # on the very topic the client published, so the stub
@@ -718,6 +740,30 @@ def test_shadow_client_offers_mqtt_subprotocol_on_legacy_fallbacks() -> None:
     assert seen["subprotocols"] == [list(_WS_SUBPROTOCOLS), ["mqtt"]]
     assert [c["level"] for c in seen["connects"]] == [5, 4]
     assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
+
+
+def test_shadow_client_reports_refused_subscriptions() -> None:
+    """A connected session whose $aws/... subscribes are all refused (wrong
+    thing name or authorizer policy) must say so — not wait 20 s and blame
+    the shadows (issue #18, 0.4.5 retest: connected, silent, undiagnosable)."""
+    app, seen = _mqtt_server(deny_subscriptions=True)
+
+    async def _run() -> None:
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(
+                session, thing_name="Eletta-Ultra_01", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port
+            )
+            with pytest.raises(CloudTelemetryError) as refused:
+                await client.fetch(timeout=5)
+        finally:
+            await session.close()
+            await runner.cleanup()
+        assert "refused all" in str(refused.value)
+        assert "0x87" in str(refused.value)
+
+    asyncio.run(_run())
 
 
 def test_shadow_client_silent_broker_reports_descriptive_timeout() -> None:

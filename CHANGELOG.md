@@ -86,6 +86,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
   opcode (documenté sur captures BLE), le profil continue de voyager dans
   l'octet profile_save de chaque brew.
 
+## [0.4.6] — 2026-11-18
+
+### Added
+- **Le refus d'abonnement cloud devient lisible** (#18, retest mimasek71
+  0.4.5) : la session MQTT vérifie désormais les codes de réponse du SUBACK.
+  Si le broker refuse tous les abonnements aux topics shadow (politique de
+  l'auteurizeur accrochée au vrai nom de machine — nom de thing dérivé
+  incorrect, par exemple), l'erreur le dit explicitement
+  « broker refused all N shadow topic subscriptions (reason 0x87) — thing
+  name or authorizer policy mismatch) » au lieu de patienter 20 s puis
+  accuser les shadows. Un refus partiel est journalisé en warning.
+- Les logs debug nomment le thing utilisé (masqué) et les topics réellement
+  abonnés — un retest avec `custom_components.delonghi_daedalus: debug`
+  devient auto-suffisant pour diagnostiquer à distance.
+
 ## [0.4.5] — 2026-11-18
 
 ### Fixed

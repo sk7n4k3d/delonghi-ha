@@ -372,6 +372,22 @@ _APP_STYLE_CLIENT_ID_PREFIX = "dlg-appliance-kit-android-"
 _LEGACY_CLIENT_ID_PREFIX = "ha-delonghi-"
 
 
+def _suback_reasons(packet: MqttPacket, protocol_version: int) -> list[int]:
+    """Per-topic reason codes of a SUBACK (MQTT 5) or return codes (3.1.1).
+
+    Anything >= 0x80 is a refusal; the value names why (0x87 not authorised,
+    0x83 quota, 0x80 unspecified). Empty list when the packet is too short to
+    trust — never guess a refusal from a malformed frame.
+    """
+    payload = packet.payload
+    if len(payload) < 3:
+        return []
+    pos = 2
+    if protocol_version >= 5:
+        pos = _skip_properties(payload, pos)
+    return list(payload[pos:])
+
+
 class ShadowClient:
     """One-shot MQTT/WSS session reading the named shadows for one thing.
 
@@ -416,8 +432,9 @@ class ShadowClient:
                 topics.append(shadow_rejected_topic(self._thing, shadow))
             await ws.send_bytes(mqtt_subscribe_packet(1, topics, protocol_version=protocol_version))
             _LOGGER.debug(
-                "Daedalus cloud: subscribed %d shadow topics (MQTT %d), requesting get for %s",
+                "Daedalus cloud: subscribed %d shadow topics on thing %s (MQTT %d), requesting get for %s",
                 len(topics),
+                mask_serial(self._thing),
                 protocol_version,
                 ", ".join(SHADOWS),
             )
@@ -425,6 +442,7 @@ class ShadowClient:
                 await ws.send_bytes(
                     mqtt_publish_packet(shadow_get_topic(self._thing, shadow), "{}", protocol_version=protocol_version)
                 )
+            suback_codes: list[int] = []
             deadline = time.monotonic() + timeout
             while len(results) + len(errors) < len(SHADOWS):
                 packet = reader.next_packet()
@@ -452,6 +470,9 @@ class ShadowClient:
                     ):
                         raise CloudTelemetryError("MQTT WS closed by broker")
                     continue
+                if packet.type == _SUBACK:
+                    suback_codes += _suback_reasons(packet, protocol_version)
+                    continue
                 if packet.type != _PUBLISH:
                     continue
                 self._route_publish(packet, results, errors)
@@ -466,6 +487,22 @@ class ShadowClient:
                 return results
             if errors:
                 raise CloudTelemetryError("; ".join(errors.values()))
+            if suback_codes and all(code >= 0x80 for code in suback_codes):
+                # The authorizer policy is scoped to the machine's real thing
+                # name: a wrong derived name means every $aws/... subscribe is
+                # refused and the gets go nowhere (issue #18, 0.4.5 retest —
+                # the session connected fine but nothing ever answered).
+                raise CloudTelemetryError(
+                    f"broker refused all {len(suback_codes)} shadow topic subscriptions "
+                    f"(reason 0x{suback_codes[0]:02x}) — thing name or authorizer policy mismatch"
+                )
+            if suback_codes and any(code >= 0x80 for code in suback_codes):
+                _LOGGER.warning(
+                    "Daedalus cloud: %d of %d shadow topic subscriptions refused (first reason 0x%02x)",
+                    sum(1 for code in suback_codes if code >= 0x80),
+                    len(suback_codes),
+                    next(code for code in suback_codes if code >= 0x80),
+                )
             raise CloudTelemetryError(
                 f"no shadow document received within {timeout:.0f}s "
                 f"({len(topics)} topics subscribed, no get/accepted or get/rejected answer)"
