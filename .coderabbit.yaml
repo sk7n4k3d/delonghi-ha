@@ -6,6 +6,12 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    # Dependabot bumps were skipped (bots skip bots by default) — review them
+    # too: a bad dependency pin is exactly where a second pair of eyes helps.
+    bot_title_patterns:
+      - "chore(deps):"
+      - "build(deps):"
+      - "Update .* requirements"
   path_filters:
     - "!**/__pycache__/**"
     - "!**/brand/**"
@@ -27,8 +33,10 @@ reviews:
         alarm suppression edge cases.
     - path: "custom_components/delonghi_coffee/switch.py"
       instructions: |
-        Power switch with assumed_state logic. Known issue: cloud cache can be
-        stale for 30+ seconds after a command. The switch must not flash back
-        to the previous state.
+        Power switch. Since 1.9.1 the assumed_state shortcut is gone: a
+        confirmation ladder re-sends POWER_ON at 20/45/75 s and only trusts
+        monitor frames whose embedded timestamp postdates the command. Watch
+        for: re-sends without fresh off-evidence, state gates treating
+        Error/Unknown (N) as "on", sends outside _cmd_lock.
 chat:
   auto_reply: true
