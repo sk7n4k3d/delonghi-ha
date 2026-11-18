@@ -693,6 +693,33 @@ def test_shadow_client_offers_mqtt_subprotocol_like_aws_ats() -> None:
     assert [c["level"] for c in seen["connects"]] == [5]
 
 
+def test_shadow_client_offers_mqtt_subprotocol_on_legacy_fallbacks() -> None:
+    """The 3.1.1 fallbacks must offer the mqtt subprotocol too: the ATS gate
+    is protocol-agnostic, so a bare fallback would take the same 426 as the
+    app-style attempt (review of the 0.4.5 fix). Reject MQTT 5 at CONNACK
+    level to force the client onto the legacy spellings."""
+    app, seen = _mqtt_server(require_subprotocol=True, reject_levels={5})
+
+    async def _run() -> dict:
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(
+                session, thing_name="Eletta-Ultra_01", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port
+            )
+            return await client.fetch(timeout=5)
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    docs = asyncio.run(_run())
+    # attempt 1 (v5) refused at CONNACK, attempt 2 (v4) accepted — and both
+    # upgrades carried an MQTT subprotocol, the fallback via the ("mqtt",) default.
+    assert seen["subprotocols"] == [list(_WS_SUBPROTOCOLS), ["mqtt"]]
+    assert [c["level"] for c in seen["connects"]] == [5, 4]
+    assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
+
+
 def test_shadow_client_silent_broker_reports_descriptive_timeout() -> None:
     """When nothing answers at all the error text must say so — never the
     empty "MQTT session failed: " that made the #18 retest undiagnosable."""

@@ -234,9 +234,8 @@ def _cloud_diagnostics(
     if error is not None:
         # Exact wall clock of the failed cloud hop when the coordinator
         # recorded it; the refresh time is the fallback for older states.
-        error["last_attempt"] = (
-            _to_iso(getattr(coordinator, "_cloud_error_at", None))
-            or (_to_iso(getattr(coordinator, "last_checked_time", None)) if coordinator is not None else None)
+        error["last_attempt"] = _to_iso(getattr(coordinator, "_cloud_error_at", None)) or (
+            _to_iso(getattr(coordinator, "last_checked_time", None)) if coordinator is not None else None
         )
     return {
         "cloud_telemetry_enabled": enabled,
