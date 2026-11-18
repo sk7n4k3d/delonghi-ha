@@ -34,3 +34,25 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           retention-days: 7
+
+  # The pytest suite mocks homeassistant entirely (tests/conftest.py), so it
+  # never exercises the real HA runtime. This job closes that blind spot: it
+  # installs a real homeassistant (>= the hacs.json minimum 2024.1.0) and
+  # imports both integration packages. Smoke test only — keep it fast.
+  ha-import-smoke:
+    name: real HA import smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install Home Assistant
+        run: pip install "homeassistant==2025.1.0" -q
+      - name: Import integrations against real Home Assistant
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python -c "import custom_components.delonghi_coffee;
+          import custom_components.delonghi_daedalus;
+          print('real-HA import smoke test OK')"

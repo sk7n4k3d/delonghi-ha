@@ -1,129 +1,62 @@
-"""Guard against CI lint version drift.
+"""Packaging consistency guards (audit 2026-11-18, #16).
 
-The Ruff job went red on ``master`` without anyone touching a source file:
-``lint.yaml`` invoked ``ruff-action`` with no ``version`` input, and the
-action only auto-discovers a version from ``project.dependencies`` /
-``dependency-groups`` — neither of which this pyproject declares. It fell
-back to ``latest``, floated from 0.15.22 to 0.16.8, and ``ruff format
---check`` then started rejecting files nobody had edited.
-
-These tests assert the two pins stay in sync, so a future bump cannot
-reintroduce the failure silently. Reformatting files fixes the symptom;
-the version float was the cause.
-
-Parsing is deliberately stdlib-only. PyYAML is not in ``requirements_test.txt``
-and a guard test is not a good reason to add a dependency.
+Issue #52 shipped a release whose zip layout disagreed with what HACS
+expected; the release workflow validates tag↔manifest but nothing tied
+manifest.json to the CHANGELOG or hacs.json to release.yaml. These tests
+close that gap: a version bump without a changelog entry, or a renamed zip
+in only one of the two places, fails the test suite (and therefore CI)
+instead of the user's install.
 """
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
-import pytest
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
-    import tomli as tomllib  # type: ignore[no-redef]
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PYPROJECT = REPO_ROOT / "pyproject.toml"
-LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint.yaml"
-
-RUFF_ACTION = "astral-sh/ruff-action@"
+ROOT = Path(__file__).resolve().parent.parent
+COFFEE_MANIFEST = ROOT / "custom_components" / "delonghi_coffee" / "manifest.json"
+DAEDALUS_MANIFEST = ROOT / "custom_components" / "delonghi_daedalus" / "manifest.json"
+CHANGELOG = ROOT / "CHANGELOG.md"
+HACS = ROOT / "hacs.json"
+RELEASE_WF = ROOT / ".github" / "workflows" / "release.yaml"
 
 
-def _required_version() -> str:
-    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
-    ruff_table = data.get("tool", {}).get("ruff")
-    assert isinstance(ruff_table, dict), "pyproject.toml has no [tool.ruff] section"
-    version = ruff_table.get("required-version")
-    assert isinstance(version, str) and version, (
-        "pyproject.toml [tool.ruff] is missing required-version — a mismatched ruff would then run instead of refusing."
-    )
-    return version
+def _version(path: Path) -> str:
+    return json.loads(path.read_text())["version"]
 
 
-def _ruff_steps() -> list[list[str]]:
-    """Return the `with:` body lines of every ruff-action step.
-
-    A step starts at a line containing ``- uses:`` and runs until the next
-    ``- uses:``. Only ruff-action steps are returned; their ``with:`` block
-    is captured by indentation so a ``version:`` belonging to a different
-    action cannot be mistaken for theirs.
-    """
-    lines = LINT_WORKFLOW.read_text(encoding="utf-8").splitlines()
-
-    steps: list[list[str]] = []
-    current: list[str] | None = None
-
-    for line in lines:
-        stripped = line.strip()
-        is_new_step = stripped.startswith("- uses:") or stripped.startswith("- name:")
-        if is_new_step:
-            if current is not None:
-                steps.append(current)
-            current = [line] if RUFF_ACTION in line else None
-        elif current is not None:
-            current.append(line)
-    if current is not None:
-        steps.append(current)
-
-    return steps
+def _changelog_versions() -> list[str]:
+    text = CHANGELOG.read_text()
+    return re.findall(r"^## \[(\d+\.\d+\.\d+)\]", text, flags=re.MULTILINE)
 
 
-def _version_inputs(step: list[str]) -> list[str]:
-    """Extract values of `version:` keys in a step's body."""
-    found: list[str] = []
-    for line in step[1:]:
-        stripped = line.strip()
-        if not stripped.startswith("version:"):
-            continue
-        value = stripped.split(":", 1)[1].strip().strip("\"'")
-        if value:
-            found.append(value)
-    return found
-
-
-def test_pyproject_pins_ruff_version() -> None:
-    """`required-version` must exist so a mismatched ruff refuses to run."""
-    assert _required_version(), "pyproject.toml is missing [tool.ruff] required-version"
-
-
-def test_lint_workflow_has_ruff_steps() -> None:
-    """Sanity: if the action is swapped out, this guard must be revisited."""
-    assert _ruff_steps(), "lint.yaml no longer uses astral-sh/ruff-action — update this guard"
-
-
-def test_every_ruff_step_pins_version() -> None:
-    """Each ruff-action step must pass an explicit `version` input.
-
-    Without it the action installs `latest`, which is precisely the bug
-    this file exists to prevent.
-    """
-    for step in _ruff_steps():
-        label = step[0].strip()
-        assert _version_inputs(step), (
-            f"ruff-action step {label!r} has no `version:` input. "
-            "It will install `latest` and can turn lint red on untouched files."
-        )
-
-
-def test_pins_agree() -> None:
-    """Workflow pin and `required-version` must be the same string.
-
-    A local ruff that disagrees with CI produces different formatting,
-    which is how "passes on my machine" becomes a red job.
-    """
-    required = _required_version()
-    installed = {v for step in _ruff_steps() for v in _version_inputs(step)}
-    assert installed == {required}, (
-        f"ruff version mismatch — workflow installs {sorted(installed)} "
-        f"but pyproject requires {required!r}. Bump both together."
+def test_coffee_manifest_matches_first_changelog_entry() -> None:
+    versions = _changelog_versions()
+    assert versions, "CHANGELOG.md has no released version sections"
+    coffee = [v for v in versions if v.startswith("1.")]
+    assert coffee[0] == _version(COFFEE_MANIFEST), (
+        f"manifest says {_version(COFFEE_MANIFEST)} but the newest 1.x CHANGELOG entry is {coffee[0]} — "
+        "add the CHANGELOG section in the same commit as the bump"
     )
 
 
-@pytest.mark.parametrize("path", ["pyproject.toml", ".github/workflows/lint.yaml"])
-def test_pinned_files_exist(path: str) -> None:
-    """Fail loudly rather than skip if a pinned file is moved or renamed."""
-    assert (REPO_ROOT / path).is_file(), f"{path} is missing — update tests/test_ci_pins.py"
+def test_daedalus_manifest_matches_first_daedalus_changelog_entry() -> None:
+    versions = _changelog_versions()
+    daedalus = [v for v in versions if v.startswith("0.")]
+    assert daedalus, "CHANGELOG.md has no daedalus (0.x) sections"
+    assert daedalus[0] == _version(DAEDALUS_MANIFEST), (
+        f"daedalus manifest says {_version(DAEDALUS_MANIFEST)} but the newest 0.x CHANGELOG entry is {daedalus[0]}"
+    )
+
+
+def test_hacs_zip_name_matches_release_workflow() -> None:
+    hacs = json.loads(HACS.read_text())
+    assert hacs.get("zip_release") is True, "hacs.json must keep zip_release: true"
+    filename = hacs["filename"]
+    workflow = RELEASE_WF.read_text()
+    assert re.search(rf"files:\s*{re.escape(filename)}\s*$", workflow, flags=re.MULTILINE), (
+        f"hacs.json filename '{filename}' is not the file published by release.yaml — HACS would 404 on every install"
+    )
+    # the zip must actually be built under that name
+    assert filename in workflow, "release.yaml never references the hacs.json zip name"

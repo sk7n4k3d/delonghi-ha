@@ -16,13 +16,21 @@
         "data": {
           "password": "パスワード"
         }
+      },
+      "select_device": {
+        "title": "コーヒーマシンを選択",
+        "description": "アカウントに複数のコーヒーマシンがあります。追加するマシンを選択してください。",
+        "data": {
+          "dsn": "コーヒーマシン"
+        }
       }
     },
     "error": {
       "invalid_auth": "メールアドレスまたはパスワードが無効です",
       "cannot_connect": "De'Longhi サーバーに接続できません",
       "no_devices": "このアカウントにコーヒーマシンが見つかりません",
-      "unknown": "予期しないエラー"
+      "unknown": "予期しないエラー",
+      "no_coffee_machine": "このアカウントには De'Longhi の家電製品がありますが、コーヒーマシンがありません（例：Pinguino エアコンのみ）。このインテグレーションはコーヒーマシンのみサポートしています。"
     },
     "abort": {
       "already_configured": "このアカウントは既に設定されています",

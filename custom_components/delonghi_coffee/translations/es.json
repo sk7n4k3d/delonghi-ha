@@ -16,13 +16,21 @@
         "data": {
           "password": "Contraseña"
         }
+      },
+      "select_device": {
+        "title": "Selecciona tu cafetera",
+        "description": "Tu cuenta tiene más de una cafetera. Elige la que quieres añadir.",
+        "data": {
+          "dsn": "Cafetera"
+        }
       }
     },
     "error": {
       "invalid_auth": "Email o contraseña incorrectos",
       "cannot_connect": "No se puede conectar a los servidores de De'Longhi",
       "no_devices": "No se encontraron cafeteras en esta cuenta",
-      "unknown": "Error inesperado"
+      "unknown": "Error inesperado",
+      "no_coffee_machine": "Esta cuenta tiene electrodomésticos De'Longhi pero ninguna cafetera (p. ej., solo un aire acondicionado Pinguino). La integración solo admite cafeteras."
     },
     "abort": {
       "already_configured": "Esta cuenta ya está configurada",

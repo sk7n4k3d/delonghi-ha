@@ -16,13 +16,21 @@
         "data": {
           "password": "Wachtwoord"
         }
+      },
+      "select_device": {
+        "title": "Selecteer je koffiezetapparaat",
+        "description": "Je account heeft meer dan één koffiezetapparaat. Kies het apparaat dat je wilt toevoegen.",
+        "data": {
+          "dsn": "Koffiezetapparaat"
+        }
       }
     },
     "error": {
       "invalid_auth": "Ongeldig email of wachtwoord",
       "cannot_connect": "Kan geen verbinding maken met De'Longhi-servers",
       "no_devices": "Geen koffiemachines gevonden op dit account",
-      "unknown": "Onverwachte fout"
+      "unknown": "Onverwachte fout",
+      "no_coffee_machine": "Dit account heeft De'Longhi-apparaten maar geen koffiezetapparaat (bijv. alleen een Pinguino-airco). De integratie ondersteunt alleen koffiezetapparaten."
     },
     "abort": {
       "already_configured": "Dit account is al geconfigureerd",

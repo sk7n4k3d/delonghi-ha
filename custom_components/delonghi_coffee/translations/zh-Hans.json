@@ -16,13 +16,21 @@
         "data": {
           "password": "密码"
         }
+      },
+      "select_device": {
+        "title": "选择您的咖啡机",
+        "description": "您的账户有多台咖啡机。请选择要添加的咖啡机。",
+        "data": {
+          "dsn": "咖啡机"
+        }
       }
     },
     "error": {
       "invalid_auth": "邮箱或密码无效",
       "cannot_connect": "无法连接到 De'Longhi 服务器",
       "no_devices": "此账户未找到咖啡机",
-      "unknown": "意外错误"
+      "unknown": "意外错误",
+      "no_coffee_machine": "此账户有 De'Longhi 家电，但没有咖啡机（例如只有 Pinguino 空调）。此集成仅支持咖啡机。"
     },
     "abort": {
       "already_configured": "此账户已配置",

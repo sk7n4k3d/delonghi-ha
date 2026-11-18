@@ -162,6 +162,48 @@
       },
       "computed_total": {
         "name": "Total All Beverages"
+      },
+      "cortado": {
+        "name": "Cortados"
+      },
+      "long_black": {
+        "name": "Long Blacks"
+      },
+      "travel_mug": {
+        "name": "Travel Mugs"
+      },
+      "preground_brews": {
+        "name": "Pre-ground Brews"
+      },
+      "beverages_modified": {
+        "name": "Modified Beverages"
+      },
+      "beverages_aborted": {
+        "name": "Aborted Brews"
+      },
+      "beverages_doubled": {
+        "name": "Double Shots"
+      },
+      "bean_system_1_uses": {
+        "name": "Bean Profile 1 Uses"
+      },
+      "bean_system_2_uses": {
+        "name": "Bean Profile 2 Uses"
+      },
+      "bean_system_3_uses": {
+        "name": "Bean Profile 3 Uses"
+      },
+      "bean_system_4_uses": {
+        "name": "Bean Profile 4 Uses"
+      },
+      "bean_system_5_uses": {
+        "name": "Bean Profile 5 Uses"
+      },
+      "bean_system_6_uses": {
+        "name": "Bean Profile 6 Uses"
+      },
+      "blocking_alarms": {
+        "name": "Blocking Alarms"
       }
     },
     "binary_sensor": {
@@ -379,6 +421,141 @@
       },
       "brew_h_cb_capp_mug": {
         "name": "Cold Brew Cappuccino Mug"
+      },
+      "brew_doppio": {
+        "name": "Doppio+"
+      },
+      "brew_latte_macchiato": {
+        "name": "Latte Macchiato"
+      },
+      "brew_espr_macchiato": {
+        "name": "Espresso Macchiato"
+      },
+      "brew_capp_doppio": {
+        "name": "Cappuccino Doppio+"
+      },
+      "brew_long_black": {
+        "name": "Long Black"
+      },
+      "brew_mug_to_go": {
+        "name": "Mug To Go"
+      },
+      "brew_cafe_au_lait": {
+        "name": "Café Au Lait"
+      },
+      "brew_cafe_con_leche": {
+        "name": "Café Con Leche"
+      },
+      "brew_espresso_lungo": {
+        "name": "Espresso Lungo"
+      },
+      "brew_galao": {
+        "name": "Galão"
+      },
+      "brew_mug_americano": {
+        "name": "Mug Americano"
+      },
+      "brew_mug_caffelatte": {
+        "name": "Mug Caffè Latte"
+      },
+      "brew_mug_capp_mix": {
+        "name": "Mug Cappuccino Mix"
+      },
+      "brew_mug_cappuccino": {
+        "name": "Mug Cappuccino"
+      },
+      "brew_mug_coffee": {
+        "name": "Mug Coffee"
+      },
+      "brew_mug_flat_white": {
+        "name": "Mug Flat White"
+      },
+      "brew_mug_hot_milk": {
+        "name": "Mug Hot Milk"
+      },
+      "brew_mug_i_americano": {
+        "name": "Mug Iced Americano"
+      },
+      "brew_mug_i_brew_over_ice": {
+        "name": "Mug Brew Over Ice"
+      },
+      "brew_mug_i_caffelatte": {
+        "name": "Mug Iced Caffè Latte"
+      },
+      "brew_mug_i_capp_mix": {
+        "name": "Mug Iced Cappuccino Mix"
+      },
+      "brew_mug_i_cappuccino": {
+        "name": "Mug Iced Cappuccino"
+      },
+      "brew_mug_i_cold_milk": {
+        "name": "Mug Cold Milk"
+      },
+      "brew_mug_i_flat_white": {
+        "name": "Mug Iced Flat White"
+      },
+      "brew_mug_i_latte_macch": {
+        "name": "Mug Iced Latte Macchiato"
+      },
+      "brew_mug_latte_macch": {
+        "name": "Mug Latte Macchiato"
+      },
+      "brew_verlangerter": {
+        "name": "Verlängerter"
+      },
+      "cancel_brew": {
+        "name": "Cancel Brew"
+      },
+      "sync_recipes": {
+        "name": "Sync Recipes"
+      },
+      "run_lan_diagnostic": {
+        "name": "Run LAN Diagnostic"
+      },
+      "brew_drip_style": {
+        "name": "Drip Style"
+      },
+      "brew_caffe_crema": {
+        "name": "Caffè Crema"
+      },
+      "brew_red_eye": {
+        "name": "Red Eye"
+      },
+      "brew_black_eye": {
+        "name": "Black Eye"
+      },
+      "brew_espresso_intenso": {
+        "name": "Espresso Intenso"
+      },
+      "brew_ristretto_napoletano": {
+        "name": "Ristretto Napoletano"
+      },
+      "brew_babyccino": {
+        "name": "Babyccino"
+      },
+      "brew_milchkaffee": {
+        "name": "Milchkaffee"
+      },
+      "brew_koffie_verkeerd": {
+        "name": "Koffie Verkeerd"
+      },
+      "brew_custom_1": {
+        "name": "Custom Drink 1"
+      },
+      "brew_custom_2": {
+        "name": "Custom Drink 2"
+      },
+      "brew_custom_3": {
+        "name": "Custom Drink 3"
+      },
+      "brew_custom_4": {
+        "name": "Custom Drink 4"
+      },
+      "brew_custom_5": {
+        "name": "Custom Drink 5"
+      },
+      "brew_custom_6": {
+        "name": "Custom Drink 6"
       }
     },
     "switch": {

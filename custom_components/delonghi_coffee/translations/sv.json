@@ -16,13 +16,21 @@
         "data": {
           "password": "Lösenord"
         }
+      },
+      "select_device": {
+        "title": "Välj din kaffemaskin",
+        "description": "Ditt konto har fler än en kaffemaskin. Välj den som ska läggas till.",
+        "data": {
+          "dsn": "Kaffemaskin"
+        }
       }
     },
     "error": {
       "invalid_auth": "Ogiltig email eller lösenord",
       "cannot_connect": "Kan inte ansluta till De'Longhis servrar",
       "no_devices": "Inga kaffemaskiner hittades på detta konto",
-      "unknown": "Oväntat fel"
+      "unknown": "Oväntat fel",
+      "no_coffee_machine": "Det här kontot har De'Longhi-apparater men ingen kaffemaskin (t.ex. bara en Pinguino-luftkonditionering). Integrationen stöder endast kaffemaskiner."
     },
     "abort": {
       "already_configured": "Detta konto är redan konfigurerat",

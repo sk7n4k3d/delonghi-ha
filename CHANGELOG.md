@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.1] — 2026-11-18
+
+### Fixed
+- **Confirmation de la mise sous tension (#47, Eletta Explore)** : après
+  `switch.turn_on`, l'intégration attend désormais un monitor dont le
+  timestamp (prouvé par CRC sur deux captures réelles) est postérieur à la
+  commande ; si rien ne revient, POWER_ON est renvoyé à 20/45/75 s (la
+  latence réellement observée chez le reporter était 70 s), et le switch
+  reste `off` tant qu'aucune preuve fraîche n'est arrivée — plus d'état
+  assumé après trois polls muets. Une notification persistante (auto-effacée
+  dès que la machine répond, même tard) signale les commandes ignorées.
+  Garde-fous de revue : `Error`/`Unknown (N)` ne comptent jamais comme
+  confirmation ; une machine déjà allumée au dernier frame ne reçoit aucun
+  renvoi parasite ; les modèles à moniteur cloud gelé sans session LAN
+  gardent l'ancien contrat (état assumé + un retry à 180 s, pas de
+  notification) ; chaque renvoi prend le verrou de commande, un `turn_off`
+  en vol annule la ladder.
+
 ## [1.9.0] — 2026-11-18
 
 ### Added
@@ -38,6 +56,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
   toutes les autres commandes. Si le Wi-Fi firmware ignore malgré tout cet
   opcode (documenté sur captures BLE), le profil continue de voyager dans
   l'octet profile_save de chaque brew.
+
+## [0.4.3] — 2026-11-18
+
+### Added
+- **Options après installation** : la télémétrie cloud se bascule désormais
+  via Configuration → intégration → Options (recharge automatique de
+  l'entrée). Auparavant il fallait supprimer et réinstaller l'intégration
+  pour l'activer (#18, stivxgamer).
+
+### Fixed
+- **Le fetch cloud ne bloque plus le refresh LAN** : la lecture des shadows
+  tourne en tâche de fond (une à la fois, anti-recouvrement) ; un broker
+  injoignable ne retarde plus l'état LAN de 75 s à chaque cycle.
+- Clé de traduction morte `invalid_host` retirée ; `strings.json` ajouté
+  (parité hassfest avec `translations/en.json`).
 
 ## [0.4.2] — 2026-11-18
 
@@ -77,9 +110,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
   **jamais** exposées en entités — le repli brut les aurait persistées dans
   la base HA et les diagnostics exportés.
 
+## [0.4.0] — 2026-11-14
+
 ### Added
 - **daedalus 0.4.0 — snapshot terrain Eletta Ultra intégré (mimasek71, #18)** :
-  - `cloud_keys.py` : table de 66 champs cloud connus (état, alarmes,
+  - `cloud_keys.py` : table de 77 champs cloud connus (état, alarmes,
     périphériques, accessoires, capacités) → noms lisibles traduits EN/FR.
     Les champs inconnus gardent le repli brut `Cloud <clé>` de la 0.3.0.
   - Les champs booléens mappés deviennent des `binary_sensor` (alarmes en

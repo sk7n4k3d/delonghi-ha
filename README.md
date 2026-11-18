@@ -32,7 +32,7 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 - **Accessory detection** — milk-based drinks require the Latte Crema module; the integration checks it is attached before sending the brew command
 - **16 language translations** — da, de, en, es, fr, it, ja, ko, nb, nl, pl, pt, ru, sv, uk, zh-Hans
 - **Multi-region support** — EU, US, and CN Ayla/Gigya endpoints
-- **Cloud polling** with configurable interval (default: 30 seconds)
+- **Cloud polling** — monitor status every 60 s, automatically accelerated to 10 s while the machine is in a transient state (brewing, descaling, rinsing…), with a full counter/profile refresh every 10 min
 - **Automatic token refresh** and retry logic with backoff
 - **Reauth flow** — seamless re-authentication when credentials expire
 
@@ -43,21 +43,22 @@ Any De'Longhi WiFi-connected coffee machine that works with the **De'Longhi Coff
 - **Eletta Explore (ECAM450.xx)** — primary development and testing machine
 - **PrimaDonna Soul (ECAM610.xx)** — confirmed working by community
 - Dinamica Plus (ECAM370.xx)
-- Rivelia (EXAM440.xx)
-- Perfetto (ECAM550.xx)
+- PrimaDonna Class, PrimaDonna Elite, PrimaDonna S
+- Maestosa
 - Other Ayla Networks-connected models
+
+Rivelia (EXAM440.xx) and Perfetto (ECAM550.xx) are **not in the known-model table** and remain untested — they may work if they speak the same Ayla/ECAM protocol, but no report confirms it yet.
 
 ## Comparison with Other Integrations
 
-| | **delonghi-ha** (this) | **[cremalink-ha](https://github.com/miditkl/cremalink-ha)** | **[ha-delonghi-coffee](https://github.com/ArbuzovAA/ha-delonghi-coffee)** |
-|---|---|---|---|
-| **Connection** | WiFi / Ayla Cloud API | WiFi / Local LAN | Bluetooth Low Energy |
-| **Protocol** | Cloud (Gigya + Ayla REST) | LAN (AES-256-CBC direct) | BLE GATT |
-| **Latency** | ~2-5s (cloud round-trip) | ~instant (local network) | ~instant (BLE range) |
-| **Rate limiting** | Possible (Ayla per-IP limits) | None (local) | None (local) |
-| **WiFi models** | All Coffee Link WiFi models | PrimaDonna Soul confirmed | Not supported |
-| **BLE-only models** | Not supported | Not supported | Supported |
-| **Sensors** | 30+ counters, 19 alarms, maintenance | Status, basic counters | Basic status |
+| | **delonghi-ha** (this) | **[cremalink-ha](https://github.com/miditkl/cremalink-ha)** |
+|---|---|---|
+| **Connection** | WiFi / Ayla Cloud API + local LAN mode | WiFi / Local LAN |
+| **Protocol** | Cloud (Gigya + Ayla REST) + LAN socket (state + brew since 1.9.0) | LAN (AES-256-CBC direct) |
+| **Latency** | ~2-5s (cloud round-trip) | ~instant (local network) |
+| **Rate limiting** | Possible (Ayla per-IP limits) | None (local) |
+| **WiFi models** | All Coffee Link WiFi models | PrimaDonna Soul confirmed |
+| **Sensors** | 30+ counters, 19 alarms, maintenance | Status, basic counters |
 | **Brew commands** | 50+ beverages, recipe conversion | Yes | Limited |
 | **Multi-region** | EU, US, CN | EU | N/A |
 
@@ -123,9 +124,42 @@ Any De'Longhi WiFi-connected coffee machine that works with the **De'Longhi Coff
 | `button.brew_brew_over_ice` | Brew over ice |
 | ... | 50+ buttons, one per available beverage (auto-discovered from your machine) |
 
+### Select
+
+| Entity | Description |
+|--------|-------------|
+| `select.profile` | Active user profile, listed by the names configured on the machine. Brews and `sync_recipes` use the selected profile |
+
 ### Accessory Detection
 
 Milk-based beverages (cappuccino, latte macchiato, caffe latte, flat white, espresso macchiato, hot milk, etc.) require the **Latte Crema** milk module to be physically attached to the machine. Before sending any brew command, the integration reads the current accessory state from the monitor data and will refuse to brew with a clear error message if the milk module is not detected. This prevents the machine from entering an error state.
+
+## Services
+
+| Service | Description |
+|---------|-------------|
+| `delonghi_coffee.brew_custom` | Brew a beverage with explicit parameters (quantities, strength, froth level, temperature, profile) |
+| `delonghi_coffee.cancel_brew` | Cancel the brew currently in progress |
+| `delonghi_coffee.sync_recipes` | Force the machine to push its recipes to the cloud (optional `profile` argument) |
+| `delonghi_coffee.select_bean_profile` | Activate one of the 7 Bean Adapt profiles on the machine (ECAM `0xB9`) |
+| `delonghi_coffee.write_bean_profile` | Create or overwrite a Bean Adapt profile — name plus raw temperature/intensity/grinder bytes (ECAM `0xBB`) |
+| `delonghi_coffee.set_baseline_from_screen` | Override counter sensors with values read off the machine's touchscreen — works around the Eletta Explore firmware bug where d5XX/d7XX stats are only pushed to the cloud on rare boot events. Sensors expose `max(cloud, baseline)` |
+| `delonghi_coffee.reset_local_baseline` | Drop every local baseline override and revert sensors to cloud values |
+
+## LAN Mode
+
+When the machine advertises LAN support (`lan_enabled` on the cloud), the integration sets up a direct local connection automatically — no configuration required:
+
+1. The integration reads `lan_ip` + `lan_key` from the Ayla cloud (one-time).
+2. It starts an embedded HTTP server (default port `10280`) and announces itself to the machine via `PUT /local_reg.json`.
+3. The machine performs an AES-256-CBC key exchange (`/local_lan/key_exchange.json`), then polls the integration for commands and pushes datapoints to it.
+
+While the LAN session is alive:
+
+- **Machine state, alarms and active profile** come from the machine's own live monitor pushes (`monitor_source: "lan"` in the coordinator data) instead of the cloud monitor, which stays frozen on some firmwares while the Coffee Link app is closed.
+- **Brew and power commands** are served on the LAN poll instead of the cloud `data_request`.
+
+Everything else (counters, recipes, profiles) still comes from the cloud, and every LAN path falls back to the cloud automatically when the session is stale or the machine is unreachable.
 
 ## Screenshots
 
@@ -234,7 +268,7 @@ The `d302_monitor_machine` property contains a Base64-encoded binary with this l
 | 0 | 1 | Accessory | Connected accessory (0=none, 1=hot water, 2=latte crema hot...) |
 | 1-2 | 2 | Switches | Bit field — water tank, motor, spout, door, etc. |
 | 3-4 | 2 | Alarms[0-1] | Bit field — water empty, grounds full, descale, beans... |
-| 5 | 1 | Status | Machine state (0=standby, 2=going to sleep, 7=ready, 3=brewing...) |
+| 5 | 1 | Status | Machine state (0=Off, 2=Idle, 3=Brewing, 7=Ready… see Machine States below) |
 | 6 | 1 | Step | Current action step |
 | 7 | 1 | Progress | Brew progress 0-100% |
 | 8-9 | 2 | Alarms[2-3] | More alarm bits (cleaning needed, hopper absent...) |
@@ -245,15 +279,22 @@ The `d302_monitor_machine` property contains a Base64-encoded binary with this l
 
 | Value | State |
 |-------|-------|
-| 0 | Standby |
-| 1 | Waking up |
-| 2 | Going to sleep |
-| 4 | Descaling |
-| 5 | Preparing steam |
+| 0 | Off |
+| 1 | Turning On |
+| 2 | Idle |
+| 3 | Brewing |
+| 4 | Error |
+| 5 | Descaling |
+| 6 | Heating |
 | 7 | Ready |
 | 8 | Rinsing |
-| 10 | Preparing milk |
-| 11 | Dispensing hot water |
+| 9 | Going to sleep |
+| 10 | Preparing Milk |
+| 11 | Dispensing Hot Water |
+| 12 | Cleaning Milk System |
+| 14 | Rinsing Water Filter |
+| 16 | Preparing Chocolate |
+| 17 | Preparing Milk Alt |
 
 ### Alarm Bits (32-bit word)
 

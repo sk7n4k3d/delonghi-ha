@@ -16,13 +16,21 @@
         "data": {
           "password": "Hasło"
         }
+      },
+      "select_device": {
+        "title": "Wybierz ekspres do kawy",
+        "description": "Twoje konto zawiera więcej niż jeden ekspres do kawy. Wybierz ten, który chcesz dodać.",
+        "data": {
+          "dsn": "Ekspres do kawy"
+        }
       }
     },
     "error": {
       "invalid_auth": "Nieprawidłowy email lub hasło",
       "cannot_connect": "Nie można połączyć się z serwerami De'Longhi",
       "no_devices": "Nie znaleziono ekspresów do kawy na tym koncie",
-      "unknown": "Nieoczekiwany błąd"
+      "unknown": "Nieoczekiwany błąd",
+      "no_coffee_machine": "To konto zawiera urządzenia De'Longhi, ale nie zawiera ekspresu do kawy (np. tylko klimatyzator Pinguino). Integracja obsługuje wyłącznie ekspresy do kawy."
     },
     "abort": {
       "already_configured": "To konto jest już skonfigurowane",
