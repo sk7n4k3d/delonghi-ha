@@ -38,6 +38,9 @@ from custom_components.delonghi_daedalus.const import (
 # imports them from the code under test could not catch a regression.
 _APP_AUTHORIZER = "x-amz-customauthorizer-name=dlg-prod-token-authorizer"
 _APP_WS_PATH = f"/mqtt?{_APP_AUTHORIZER}"
+# RFC 6455 subprotocols the MQTT-over-WS upgrade must offer: the AWS IoT ATS
+# refuses the upgrade itself (HTTP 426) when none is present.
+_WS_SUBPROTOCOLS = ("mqttv5", "mqtt")
 # Shaped like a real Gigya JWT so the redaction patterns actually fire.
 FAKE_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.ZmFrZXNpZ25hdHVyZTEyMzQ"
 
@@ -539,6 +542,7 @@ def _mqtt_server(
     reject_usernames: set[str] | None = None,
     drop_socket: bool = False,
     answer_shadows: set[str] | None = None,
+    require_subprotocol: bool = False,
 ) -> tuple[web.Application, dict]:
     """Minimal MQTT-over-WS broker stub: CONNACK, SUBACK, then one accepted
     PUBLISH per shadow get, encoded in the level the client connected with.
@@ -548,15 +552,25 @@ def _mqtt_server(
     mimasek71 saw for the non-app-style connects). ``answer_shadows`` limits
     which shadow gets are answered — a named shadow the thing does not have
     is silent on the real broker, and the client must keep the partial set.
+    ``require_subprotocol`` mimics the AWS IoT ATS gate: a WS upgrade that
+    offers no MQTT subprotocol is refused with HTTP 426 before MQTT starts.
     """
-    seen: dict[str, list] = {"connects": [], "paths": [], "publishes": []}
+    seen: dict[str, list] = {"connects": [], "paths": [], "publishes": [], "subprotocols": []}
 
     app = web.Application()
 
     async def handler(request: web.Request) -> web.WebSocketResponse:
-        ws = web.WebSocketResponse(autoping=False)
+        # AWS IoT ATS on 443 refuses a WS upgrade that offers no MQTT
+        # subprotocol (HTTP 426) — mimicked here so a client that forgets
+        # Sec-WebSocket-Protocol fails exactly like the real broker.
+        offered = [p.strip() for p in request.headers.get("Sec-WebSocket-Protocol", "").split(",") if p.strip()]
+        chosen = next((p for p in offered if p in _WS_SUBPROTOCOLS), None)
+        if require_subprotocol and chosen is None:
+            return web.Response(status=426, headers={"Upgrade": "websocket"})
+        ws = web.WebSocketResponse(autoping=False, protocols=(chosen,) if chosen else None)
         await ws.prepare(request)
         seen["paths"].append(str(request.rel_url))
+        seen["subprotocols"].append(offered)
         reader = MqttStreamReader()
         async for msg in ws:
             if msg.type != web.WSMsgType.BINARY:
@@ -584,13 +598,17 @@ def _mqtt_server(
                     topic, _ = pkt.publish_parts()
                     seen["publishes"].append(topic)
                     if topic.endswith("/get"):
-                        shadow = topic.split("/")[5]
+                        # $aws/things/<thing>/shadow/name/<shadow>/get — answer
+                        # on the very topic the client published, so the stub
+                        # never depends on one hard-coded thing name.
+                        parts = topic.split("/")
+                        thing, shadow = parts[2], parts[5]
                         if answer_shadows is not None and shadow not in answer_shadows:
                             continue
                         doc = {"state": {"reported": {"shadow": shadow}}}
                         await ws.send_bytes(
                             mqtt_publish_packet(
-                                shadow_accepted_topic("thing1", shadow),
+                                shadow_accepted_topic(thing, shadow),
                                 json.dumps(doc),
                                 protocol_version=reader.protocol_version,
                             )
@@ -640,6 +658,39 @@ def test_shadow_client_keeps_partial_result_when_one_shadow_is_silent() -> None:
             await runner.cleanup()
 
     asyncio.run(_run())
+
+
+def test_shadow_client_offers_mqtt_subprotocol_like_aws_ats() -> None:
+    """The AWS IoT ATS answers HTTP 426 to a WS upgrade that offers no MQTT
+    subprotocol (issue #18, mimasek71's 0.4.4 diagnostics). The stub gates on
+    the same header, so this pins all three halves of the contract: an
+    upgrade without it is refused (control), the client does offer
+    mqttv5/mqtt, and the shadow read then completes."""
+    app, seen = _mqtt_server(require_subprotocol=True)
+
+    async def _run() -> dict:
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            # Control: the gate bites before MQTT starts, exactly like the ATS.
+            with pytest.raises(aiohttp.WSServerHandshakeError) as refused:
+                await session.ws_connect(f"ws://127.0.0.1:{port}{_APP_WS_PATH}")
+            assert refused.value.status == 426
+
+            client = ShadowClient(
+                session, thing_name="Eletta-Ultra_01", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port
+            )
+            docs = await client.fetch(timeout=5)
+            assert seen["subprotocols"] == [list(_WS_SUBPROTOCOLS)], "the WS upgrade carried no MQTT subprotocol"
+            return docs
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    docs = asyncio.run(_run())
+    assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
+    # One CONNECT, app style: the mqttv5 subprotocol went with the MQTT 5 form.
+    assert [c["level"] for c in seen["connects"]] == [5]
 
 
 def test_shadow_client_silent_broker_reports_descriptive_timeout() -> None:

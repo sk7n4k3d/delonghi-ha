@@ -527,6 +527,7 @@ class ShadowClient:
                 "password": self._jwt,
                 "client_id": f"{_APP_STYLE_CLIENT_ID_PREFIX}{secrets.token_hex(8)}",
                 "protocol_version": 5,
+                "protocols": ("mqttv5", "mqtt"),
             },
             {
                 "url": self._ws_url(app_style=False),
@@ -575,6 +576,11 @@ class ShadowClient:
                 ws = await asyncio.wait_for(
                     self._session.ws_connect(
                         str(attempt["url"]),
+                        # AWS IoT ATS answers 426 (Upgrade Required) to a WS
+                        # upgrade that offers no MQTT subprotocol — the
+                        # subprotocol IS the handshake gate on port 443
+                        # (issue #18, mimasek71's 0.4.4 diagnostics).
+                        protocols=attempt.get("protocols") or ("mqtt",),
                         heartbeat=30,
                         timeout=aiohttp.ClientWSTimeout(ws_receive=min(15.0, remaining)),
                     ),
