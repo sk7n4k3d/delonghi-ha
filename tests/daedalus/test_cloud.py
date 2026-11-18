@@ -544,6 +544,7 @@ def _mqtt_server(
     answer_shadows: set[str] | None = None,
     require_subprotocol: bool = False,
     deny_subscriptions: bool = False,
+    silent_suback: bool = False,
 ) -> tuple[web.Application, dict]:
     """Minimal MQTT-over-WS broker stub: CONNACK, SUBACK, then one accepted
     PUBLISH per shadow get, encoded in the level the client connected with.
@@ -593,6 +594,8 @@ def _mqtt_server(
                     )
                     await ws.send_bytes(bytes([0x20, 0x02, 0x00, 5 if refused else 0]))
                 elif pkt.type == 8:  # SUBSCRIBE → SUBACK
+                    if silent_suback:
+                        continue  # broker swallows the SUBSCRIBE entirely
                     pid = pkt.payload[:2]
                     # count the topic filters in the SUBSCRIBE payload:
                     # pid, [MQTT5 properties], then 2-byte-len + topic + qos
@@ -740,6 +743,30 @@ def test_shadow_client_offers_mqtt_subprotocol_on_legacy_fallbacks() -> None:
     assert seen["subprotocols"] == [list(_WS_SUBPROTOCOLS), ["mqtt"]]
     assert [c["level"] for c in seen["connects"]] == [5, 4]
     assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
+
+
+def test_shadow_client_reports_missing_suback() -> None:
+    """A broker that accepts the session but never acknowledges the SUBSCRIBE
+    must be named as such — the 0.4.6 retest could not distinguish this from
+    granted-but-silent shadows (mimasek71, issue #18)."""
+    app, seen = _mqtt_server(silent_suback=True)
+
+    async def _run() -> None:
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(
+                session, thing_name="Eletta-Ultra_01", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port
+            )
+            with pytest.raises(CloudTelemetryError) as swallowed:
+                await client.fetch(timeout=3)
+        finally:
+            await session.close()
+            await runner.cleanup()
+        assert "no SUBACK received" in str(swallowed.value)
+        assert not seen["publishes"], "gets must not be sent before the SUBACK"
+
+    asyncio.run(_run())
 
 
 def test_shadow_client_reports_refused_subscriptions() -> None:

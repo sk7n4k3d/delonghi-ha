@@ -86,6 +86,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
   opcode (documenté sur captures BLE), le profil continue de voyager dans
   l'octet profile_save de chaque brew.
 
+## [0.4.7] — 2026-11-18
+
+### Fixed / Added
+- **Le SUBACK est attendu et journalisé avant l'envoi des get** (#18,
+  remarque mimasek71 sur 0.4.6) : la ligne « subscribed N topics » était
+  écrite avant la lecture du SUBACK, et les get partaient avant sa
+  validation — l'absence d'erreur de refus ne prouvait donc pas que les
+  abonnements avaient été accordés. Désormais : attente du SUBACK (10 s),
+  journalisation debug de chaque code raison (`0x00` accordé, `0x87` non
+  autorisé…), erreur explicite « no SUBACK received — the broker accepted
+  the session but never acknowledged the subscriptions » s'il n'arrive
+  jamais, et les get ne partent qu'après accord.
+
 ## [0.4.6] — 2026-11-18
 
 ### Added
