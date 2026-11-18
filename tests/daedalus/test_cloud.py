@@ -538,13 +538,16 @@ def _mqtt_server(
     reject_levels: set[int] | None = None,
     reject_usernames: set[str] | None = None,
     drop_socket: bool = False,
+    answer_shadows: set[str] | None = None,
 ) -> tuple[web.Application, dict]:
     """Minimal MQTT-over-WS broker stub: CONNACK, SUBACK, then one accepted
     PUBLISH per shadow get, encoded in the level the client connected with.
 
     ``reject_*`` model the authorizer refusing a spelling, ``drop_socket``
     models the broker closing the WebSocket without any CONNACK (what
-    mimasek71 saw for the non-app-style connects).
+    mimasek71 saw for the non-app-style connects). ``answer_shadows`` limits
+    which shadow gets are answered — a named shadow the thing does not have
+    is silent on the real broker, and the client must keep the partial set.
     """
     seen: dict[str, list] = {"connects": [], "paths": [], "publishes": []}
 
@@ -582,6 +585,8 @@ def _mqtt_server(
                     seen["publishes"].append(topic)
                     if topic.endswith("/get"):
                         shadow = topic.split("/")[5]
+                        if answer_shadows is not None and shadow not in answer_shadows:
+                            continue
                         doc = {"state": {"reported": {"shadow": shadow}}}
                         await ws.send_bytes(
                             mqtt_publish_packet(
@@ -607,6 +612,52 @@ def test_shadow_client_fetches_both_shadows() -> None:
             assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
             assert docs["MachineCapabilities"]["state"]["reported"]["shadow"] == "MachineCapabilities"
             assert [c["level"] for c in seen["connects"]] == [5]  # app style first, no retry needed
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_shadow_client_keeps_partial_result_when_one_shadow_is_silent() -> None:
+    """Issue #18 retest: a named shadow the thing does not have stays silent
+    (no accepted, no rejected). The receive deadline used to raise out of the
+    wait loop and discard the shadow that DID answer, behind an empty
+    "MQTT session failed: " error — the valueless cloud_error the tester saw.
+    A partial set must now be returned."""
+
+    async def _run() -> None:
+        app, _seen = _mqtt_server(answer_shadows={"MachineStatus"})
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
+            docs = await client.fetch(timeout=1)
+            assert set(docs) == {"MachineStatus"}
+            assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
+        finally:
+            await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+def test_shadow_client_silent_broker_reports_descriptive_timeout() -> None:
+    """When nothing answers at all the error text must say so — never the
+    empty "MQTT session failed: " that made the #18 retest undiagnosable."""
+
+    async def _run() -> None:
+        app, _seen = _mqtt_server(answer_shadows=set())
+        runner, port = await _serve(app)
+        session = aiohttp_session()
+        try:
+            client = ShadowClient(session, thing_name="thing1", jwt="jwt", broker="127.0.0.1", scheme="ws", port=port)
+            with pytest.raises(CloudTelemetryError) as excinfo:
+                await client.fetch(timeout=1)
+            message = str(excinfo.value)
+            assert message.strip()
+            assert "no shadow document received" in message
+            assert "MQTT session failed: " not in message
         finally:
             await session.close()
             await runner.cleanup()

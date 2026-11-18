@@ -34,6 +34,7 @@ requires. Enough for a shadow read, nothing else.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import re
@@ -414,6 +415,12 @@ class ShadowClient:
                 topics.append(shadow_accepted_topic(self._thing, shadow))
                 topics.append(shadow_rejected_topic(self._thing, shadow))
             await ws.send_bytes(mqtt_subscribe_packet(1, topics, protocol_version=protocol_version))
+            _LOGGER.debug(
+                "Daedalus cloud: subscribed %d shadow topics (MQTT %d), requesting get for %s",
+                len(topics),
+                protocol_version,
+                ", ".join(SHADOWS),
+            )
             for shadow in SHADOWS:
                 await ws.send_bytes(
                     mqtt_publish_packet(shadow_get_topic(self._thing, shadow), "{}", protocol_version=protocol_version)
@@ -425,7 +432,17 @@ class ShadowClient:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         break
-                    msg = await ws.receive(timeout=remaining)
+                    try:
+                        msg = await ws.receive(timeout=remaining)
+                    except TimeoutError:
+                        # aiohttp *raises* at the receive deadline instead of
+                        # returning: that is the shadow wait ending, not a
+                        # session failure. It used to be caught by the outer
+                        # clause below, discarding every shadow that did
+                        # answer behind an empty "MQTT session failed: "
+                        # (str(TimeoutError) is "") — the valueless
+                        # cloud_error of the issue #18 retest.
+                        break
                     if msg.type == aiohttp.WSMsgType.BINARY:
                         reader.feed(msg.data)
                     elif msg.type in (
@@ -438,15 +455,26 @@ class ShadowClient:
                 if packet.type != _PUBLISH:
                     continue
                 self._route_publish(packet, results, errors)
-            if errors and not results:
+            if results:
+                missing = [s for s in SHADOWS if s not in results and s not in errors]
+                if missing:
+                    _LOGGER.debug(
+                        "Daedalus cloud: partial shadow set after %.0fs, no answer for %s",
+                        timeout,
+                        ", ".join(missing),
+                    )
+                return results
+            if errors:
                 raise CloudTelemetryError("; ".join(errors.values()))
-            if not results:
-                raise CloudTelemetryError("no shadow document received before timeout")
-            return results
+            raise CloudTelemetryError(
+                f"no shadow document received within {timeout:.0f}s "
+                f"({len(topics)} topics subscribed, no get/accepted or get/rejected answer)"
+            )
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
-            # receive() timeouts and WS resets must surface as the optional
-            # cloud error the coordinator logs, never as a raw crash.
-            raise CloudTelemetryError(f"MQTT session failed: {exc}") from exc
+            # WS resets must surface as the optional cloud error the
+            # coordinator logs, never as a raw crash. The text falls back to
+            # the exception type: several transport errors stringify empty.
+            raise CloudTelemetryError(f"MQTT session failed: {sanitize_text(str(exc)) or type(exc).__name__}") from exc
         finally:
             with contextlib.suppress(Exception):
                 await ws.close()
@@ -469,11 +497,16 @@ class ShadowClient:
                 # document must degrade to cloud_error, not escape the
                 # CloudTelemetryError contract (audit #18, B1).
                 errors[shadow] = f"unparsable shadow: {exc}"
+                _LOGGER.debug("Daedalus cloud: %s shadow document unparsable: %s", shadow, exc)
             else:
                 results[shadow] = parsed if isinstance(parsed, dict) else {"value": parsed}
+                _LOGGER.debug("Daedalus cloud: %s shadow accepted (%d bytes)", shadow, len(body))
         elif topic.endswith("/get/rejected"):
-            # The rejected payload is broker-controlled text — truncate hard.
+            # The rejected payload is broker-controlled text — truncate hard,
+            # and keep the raw body out of the log line (it can echo the
+            # request context); the shadow name is what a retest needs.
             errors[shadow] = f"shadow get rejected by broker: {body[:200]}"
+            _LOGGER.warning("Daedalus cloud: shadow get for %s rejected by the broker", shadow)
 
     def _ws_url(self, *, app_style: bool) -> str:
         """WebSocket endpoint; only the app-style one carries the authorizer."""
@@ -525,7 +558,7 @@ class ShadowClient:
         last_rc: int | None = None
         failures: list[str] = []
         budget_exhausted = False
-        for attempt in self._connect_attempts():
+        for index, attempt in enumerate(self._connect_attempts(), start=1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 budget_exhausted = True
@@ -535,16 +568,25 @@ class ShadowClient:
                 # ClientWSTimeout, not the deprecated receive_timeout kwarg
                 # (review #18, F8): at most 15 s to receive the CONNACK after
                 # CONNECT, and never more than the shared connect budget.
-                ws = await self._session.ws_connect(
-                    str(attempt["url"]),
-                    heartbeat=30,
-                    timeout=aiohttp.ClientWSTimeout(ws_receive=min(15.0, remaining)),
+                # The handshake itself (DNS + TCP + TLS + WS upgrade) is NOT
+                # covered by ClientWSTimeout, so a black-holed broker used to
+                # sit in ws_connect far past the budget on aiohttp's session
+                # defaults — the wait_for bounds the whole attempt now.
+                ws = await asyncio.wait_for(
+                    self._session.ws_connect(
+                        str(attempt["url"]),
+                        heartbeat=30,
+                        timeout=aiohttp.ClientWSTimeout(ws_receive=min(15.0, remaining)),
+                    ),
+                    timeout=remaining,
                 )
             except (aiohttp.ClientError, TimeoutError, OSError) as exc:
                 # The aiohttp text embeds the request URL — the legacy
                 # spellings put the JWT in reach — so scrub at birth instead
-                # of trusting downstream consumers (audit #18, C2).
-                failures.append(sanitize_text(str(exc)))
+                # of trusting downstream consumers (audit #18, C2). The label
+                # and type fallback keep the aggregated error non-empty even
+                # for exceptions that stringify empty (bare TimeoutError).
+                failures.append(f"attempt {index}: WS connect failed: {sanitize_text(str(exc)) or type(exc).__name__}")
                 continue
             opened = False
             try:
@@ -563,21 +605,25 @@ class ShadowClient:
                     break
                 msg = await ws.receive(timeout=min(10.0, remaining))
                 if msg.type != aiohttp.WSMsgType.BINARY:
-                    raise CloudTelemetryError(f"expected binary CONNACK, got {msg.type!r}")
+                    raise CloudTelemetryError(f"attempt {index}: expected binary CONNACK, got {msg.type!r}")
                 reader = MqttStreamReader(protocol_version=version)
                 reader.feed(msg.data)
                 packet = reader.next_packet()
                 if packet is None or packet.type != _CONNACK:
-                    raise CloudTelemetryError("no CONNACK from broker")
+                    raise CloudTelemetryError(f"attempt {index}: no CONNACK from broker")
                 # MQTT 5 moved the return code to a "reason code" but kept it
                 # at payload[1] (payload[0] stays the acknowledge flags), so
                 # the same success test covers both levels.
                 if len(packet.payload) >= 2 and packet.payload[1] == 0:
                     opened = True
+                    _LOGGER.debug("Daedalus cloud: MQTT connected on spelling %d (MQTT %d)", index, version)
                     return ws, version
                 last_rc = packet.payload[1] if len(packet.payload) >= 2 else -1
-            except (aiohttp.ClientError, TimeoutError, OSError) as exc:
-                failures.append(sanitize_text(str(exc)))
+                _LOGGER.debug("Daedalus cloud: spelling %d refused by the authorizer (CONNACK rc=%s)", index, last_rc)
+            except TimeoutError as exc:
+                failures.append(f"attempt {index}: no CONNACK in time: {sanitize_text(str(exc)) or type(exc).__name__}")
+            except (aiohttp.ClientError, OSError) as exc:
+                failures.append(f"attempt {index}: {sanitize_text(str(exc)) or type(exc).__name__}")
             except CloudTelemetryError as exc:
                 failures.append(str(exc))
             finally:

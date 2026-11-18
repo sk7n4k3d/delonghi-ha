@@ -10,6 +10,7 @@ Brewing commands are intentionally out of scope until we capture the exact
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import ssl
 from typing import Any
@@ -309,7 +310,7 @@ class DaedalusApi:
         failure path — no socket leak per cycle (audit 2026-11-05).
         """
         url = build_lan_ws_url(host)
-        ssl_ctx = _build_trust_all_ssl_context()
+        ssl_ctx = await _get_trust_all_ssl_context()
         session = self._get_session()
         try:
             ws = await session.ws_connect(url, ssl=ssl_ctx, heartbeat=20)
@@ -441,6 +442,12 @@ class DaedalusLanConnection:
         return parse_message(raw.data)
 
 
+# Cached process-wide: the context is immutable and safe to share across
+# connections, so it is built once, off the event loop (see
+# `_get_trust_all_ssl_context`).
+_SSL_CTX: ssl.SSLContext | None = None
+
+
 def _build_trust_all_ssl_context() -> ssl.SSLContext:
     """Build a trust-all TLS context for the self-signed machine cert.
 
@@ -449,8 +456,33 @@ def _build_trust_all_ssl_context() -> ssl.SSLContext:
     trust-all X509TrustManager + ALLOW_ALL hostname verifier. We mirror
     that — there is no CA to pin against. Authentication happens in-band
     via the JWT passed in the AUTH frame.
+
+    Deliberately NOT ``ssl.create_default_context()``: that call runs
+    ``load_default_certs()``, a synchronous walk of the system CA store that
+    HA flags as a blocking call when it happens on the event loop (issue #18
+    retest). With ``verify_mode=CERT_NONE`` the CA store is never consulted,
+    so loading it buys nothing here. The TLS 1.2 floor matches what
+    ``create_default_context`` set by default, so the wire behaviour is
+    unchanged.
     """
-    ctx = ssl.create_default_context()
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    # check_hostname must drop before CERT_NONE (setting the latter while the
+    # former is on raises ValueError on PROTOCOL_TLS_CLIENT contexts).
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
+
+async def _get_trust_all_ssl_context() -> ssl.SSLContext:
+    """Return the shared trust-all context, built once in a worker thread.
+
+    The build itself no longer touches disk, but running it through
+    ``asyncio.to_thread`` keeps the "never build TLS state on the loop"
+    guarantee explicit — a future switch back to ``create_default_context``
+    could not then reintroduce the blocking call unnoticed.
+    """
+    global _SSL_CTX
+    if _SSL_CTX is None:
+        _SSL_CTX = await asyncio.to_thread(_build_trust_all_ssl_context)
+    return _SSL_CTX

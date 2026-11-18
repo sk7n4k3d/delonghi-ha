@@ -84,6 +84,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cloud_data: dict[str, Any] | None = None
         self._cloud_fetched_at: float = 0.0
         self._cloud_error: str | None = None
+        self._cloud_error_at: float | None = None
         self._cloud_lock = asyncio.Lock()
         self._cloud_task: asyncio.Task | None = None
 
@@ -131,10 +132,12 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _schedule_cloud_fetch(self) -> None:
         """Start a background shadow fetch when one is due and none is running."""
         if self._cloud_task is not None and not self._cloud_task.done():
+            _LOGGER.debug("Daedalus cloud: fetch already running, skipping this cycle")
             return  # anti-overlap guard: one cloud hop at a time
         now = time.monotonic()
         if self._cloud_data is not None and now - self._cloud_fetched_at < CLOUD_POLL_SECONDS:
             return  # cache still fresh
+        _LOGGER.debug("Daedalus cloud: starting background shadow fetch")
         self._cloud_task = self.hass.async_create_task(self._async_cloud_fetch())
 
     async def _ensure_connected(self) -> None:
@@ -245,13 +248,31 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
             except CloudTelemetryError as exc:
                 self._cloud_error = sanitize_text(exc, host=self.entry.data.get(CONF_HOST))
+                self._cloud_error_at = time.time()
                 _LOGGER.debug("Daedalus cloud telemetry failed (non-fatal): %s", self._cloud_error)
                 return
+            except TimeoutError:
+                # The wait_for budget above. str(TimeoutError) is empty, so
+                # the generic branch used to store "unexpected cloud error: "
+                # — the valueless cloud_error of the issue #18 retest.
+                self._cloud_error = f"cloud hop timed out after {CLOUD_FETCH_TIMEOUT_SECONDS}s"
+                self._cloud_error_at = time.time()
+                _LOGGER.warning("Daedalus cloud telemetry timed out after %ss (non-fatal)", CLOUD_FETCH_TIMEOUT_SECONDS)
+                return
             except Exception as exc:  # noqa: BLE001 — cloud must never take the entry down
-                self._cloud_error = sanitize_text(f"unexpected cloud error: {exc}", host=self.entry.data.get(CONF_HOST))
+                self._cloud_error = sanitize_text(
+                    f"unexpected cloud error: {exc or type(exc).__name__}", host=self.entry.data.get(CONF_HOST)
+                )
+                self._cloud_error_at = time.time()
                 _LOGGER.warning("Daedalus cloud telemetry unexpected failure (non-fatal): %s", self._cloud_error)
                 return
             self._cloud_error = None
+            self._cloud_error_at = None
+            _LOGGER.debug(
+                "Daedalus cloud: shadows fetched (%d status keys, %d capability keys)",
+                len(cloud_data["status_flat"]),
+                len(cloud_data["capabilities_flat"]),
+            )
             if thing != self.entry.data.get(CONF_MACHINE_NAME):
                 self.hass.config_entries.async_update_entry(
                     self.entry, data={**self.entry.data, CONF_MACHINE_NAME: thing}

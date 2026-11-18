@@ -157,3 +157,29 @@ def test_successful_fetch_projects_via_one_extra_refresh():
         assert coord._cloud_data["machine_name"] == "thing-1"
 
     asyncio.run(_go())
+
+
+def test_cloud_hop_timeout_sets_descriptive_error():
+    """The wait_for budget used to fall into the generic ``except Exception``
+    branch, and str(TimeoutError) is empty — the stored cloud_error was
+    literally "unexpected cloud error: ", the valueless key the issue #18
+    retest diagnostics showed."""
+
+    async def _go():
+        coord = _make_coordinator()
+
+        async def _hang(*_args, **_kwargs):
+            await asyncio.sleep(30)
+            return _DOCS, "thing-1"
+
+        with (
+            patch(_PATCH, side_effect=_hang),
+            patch("custom_components.delonghi_daedalus.coordinator.CLOUD_FETCH_TIMEOUT_SECONDS", 0.05),
+        ):
+            await coord._async_cloud_fetch()
+        assert coord._cloud_error is not None
+        assert coord._cloud_error.strip()
+        assert "timed out" in coord._cloud_error
+        assert coord._cloud_data is None
+
+    asyncio.run(_go())
