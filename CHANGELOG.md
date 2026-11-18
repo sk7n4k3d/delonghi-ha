@@ -86,6 +86,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
   opcode (documenté sur captures BLE), le profil continue de voyager dans
   l'octet profile_save de chaque brew.
 
+## [0.4.5] — 2026-11-18
+
+### Fixed
+- **La connexion cloud MQTT-over-WebSocket offre enfin les sous-protocoles
+  MQTT** (`Sec-WebSocket-Protocol: mqttv5, mqtt`) : AWS IoT (port 443)
+  répond HTTP 426 à toute montée en WebSocket qui ne les propose pas, ce
+  qui rendait tous les capteurs cloud indisponibles même avec la télémétrie
+  activée (#18, diagnostics mimasek71 en 0.4.4). Un test de régression
+  imite la porte ATS : une montée sans sous-protocole est refusée 426.
+
 ## [0.4.4] — 2026-11-18
 
 ### Fixed
