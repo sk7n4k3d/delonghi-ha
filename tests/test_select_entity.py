@@ -34,7 +34,8 @@ class TestProfileSelectInit:
 class TestProfileSelectOptions:
     def test_default_when_no_profiles(self):
         sel = DeLonghiProfileSelect(_make_coordinator(), "DSN", "m", "n", None)
-        assert sel.options == ["Profile 1", "Profile 2", "Profile 3", "Profile 4"]
+        # 1..5 — some machines carry a fifth profile (issue #50 report)
+        assert sel.options == ["Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5"]
 
     def test_named_profiles(self):
         profiles = {1: {"name": "Sebastien"}, 2: {"name": "Sasha"}, 3: {"name": "Anna"}}

@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+### Fixed
+- **Select de profil borné à 4** : le dropdown et le parsing de secours
+  s'arrêtaient à « Profile 4 » alors que certaines machines (retour #50)
+  déclarent 5 profils et que la commande accepte 1–5. Les deux chemins
+  offrent/parsent maintenant 1–5.
+
 ## [1.9.1] — 2026-11-18
 
 ### Fixed

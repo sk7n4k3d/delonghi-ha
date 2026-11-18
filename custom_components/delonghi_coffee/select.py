@@ -55,7 +55,7 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
         """Return available profile options."""
         profiles = self.coordinator.data.get("profiles", {})
         if not profiles:
-            return ["Profile 1", "Profile 2", "Profile 3", "Profile 4"]
+            return [f"Profile {i}" for i in range(1, 6)]
         return [profiles.get(i, {}).get("name", f"Profile {i}") for i in sorted(profiles.keys())]
 
     @property
@@ -101,8 +101,11 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
                 pid = p
                 break
         if pid is None:
-            # Fallback: parse "Profile N"
-            for i in range(1, 5):
+            # Fallback: parse "Profile N". Upper bound matches
+            # set_active_profile's accepted range — some machines carry a
+            # fifth profile (issue #50 report: 5 profiles on the machine,
+            # dropdown capped at 4).
+            for i in range(1, 6):
                 if option == f"Profile {i}":
                     pid = i
                     break

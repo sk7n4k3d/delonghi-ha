@@ -39,7 +39,16 @@ def _entity(coord: MagicMock):
 class TestProfileSelectOptions:
     def test_options_fallback_when_no_profiles(self):
         entity = _entity(_make_coord())
-        assert entity.options == ["Profile 1", "Profile 2", "Profile 3", "Profile 4"]
+        # 1..5: some machines carry a fifth profile (issue #50 report)
+        assert entity.options == ["Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5"]
+
+    def test_select_profile5_fallback_parses(self):
+        """The "Profile N" fallback must accept Profile 5 (set_active_profile
+        range is 1..5; the old cap at 4 silently dropped the option)."""
+        coord = _make_coord()
+        entity = _entity(coord)
+        asyncio.run(entity.async_select_option("Profile 5"))
+        entity.hass.async_add_executor_job.assert_called_once_with(coord.api.set_active_profile, coord.dsn, 5)
 
     def test_options_use_profile_names_when_available(self):
         profiles = {
