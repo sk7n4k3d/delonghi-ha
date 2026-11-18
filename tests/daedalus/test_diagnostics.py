@@ -4,11 +4,18 @@ Confirms every key in REDACT_KEYS is actually scrubbed before the payload
 leaves the system, and that non-secret fields pass through. Without this,
 a user uploading the diagnostics zip to a public GitHub issue would be
 leaking JWTs / session tokens that grant 90-day account access.
+
+The ``cloud_*`` tests cover issue #18: the dump must show *why* the cloud
+telemetry failed (sanitized text + category + codes) and whether the
+cloud session is up at all — without ever leaking the JWT, the broker
+credentials or the full serial number.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -226,3 +233,229 @@ def test_minimal_entry_data_does_not_crash(entry_data_value: Any) -> None:
     hass = _make_hass_with(entry.entry_id, None)
     result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
     assert "entry" in result
+
+
+# --------------------------------------------------------------- cloud block --
+
+# A cloud_error string as the coordinator stores it: already sanitized once,
+# but the dump re-scrubs it (defense in depth) because it is written for a
+# public issue tracker.
+_RAW_CLOUD_ERROR = (
+    "MQTT WS connect failed: password Sup3rS3cret! for mimasek71@corp.example.net "
+    "at wss://192.168.1.42:443/mqtt with token "
+    "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.realSigFragment for SN1234567890"
+)
+_SECRETS = (
+    "Sup3rS3cret!",
+    "mimasek71@corp.example.net",
+    "192.168.1.42",
+    "SN1234567890",
+    "realSigFragment",
+    "eyJ",
+)
+
+
+def _cloud_coordinator(**attrs: Any) -> MagicMock:
+    coord = MagicMock()
+    coord.data = {"connected": True}
+    coord.last_update_success = True
+    coord.last_exception = None
+    coord.update_interval = MagicMock(total_seconds=lambda: 30)
+    coord.last_checked_time = None
+    for key, value in attrs.items():
+        setattr(coord, key, value)
+    return coord
+
+
+def _cloud_payload(coord: Any, *, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    entry = _make_entry(data=_full_data(), options=options)
+    hass = _make_hass_with(entry.entry_id, coord)
+    return asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))["cloud"]
+
+
+def test_cloud_error_value_is_exposed_and_scrubbed() -> None:
+    """issue #18: the key existed but its value never reached the dump.
+
+    The tester's report could not be triaged because auth / MQTT /
+    subscription / parsing failures were all indistinguishable. The value
+    must now be there — with every secret class still scrubbed.
+    """
+    cloud = _cloud_payload(_cloud_coordinator(data={"connected": True, "cloud_error": _RAW_CLOUD_ERROR}))
+    error = cloud["cloud_error"]
+
+    assert error is not None, "cloud_error value must be exposed"
+    assert error["category"] == "mqtt_connect"
+    assert "MQTT WS connect failed" in error["message"]
+
+    blob = json.dumps(cloud)
+    for secret in _SECRETS:
+        assert secret not in blob, f"leaked {secret!r} in {blob}"
+
+
+def test_cloud_error_from_coordinator_cache_when_refresh_has_not_run() -> None:
+    """The background fetch records the error before the next refresh projects it."""
+    cloud = _cloud_payload(
+        _cloud_coordinator(_cloud_error="MQTT broker refused the JWT (CONNACK rc=5)"),
+    )
+    assert cloud["cloud_error"]["category"] == "auth"
+    assert cloud["cloud_error"]["mqtt_connack_rc"] == 5
+
+
+def test_mock_coordinator_never_fabricates_a_cloud_error() -> None:
+    """A coordinator without the attribute must not invent an error (MagicMock)."""
+    cloud = _cloud_payload(_cloud_coordinator())
+    assert cloud["cloud_error"] is None
+    assert cloud["cloud_connected"] is False
+    assert cloud["last_cloud_message"] is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "category", "codes"),
+    [
+        ("MQTT broker refused the JWT (CONNACK rc=5)", "auth", {"mqtt_connack_rc": 5}),
+        ("/devices returned HTTP 403", "auth", {"http_status": 403}),
+        ("/devices returned HTTP 500", "device_lookup", {"http_status": 500}),
+        ("serial **** not found in /devices response", "device_lookup", {}),
+        ("no CONNACK from broker", "mqtt_connect", {}),
+        ("MQTT WS closed by broker", "mqtt_connect", {}),
+        ("no shadow document received before timeout", "no_shadow", {}),
+        (
+            'shadow get rejected by broker: {"code":404,"message":"No method defined"}',
+            "shadow_rejected",
+            {"shadow_code": 404},
+        ),
+        ("unparsable shadow: Expecting value", "parse", {}),
+        ("unexpected cloud error: something odd", "unexpected", {}),
+        ("a failure nobody has seen yet", "unknown", {}),
+    ],
+)
+def test_cloud_error_is_classified_for_triage(raw: str, category: str, codes: dict[str, int]) -> None:
+    """The category + codes are what replaces a log scrape (issue #18)."""
+    error = _cloud_payload(_cloud_coordinator(data={"connected": True, "cloud_error": raw}))["cloud_error"]
+    assert error is not None
+    assert error["category"] == category
+    assert {k: v for k, v in error.items() if k in codes} == codes
+
+
+def test_cloud_error_message_is_truncated_without_losing_its_category() -> None:
+    """The truncation marker must not reclassify a long message as a parse error."""
+    error = _cloud_payload(
+        _cloud_coordinator(data={"connected": True, "cloud_error": "MQTT session failed: " + "x" * 600})
+    )["cloud_error"]
+    assert error["truncated"] is True
+    assert len(error["message"]) <= 240
+    assert error["category"] == "mqtt_connect"
+
+
+def test_cloud_error_codes_survive_truncation() -> None:
+    """A code past the display ceiling is still parsed out of the full text."""
+    error = _cloud_payload(
+        _cloud_coordinator(data={"connected": True, "cloud_error": "MQTT session failed: " + "x" * 600 + " HTTP 500"})
+    )["cloud_error"]
+    assert error["truncated"] is True
+    assert error["http_status"] == 500
+
+
+def test_cloud_error_json_secrets_are_scrubbed() -> None:
+    """A broker-controlled /get/rejected payload can echo token-shaped fields."""
+    raw = 'shadow get rejected by broker: {"code":404,"clientToken":"aGVsbG8gd29ybGQ","password":"hunter2secret"}'
+    cloud = _cloud_payload(_cloud_coordinator(data={"connected": True, "cloud_error": raw}))
+    blob = json.dumps(cloud)
+    assert "aGVsbG8gd29ybGQ" not in blob
+    assert "hunter2secret" not in blob
+    assert cloud["cloud_error"]["shadow_code"] == 404
+
+
+def test_cloud_error_carries_the_attempt_timestamp() -> None:
+    coord = _cloud_coordinator(
+        data={"connected": True, "cloud_error": "MQTT broker refused the JWT (CONNACK rc=5)"},
+    )
+    coord.last_checked_time = datetime(2026, 11, 18, 3, 4, 5, tzinfo=UTC)
+    error = _cloud_payload(coord)["cloud_error"]
+    assert error["last_attempt"] == "2026-11-18T03:04:05+00:00"
+
+
+def test_cloud_connected_and_last_message_when_shadows_arrive() -> None:
+    stamp = datetime(2026, 11, 18, 2, 15, 33, tzinfo=UTC).timestamp()
+    cloud = _cloud_payload(
+        _cloud_coordinator(
+            data={
+                "connected": True,
+                "cloud": {
+                    "machine_name": "SN1234567890",
+                    "status_flat": {"operatingState": "STANDBY"},
+                    "capabilities_flat": {},
+                    "fetched_at": stamp,
+                },
+            }
+        )
+    )
+    assert cloud["cloud_connected"] is True
+    assert cloud["last_cloud_message"] == "2026-11-18T02:15:33+00:00"
+    assert cloud["cloud_error"] is None
+
+
+def test_cloud_connected_false_when_an_error_is_pending() -> None:
+    """A stale cached shadow must not be reported as a live cloud session."""
+    cloud = _cloud_payload(
+        _cloud_coordinator(
+            data={
+                "connected": True,
+                "cloud": {"status_flat": {"operatingState": "STANDBY"}, "fetched_at": 1763443000.0},
+                "cloud_error": "MQTT WS closed by broker",
+            }
+        )
+    )
+    assert cloud["cloud_connected"] is False
+    assert cloud["last_cloud_message"] is not None
+
+
+def test_cloud_topics_subscribed_have_the_serial_masked() -> None:
+    """Topics embed the thing name (= the serial by default) — masked, last 4 only."""
+    cloud = _cloud_payload(_cloud_coordinator())
+    assert cloud["cloud_topics_subscribed"] == [
+        "$aws/things/********7890/shadow/name/MachineStatus/get/accepted",
+        "$aws/things/********7890/shadow/name/MachineStatus/get/rejected",
+        "$aws/things/********7890/shadow/name/MachineCapabilities/get/accepted",
+        "$aws/things/********7890/shadow/name/MachineCapabilities/get/rejected",
+    ]
+    assert "SN1234567890" not in json.dumps(cloud)
+
+
+def test_cloud_topics_empty_without_a_thing_name() -> None:
+    entry = _make_entry(data={"pool": "EU"})
+    hass = _make_hass_with(entry.entry_id, None)
+    result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+    assert result["cloud"]["cloud_topics_subscribed"] == []
+
+
+def test_cloud_telemetry_flag_read_from_options_then_data() -> None:
+    """The reconfigure flow writes the switch into ``entry.data``; options wins if set."""
+    coord = _cloud_coordinator(data={"connected": True, "cloud": {"status_flat": {"a": 1}}})
+    assert _cloud_payload(coord)["cloud_telemetry_enabled"] is False
+    assert _cloud_payload(coord, options={"cloud_telemetry": True})["cloud_telemetry_enabled"] is True
+
+    entry = _make_entry(data={**_full_data(), "cloud_telemetry": True})
+    hass = _make_hass_with(entry.entry_id, coord)
+    result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+    assert result["cloud"]["cloud_telemetry_enabled"] is True
+
+
+def test_cloud_block_survives_a_missing_coordinator() -> None:
+    """Telemetry can be enabled before the first refresh — no KeyError, no crash."""
+    entry = _make_entry(data={**_full_data(), "cloud_telemetry": True})
+    hass = MagicMock()
+    hass.data = {}
+    result = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, entry))
+    assert result["cloud"] == {
+        "cloud_telemetry_enabled": True,
+        "cloud_connected": False,
+        "last_cloud_message": None,
+        "cloud_topics_subscribed": [
+            "$aws/things/********7890/shadow/name/MachineStatus/get/accepted",
+            "$aws/things/********7890/shadow/name/MachineStatus/get/rejected",
+            "$aws/things/********7890/shadow/name/MachineCapabilities/get/accepted",
+            "$aws/things/********7890/shadow/name/MachineCapabilities/get/rejected",
+        ],
+        "cloud_error": None,
+    }
