@@ -566,3 +566,65 @@ class TestFailureLogsMaskIdentifiers:
         # triage value preserved: last serial digits + error detail survive
         assert "********7890" in joined
         assert "LAN WS connect" in joined
+
+
+# --------------------------------------------------------------------------- #
+# Options flow — cloud telemetry toggle (issue #18, stivxgamer)               #
+# --------------------------------------------------------------------------- #
+
+from custom_components.delonghi_daedalus.config_flow import DaedalusOptionsFlow  # noqa: E402
+
+
+def _make_entry(telemetry: bool) -> MagicMock:
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {CONF_EMAIL: "a@b.c", CONF_CLOUD_TELEMETRY: telemetry}
+    return entry
+
+
+def _make_options_flow(entry: MagicMock) -> DaedalusOptionsFlow:
+    flow = DaedalusOptionsFlow(entry)
+    flow.hass = MagicMock()
+    flow.hass.config_entries.async_reload = AsyncMock()
+    return flow
+
+
+def test_options_flow_class_wires_to_entry() -> None:
+    # NOTE: async_get_options_flow itself is @callback-decorated, which the
+    # mocked homeassistant turns into a MagicMock — construct directly.
+    entry = _make_entry(False)
+    flow = DaedalusOptionsFlow(entry)
+    assert flow._entry is entry
+
+
+def test_options_shows_form_with_current_value() -> None:
+    flow = _make_options_flow(_make_entry(True))
+    result = asyncio.run(flow.async_step_init(None))
+    assert result["type"] == "form"
+    assert result["step_id"] == "init"
+    # the checkbox defaults to the stored value
+    schema_keys = list(result["data_schema"].schema)
+    assert any(str(k) == CONF_CLOUD_TELEMETRY for k in schema_keys)
+
+
+def test_options_toggle_updates_data_and_reloads() -> None:
+    entry = _make_entry(False)
+    flow = _make_options_flow(entry)
+    result = asyncio.run(flow.async_step_init({CONF_CLOUD_TELEMETRY: True}))
+    assert result["type"] == "create_entry"
+    flow.hass.config_entries.async_update_entry.assert_called_once()
+    args, kwargs = flow.hass.config_entries.async_update_entry.call_args
+    assert args[0] is entry
+    new_data = kwargs["data"]
+    assert new_data[CONF_CLOUD_TELEMETRY] is True
+    assert new_data[CONF_EMAIL] == "a@b.c"  # other keys preserved
+    flow.hass.config_entries.async_reload.assert_awaited_once_with("entry-1")
+
+
+def test_options_no_change_does_not_reload() -> None:
+    entry = _make_entry(True)
+    flow = _make_options_flow(entry)
+    result = asyncio.run(flow.async_step_init({CONF_CLOUD_TELEMETRY: True}))
+    assert result["type"] == "create_entry"
+    flow.hass.config_entries.async_update_entry.assert_not_called()
+    flow.hass.config_entries.async_reload.assert_not_called()

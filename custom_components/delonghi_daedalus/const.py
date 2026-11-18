@@ -72,5 +72,8 @@ DEFAULT_UPDATE_INTERVAL_SECONDS: Final = 30
 # 120 s matches the cadence mimasek71 validated on the Eletta Ultra.
 CLOUD_POLL_SECONDS: Final = 120
 # Hard budget for one full cloud hop (REST lookup + MQTT connect + shadows);
-# keeps a black-holed broker from stalling the coordinator (audit #18, D1).
+# bounds the background fetch task so a black-holed broker cannot pile up
+# hops (audit #18, D1). It no longer needs to stay under
+# DEFAULT_UPDATE_INTERVAL_SECONDS: the hop runs detached from the refresh
+# (finding 9), so the LAN snapshot never waits on it.
 CLOUD_FETCH_TIMEOUT_SECONDS: Final = 75

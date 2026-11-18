@@ -20,6 +20,8 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .api import (
@@ -114,10 +116,51 @@ async def _probe_pools(
     raise DaedalusAuthError(f"all_pools: every Gigya pool returned 403005 for {_mask_email(email)}") from last_exc
 
 
+class DaedalusOptionsFlow(config_entries.OptionsFlow):
+    """Post-setup options.
+
+    The cloud telemetry toggle lives in entry.data (the sensor platforms
+    gate on it at setup) and this integration registers no update listener,
+    so flipping it updates entry.data and reloads the entry immediately.
+    Without this flow, toggling meant deleting and re-adding the integration
+    (issue #18, stivxgamer).
+    """
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        self._entry = entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is None:
+            return self.async_show_form(
+                step_id="init",
+                data_schema=vol.Schema(
+                    {
+                        vol.Optional(
+                            CONF_CLOUD_TELEMETRY,
+                            default=bool(self._entry.data.get(CONF_CLOUD_TELEMETRY, False)),
+                        ): bool
+                    }
+                ),
+            )
+        enabled = bool(user_input.get(CONF_CLOUD_TELEMETRY, False))
+        if enabled != bool(self._entry.data.get(CONF_CLOUD_TELEMETRY, False)):
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                data={**self._entry.data, CONF_CLOUD_TELEMETRY: enabled},
+            )
+            await self.hass.config_entries.async_reload(self._entry.entry_id)
+        return self.async_create_entry(title="", data={})
+
+
 class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a Daedalus config flow."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> DaedalusOptionsFlow:
+        return DaedalusOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         super().__init__()

@@ -9,6 +9,7 @@ top; cloud failures never poison the LAN snapshot.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from datetime import timedelta
 from typing import Any
@@ -73,10 +74,18 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # CLOUD_POLL_SECONDS, independent of the 30 s LAN cycle. The lock
         # serializes overlapping cycles (manual refresh + timer) so the
         # cache fields never interleave writes (review #18, F5).
+        #
+        # Budget review (finding 9): the cloud hop may burn
+        # CLOUD_FETCH_TIMEOUT_SECONDS (75 s on a black-holed broker) while the
+        # refresh interval is 30 s — awaited inline it would delay the LAN
+        # snapshot by more than two full cycles. The fetch therefore runs in a
+        # background task (``_cloud_task`` is the anti-overlap guard); the
+        # refresh only ever attaches the cached snapshot and returns.
         self._cloud_data: dict[str, Any] | None = None
         self._cloud_fetched_at: float = 0.0
         self._cloud_error: str | None = None
         self._cloud_lock = asyncio.Lock()
+        self._cloud_task: asyncio.Task | None = None
 
     @property
     def serial_number(self) -> str:
@@ -108,10 +117,25 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "host": self.entry.data.get(CONF_HOST),
             }
         if self.entry.data.get(CONF_CLOUD_TELEMETRY):
-            # Outside the LAN lock: the cloud hop is independent of the WS
-            # and must never block or fail it.
-            await self._async_cloud_update(data)
+            # Outside the LAN lock, and off the critical path entirely: the
+            # refresh attaches the *cached* shadow and (re)starts the fetch in
+            # the background, so a slow or black-holed broker delays the cloud
+            # projection only — never the LAN snapshot (finding 9).
+            if self._cloud_data is not None:
+                data["cloud"] = self._cloud_data
+            if self._cloud_error:
+                data["cloud_error"] = self._cloud_error
+            self._schedule_cloud_fetch()
         return data
+
+    def _schedule_cloud_fetch(self) -> None:
+        """Start a background shadow fetch when one is due and none is running."""
+        if self._cloud_task is not None and not self._cloud_task.done():
+            return  # anti-overlap guard: one cloud hop at a time
+        now = time.monotonic()
+        if self._cloud_data is not None and now - self._cloud_fetched_at < CLOUD_POLL_SECONDS:
+            return  # cache still fresh
+        self._cloud_task = self.hass.async_create_task(self._async_cloud_fetch())
 
     async def _ensure_connected(self) -> None:
         if self._lan is not None and not self._lan.closed:
@@ -173,21 +197,25 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.entry, data={**self.entry.data, CONF_LAN_AUTH_MESSAGE: self._lan.auth_message}
             )
 
-    async def _async_cloud_update(self, data: dict[str, Any]) -> None:
-        """Refresh (or reuse) the shadow snapshot. Never raises.
+    async def _async_cloud_fetch(self) -> None:
+        """Fetch the shadow documents in the background. Never raises.
 
-        The whole body — fetch AND projection — sits under one lock +
-        try/except: a pathological shadow document (deep nesting,
-        unparsable shapes) and overlapping cycles must both degrade to
-        cloud_error, never reach DataUpdateCoordinator (review #18, F3/F5).
+        Runs off the refresh path (finding 9): a slow broker delays the cloud
+        projection, never the LAN snapshot. On success one extra refresh is
+        requested so the fresh shadow is projected without waiting for the
+        next 30 s tick; on failure nothing is requested — the normal refresh
+        cycle retries by itself, and an error→refresh→fetch→error chain would
+        otherwise turn the fetch latency into a hot loop.
+
+        The whole body — fetch AND cache write — sits under one lock +
+        try/except: a pathological shadow document (deep nesting, unparsable
+        shapes) and overlapping cycles must both degrade to cloud_error,
+        never reach DataUpdateCoordinator (review #18, F3/F5).
         """
         async with self._cloud_lock:
             now = time.monotonic()
             if self._cloud_data is not None and now - self._cloud_fetched_at < CLOUD_POLL_SECONDS:
-                data["cloud"] = self._cloud_data
-                if self._cloud_error:
-                    data["cloud_error"] = self._cloud_error
-                return
+                return  # a concurrent cycle already refreshed the cache
             try:
                 stored_name = self.entry.data.get(CONF_MACHINE_NAME)
                 docs, thing = await asyncio.wait_for(
@@ -203,8 +231,10 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # 3 MQTT connect spellings + shadow wait; the MQTT phase
                     # is itself capped by ShadowClient._connect's 30 s budget):
                     # without it a black-holed broker could hold _cloud_lock —
-                    # and delay the coordinator refresh — on aiohttp's 300 s
-                    # session default (audit #18, D1).
+                    # and pile up cloud hops — on aiohttp's 300 s session
+                    # default (audit #18, D1). The LAN refresh no longer waits
+                    # on it at all (finding 9); this cap now bounds the
+                    # background task itself.
                     timeout=CLOUD_FETCH_TIMEOUT_SECONDS,
                 )
                 cloud_data = {
@@ -216,14 +246,10 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except CloudTelemetryError as exc:
                 self._cloud_error = sanitize_text(exc, host=self.entry.data.get(CONF_HOST))
                 _LOGGER.debug("Daedalus cloud telemetry failed (non-fatal): %s", self._cloud_error)
-                data["cloud_error"] = self._cloud_error
-                if self._cloud_data is not None:
-                    data["cloud"] = self._cloud_data
                 return
             except Exception as exc:  # noqa: BLE001 — cloud must never take the entry down
                 self._cloud_error = sanitize_text(f"unexpected cloud error: {exc}", host=self.entry.data.get(CONF_HOST))
                 _LOGGER.warning("Daedalus cloud telemetry unexpected failure (non-fatal): %s", self._cloud_error)
-                data["cloud_error"] = self._cloud_error
                 return
             self._cloud_error = None
             if thing != self.entry.data.get(CONF_MACHINE_NAME):
@@ -232,9 +258,17 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             self._cloud_data = cloud_data
             self._cloud_fetched_at = now
-            data["cloud"] = cloud_data
+
+        # Project the fresh snapshot now instead of on the next tick. Best
+        # effort: a harness without the coordinator base must not blow up the
+        # completed fetch.
+        with contextlib.suppress(Exception):
+            self.async_request_refresh()
 
     async def async_shutdown(self) -> None:
+        if self._cloud_task is not None and not self._cloud_task.done():
+            self._cloud_task.cancel()
+        self._cloud_task = None
         if self._lan is not None:
             await self._lan.close()
             self._lan = None

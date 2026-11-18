@@ -25,7 +25,6 @@
       "invalid_auth": "Invalid My Coffee Lounge credentials",
       "all_pools_unauthorized": "Login failed on all account regions (EU, EU_US, CH). Your account may have been created via the in-app registration page (OAuth2/OIDC), which uses a different authentication path than direct login. Check that your password is correct, then open an issue on the integration's GitHub repository for further investigation.",
       "cannot_connect": "Cannot reach the machine on the LAN",
-      "invalid_host": "Invalid IP / hostname",
       "unknown": "Unexpected error"
     },
     "abort": {
@@ -279,6 +278,16 @@
       },
       "cloud_auto_turn_off_options": {
         "name": "Auto turn-off times (min)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "De'Longhi Daedalus options",
+        "data": {
+          "cloud_telemetry": "Read-only cloud telemetry: pull live state from the De'Longhi cloud every 2 minutes. Never sends commands. Changing this reloads the integration."
+        }
       }
     }
   }

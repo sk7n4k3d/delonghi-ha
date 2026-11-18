@@ -25,7 +25,6 @@
       "invalid_auth": "Identifiants My Coffee Lounge invalides",
       "all_pools_unauthorized": "Connexion échouée sur toutes les régions (EU, EU_US, CH). Votre compte a peut-être été créé via la page d'inscription intégrée à l'app (OAuth2/OIDC), qui utilise un chemin d'authentification différent du login direct. Vérifiez votre mot de passe, puis ouvrez une issue sur le dépôt GitHub de l'intégration pour investigation.",
       "cannot_connect": "Impossible de joindre la machine sur le réseau local",
-      "invalid_host": "IP ou nom d'hôte invalide",
       "unknown": "Erreur inattendue"
     },
     "abort": {
@@ -279,6 +278,16 @@
       },
       "cloud_auto_turn_off_options": {
         "name": "Extinction automatique (min)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options De'Longhi Daedalus",
+        "data": {
+          "cloud_telemetry": "Télémétrie cloud en lecture seule : récupère l'état live du cloud De'Longhi toutes les 2 minutes. N'envoie jamais de commande. Modifier cette option recharge l'intégration."
+        }
       }
     }
   }
