@@ -18,9 +18,10 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > `custom_components/delonghi_daedalus/`; the other repo is a packaging mirror.
 >
 > Daedalus ≥ 0.4.0 optional **cloud telemetry** (read-only, opt-in) maps the known AWS shadow
-> fields to named entities (EN/FR) — alarms surface as `binary_sensor` (`problem`). Field mapping
+> fields to named entities (EN/FR/RO) — alarms surface as `binary_sensor` (`problem`). Field mapping
 > credits: @mimasek71 (issue #18). Example Lovelace card:
 > [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
+> [Set up My Coffee Lounge and upgrade an existing LAN connection](docs/daedalus-setup.md).
 >
 > PrimaDonna Aromatic **ECAM63070** monitoring was verified with Daedalus v0.4.7 on Home Assistant
 > Core 2026.11.1 using an EU owner account. The LAN connection, standby state and firmware

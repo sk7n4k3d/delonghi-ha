@@ -227,10 +227,18 @@ def test_path_alias_beats_segment_alias() -> None:
 
 
 def test_sensitive_keys_never_planned() -> None:
-    """BLE passcode / MAC / SN must not become entities in either platform."""
+    """Identifiers and credentials must not become cloud entities."""
     cloud = {
         "status_flat": {"BlePassCode": "123456", "MAC": "08:aa", "SN": "AC000", "Status": "Standby"},
-        "capabilities_flat": {"BlePassCode": "x", "Languages": 27},
+        "capabilities_flat": {
+            "BlePassCode": "x",
+            "network.MAC_address": "00:11:22:33:44:55",
+            "MachineName": "thing-id",
+            "network.LanIpAddress": "192.168.2.8",
+            "machine.SerialNumber": "machine-serial",
+            "auth.session_token.value": "session-token",
+            "Languages": 27,
+        },
     }
     planned = {k for s, k, _ in plan_cloud_entities(cloud, want_binary=False)}
     planned |= {k for s, k, _ in plan_cloud_entities(cloud, want_binary=True)}

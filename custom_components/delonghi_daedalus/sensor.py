@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -11,11 +10,11 @@ from homeassistant.const import MAX_LENGTH_STATE_STATE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .cloud_keys import KIND_CAPABILITY, CloudEntityDiscovery, CloudKey, cloud_key_display, lookup_cloud_key
 from .const import BREWING_STATISTICS_KEYS, CONF_CLOUD_TELEMETRY, DOMAIN
 from .coordinator import DaedalusCoordinator
+from .entity import DaedalusCloudEntity, DaedalusEntity
 
 
 async def async_setup_entry(
@@ -53,29 +52,34 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_add_cloud_sensors))
 
 
-class _DaedalusSensorBase(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
-    _attr_has_entity_name = True
-    # These are wiring-state sensors (LAN ID / SN / LAN IP), not user-facing
-    # measurements — keep them out of the main dashboard.
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
+class _DaedalusSensorBase(DaedalusEntity, SensorEntity):
     def __init__(self, coordinator: DaedalusCoordinator, *, key: str) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.serial_number}_{key}"
+        super().__init__(coordinator, key=key)
         self._attr_translation_key = key
 
 
-class DaedalusConnectionIdSensor(_DaedalusSensorBase):
+class _DaedalusLanDiagnosticSensor(_DaedalusSensorBase):
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Home Assistant applies this when creating a registry entry, so existing
+    # entities keep their previous enabled/disabled settings.
+    _attr_entity_registry_enabled_default = False
+
+
+class DaedalusConnectionIdSensor(_DaedalusLanDiagnosticSensor):
     def __init__(self, coordinator: DaedalusCoordinator) -> None:
         super().__init__(coordinator, key="connection_id")
 
     @property
     def native_value(self) -> int | None:
         data = self.coordinator.data or {}
-        return data.get("connection_id")
+        return data.get("connection_id") if data.get("connected") else None
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.native_value is not None
 
 
-class DaedalusSerialNumberSensor(_DaedalusSensorBase):
+class DaedalusSerialNumberSensor(_DaedalusLanDiagnosticSensor):
     def __init__(self, coordinator: DaedalusCoordinator) -> None:
         super().__init__(coordinator, key="serial_number")
 
@@ -84,7 +88,7 @@ class DaedalusSerialNumberSensor(_DaedalusSensorBase):
         return self.coordinator.serial_number
 
 
-class DaedalusLanIpSensor(_DaedalusSensorBase):
+class DaedalusLanIpSensor(_DaedalusLanDiagnosticSensor):
     def __init__(self, coordinator: DaedalusCoordinator) -> None:
         super().__init__(coordinator, key="lan_ip")
 
@@ -110,7 +114,7 @@ class DaedalusBrewingStatisticSensor(_DaedalusSensorBase):
         return cloud.get("brewing_statistics", {}).get(self._attr_translation_key)
 
 
-class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
+class DaedalusCloudSensor(DaedalusCloudEntity, SensorEntity):
     """One flattened AWS IoT shadow key (issue #18).
 
     Known fields get a translated name from ``cloud_keys``; unknown ones keep
@@ -122,8 +126,6 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
     stay stable even if the raw value shape changes later.
     """
 
-    _attr_has_entity_name = True
-
     def __init__(
         self,
         coordinator: DaedalusCoordinator,
@@ -131,23 +133,18 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
         key: str,
         meta: CloudKey | None = None,
     ) -> None:
-        super().__init__(coordinator)
-        self._source = source
-        self._key = key
-        display = cloud_key_display(key)
+        super().__init__(coordinator, source, key)
         if meta is None:
             meta = lookup_cloud_key(key)
         self._is_languages = meta is not None and meta.key == "languages"
-        # capabilities_flat keys keep a distinct unique_id namespace so a same
-        # named status/capability key can never collide.
-        prefix = "cloud" if source == "status_flat" else "cloudcap"
-        self._attr_unique_id = f"{coordinator.serial_number}_{prefix}_{display}"
         if meta is not None:
             self._attr_translation_key = f"cloud_{meta.key}"
         else:
+            display = cloud_key_display(key)
             self._attr_name = f"Cloud {display.replace('.', ' ').replace('_', ' ').strip()}"
-        if source == "capabilities_flat" or (meta is not None and meta.kind == KIND_CAPABILITY):
+        if source == "capabilities_flat" or meta is None or meta.kind == KIND_CAPABILITY:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            self._attr_entity_registry_enabled_default = False
 
     def _language_list(self, value: str) -> list[str] | None:
         """Decode the known Languages field that flatten_shadow stores as JSON."""
@@ -163,8 +160,7 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> str | int | float | None:
-        cloud = (self.coordinator.data or {}).get("cloud") or {}
-        value: Any = cloud.get(self._source, {}).get(self._key)
+        value = self._cloud_value
         if isinstance(value, bool):
             return "true" if value else "false"
         if isinstance(value, str) and len(value) > MAX_LENGTH_STATE_STATE:
@@ -175,10 +171,9 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        cloud = (self.coordinator.data or {}).get("cloud") or {}
-        attrs = {"shadow_key": self._key, "machine_name": cloud.get("machine_name")}
-        value = cloud.get(self._source, {}).get(self._key)
+    def extra_state_attributes(self) -> dict[str, object]:
+        attrs = super().extra_state_attributes
+        value = self._cloud_value
         if isinstance(value, str) and len(value) > MAX_LENGTH_STATE_STATE:
             languages = self._language_list(value)
             if languages is not None:

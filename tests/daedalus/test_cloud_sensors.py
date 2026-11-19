@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,13 +20,16 @@ from custom_components.delonghi_daedalus import binary_sensor as bs
 from custom_components.delonghi_daedalus import sensor as sp
 from custom_components.delonghi_daedalus.cloud_keys import lookup_cloud_key
 from custom_components.delonghi_daedalus.const import CONF_CLOUD_TELEMETRY, DOMAIN
+from custom_components.delonghi_daedalus.device import DaedalusDevice
 
 
 class _FakeCoordinator:
     serial_number = "SN-TEST"
 
-    def __init__(self, data: dict) -> None:
+    def __init__(self, data: dict, **entry_data: str) -> None:
+        self.entry = SimpleNamespace(data=entry_data)
         self.data = data
+        self.device = DaedalusDevice(self)
         self.listeners: list[Callable[[], None]] = []
 
     def async_add_listener(self, callback: Callable[[], None]) -> Callable[[], None]:
@@ -53,7 +57,7 @@ def test_known_status_key_uses_translation() -> None:
     assert entity._attr_unique_id == "SN-TEST_cloud_OperatingState"
     assert entity.native_value == "Standby"
     assert getattr(entity, "_attr_entity_category", None) is None
-    assert entity.extra_state_attributes == {"shadow_key": "OperatingState", "machine_name": "thing-1"}
+    assert entity.extra_state_attributes == {"shadow_key": "OperatingState"}
 
 
 def test_unknown_key_keeps_raw_fallback() -> None:
@@ -86,7 +90,6 @@ def test_oversized_languages_uses_count_and_list_attribute() -> None:
     assert entity.native_value == len(languages)
     assert entity.extra_state_attributes == {
         "shadow_key": "Languages",
-        "machine_name": "thing-1",
         "languages": languages,
     }
 
@@ -102,11 +105,11 @@ def test_state_length_boundary_preserves_short_string_and_omits_oversized_raw_va
     coord = _FakeCoordinator(_cloud(capabilities_flat={key: value}))
     entity = sp.DaedalusCloudSensor(coord, "capabilities_flat", key)
     assert entity.native_value == value
-    assert entity.extra_state_attributes == {"shadow_key": key, "machine_name": "thing-1"}
+    assert entity.extra_state_attributes == {"shadow_key": key}
 
     coord.data = _cloud(capabilities_flat={key: value + "x"})
     assert entity.native_value is None
-    assert entity.extra_state_attributes == {"shadow_key": key, "machine_name": "thing-1", "value_length": 256}
+    assert entity.extra_state_attributes == {"shadow_key": key, "value_length": 256}
 
 
 @pytest.mark.parametrize("key, payload", [("opaque", ["x" * 256]), ("Languages", [{"token": "x" * 256}])])
@@ -117,7 +120,6 @@ def test_oversized_json_does_not_expose_unknown_or_structured_values(key: str, p
     assert entity.native_value is None
     assert entity.extra_state_attributes == {
         "shadow_key": key,
-        "machine_name": "thing-1",
         "value_length": len(value),
     }
 
@@ -132,6 +134,7 @@ def test_alarm_maps_to_problem_binary_sensor() -> None:
     assert entity._attr_device_class == BinarySensorDeviceClass.PROBLEM
     assert entity._attr_translation_key == "cloud_descale"
     assert entity._attr_unique_id == "SN-TEST_cloud_Descale"
+    assert entity.extra_state_attributes == {"shadow_key": "Descale"}
     assert getattr(entity, "_attr_entity_category", None) is None
 
 
@@ -186,13 +189,101 @@ def test_binary_setup_adds_only_mapped_bools() -> None:
     assert len(coord.listeners) == 1
 
 
-@pytest.mark.parametrize("platform", [sp, bs])
-def test_setup_without_cloud_flag(platform) -> None:
+def test_setup_without_cloud_flag() -> None:
     coord = _FakeCoordinator(_CLOUD)
     sensors: list = []
-    asyncio.run(platform.async_setup_entry(_hass(coord), _entry(cloud_telemetry=False), sensors.extend))
-    assert all(not isinstance(e, (sp.DaedalusCloudSensor, bs.DaedalusCloudBinarySensor)) for e in sensors)
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(cloud_telemetry=False), sensors.extend))
+    assert all(not isinstance(e, sp.DaedalusCloudSensor) for e in sensors)
     assert not coord.listeners
+
+
+def test_sensor_setup_registers_listener_when_shadows_absent() -> None:
+    coord = _FakeCoordinator({"connected": True})  # no cloud key yet
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    assert len(coord.listeners) == 1
+    assert not any(isinstance(e, sp.DaedalusCloudSensor) for e in added)
+
+
+def test_device_info_on_all_platforms_without_changing_existing_entity_registry_keys() -> None:
+    coord = _FakeCoordinator(
+        _cloud(
+            status_flat={"OperatingState": "Standby", "Descale": True, "opaque": 1, "peripherals.DripPresence": False},
+            capabilities_flat={"Languages": 27},
+        ),
+        model="ECAM63070",
+        machine_name="PRIVATE-THING",
+    )
+    added: list = []
+    for platform in (sp, bs):
+        asyncio.run(platform.async_setup_entry(_hass(coord), _entry(), added.extend))
+
+    # HA finds an existing registry entry by platform/domain/unique ID before
+    # attaching the device or applying defaults for any new registry entries.
+    entities = {entity._attr_unique_id.removeprefix("SN-TEST_"): entity for entity in added}
+    assert set(entities) == {
+        "connection_id",
+        "serial_number",
+        "lan_ip",
+        "connected",
+        "cloud_OperatingState",
+        "cloud_Descale",
+        "cloud_opaque",
+        "cloudcap_Languages",
+        "cloud_peripherals.DripPresence",
+    }
+    device = entities["connected"]._attr_device_info
+    assert all(entity._attr_device_info == device for entity in added)
+    assert device["model"] == "PrimaDonna Aromatic ECAM630.70"
+    assert device["manufacturer"] == "De'Longhi"
+    assert "PRIVATE-THING" not in str(device)
+    assert "SN-TEST" not in str(device)
+    assert "connections" not in device
+    assert all(domain == DOMAIN and len(identifier) == 64 for domain, identifier in device["identifiers"])
+    assert len(device["identifiers"]) == 1
+
+    legacy_device = bs.DaedalusConnectedSensor(_FakeCoordinator({}))._attr_device_info
+    assert device["identifiers"] == legacy_device["identifiers"]
+    assert legacy_device["name"] == "De'Longhi My Coffee Lounge"
+    another = _FakeCoordinator({})
+    another.serial_number = "SN-DIFFERENT"
+    another.device = DaedalusDevice(another)
+    assert bs.DaedalusConnectedSensor(another)._attr_device_info["identifiers"] != device["identifiers"]
+
+    assert {
+        key for key, entity in entities.items() if not getattr(entity, "_attr_entity_registry_enabled_default", True)
+    } == {
+        "connection_id",
+        "serial_number",
+        "lan_ip",
+        "cloud_opaque",
+        "cloudcap_Languages",
+    }
+    assert getattr(entities["cloud_peripherals.DripPresence"], "_attr_entity_category", None) is None
+    assert entities["cloud_opaque"]._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+
+def test_cloud_availability_is_independent_of_the_lan_and_each_shadow() -> None:
+    coord = _FakeCoordinator(
+        {"connected": False, **_cloud(status_flat={"Descale": False}, capabilities_flat={"Languages": 27})}
+    )
+    lan = bs.DaedalusConnectedSensor(coord)
+    session_id = sp.DaedalusConnectionIdSensor(coord)
+    status = bs.DaedalusCloudBinarySensor(coord, "status_flat", "Descale", lookup_cloud_key("Descale"))
+    capabilities = sp.DaedalusCloudSensor(coord, "capabilities_flat", "Languages")
+    assert lan.available and not lan.is_on
+    assert not session_id.available
+    assert status.available and status.is_on is False
+    assert capabilities.available
+
+    coord.data = _cloud(status_flat={"Descale": False})
+    assert status.available
+    assert not capabilities.available
+
+    coord.data = {"connected": True, "connection_id": 0}
+    assert lan.available and lan.is_on
+    assert session_id.available and session_id.native_value == 0
+    assert not status.available
 
 
 @pytest.mark.parametrize("capabilities_at_setup", [False, True])

@@ -27,6 +27,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .cloud import SHADOWS, shadow_accepted_topic, shadow_rejected_topic
+from .cloud_keys import SENSITIVE_KEYS, normalize
 from .const import (
     CONF_CLOUD_TELEMETRY,
     CONF_HOST,
@@ -44,7 +45,9 @@ REDACT_KEYS: set[str] = {
     "password",
     "jwt",
     "session_token",
+    "sessionToken",
     "session_secret",
+    "sessionSecret",
     "id_token",
     "oauth_token",
     "AuthToken",
@@ -53,30 +56,25 @@ REDACT_KEYS: set[str] = {
     "uidSignature",
     "signatureTimestamp",
     "serial_number",
+    "serialNumber",
     "SerialNo",
     # H-daedalus-3 (audit 2026-05-08): config_flow stores the serial number
     # under CONF_MACHINE_NAME too (see config_flow.py:179). Without this
     # entry the SN leaked verbatim into uploaded diag dumps via the
     # ``machine_name`` field even though ``serial_number`` was scrubbed.
     "machine_name",
+    "machineName",
+    "thing_name",
+    "thingName",
+    "mac",
+    "mac_address",
+    "macAddress",
+    "connection_id",
+    "model",
     "host",
     "lan_ip",
+    "lan_tls_fingerprint",
 }
-
-
-def _redact_last_exception(exc: object | None, *, host: object = None) -> str:
-    """Free-text render of ``coordinator.last_exception``, safe to share.
-
-    ``async_redact_data`` is key-indexed and cannot scrub a free-text value,
-    yet exception texts carry the LAN WS URL (host), Gigya error strings that
-    may echo the account email, and JWT fragments (audit 2026-11-05). The
-    dump is designed to be pasted into a public issue — so the value is
-    sanitized (with the entry's configured host: private IPv6 forms are only
-    scrubbed literally) and prefixed with the exception type for triage.
-    """
-    if exc is None:
-        return ""
-    return f"{type(exc).__name__}: {sanitize_text(str(exc), host=host)}"
 
 
 # --- cloud telemetry block (issue #18) --------------------------------------
@@ -87,16 +85,20 @@ def _redact_last_exception(exc: object | None, *, host: object = None) -> str:
 _CLOUD_ERROR_MAX_CHARS = 240
 _TRUNCATED_MARK = "...[TRUNCATED]"
 
-# ``sanitize_text`` knows the Gigya/LAN spellings; a broker-controlled
-# ``/get/rejected`` payload is JSON and can echo nonce-ish fields
-# (``{"clientToken":"…","password":"…"}``). Extra scrub for this sink only.
-_JSON_SECRET_RE = re.compile(
-    r"""(?ix)
-    "? (clienttoken|accesstoken|authtoken|token|apikey|api_key|secret|password|passwd|jwt) "?
-    \s*[:=]\s*
-    "? [^"\s,}]+ "?
-    """
-)
+# Broker errors may include key/value fields we cannot look up in the entry.
+_JSON_FIELD_RE = re.compile(r"""(?i)(?<!\w)"?([a-z][\w]*)"?\s*[:=]\s*("(?:[^"\\]|\\.)*"|[^"\s,}]+)""")
+_PRIVATE_ERROR_FIELDS = SENSITIVE_KEYS | {"token", "accesstoken", "refreshtoken", "passwd"}
+
+
+def _sanitize_diagnostic_text(text: str, *, host: object, private_values: tuple[str, ...]) -> str:
+    for value in private_values:
+        text = text.replace(value, "**REDACTED**")
+    text = _JSON_FIELD_RE.sub(
+        lambda match: f'"{match[1]}":"***"' if normalize(match[1]) in _PRIVATE_ERROR_FIELDS else match[0],
+        text,
+    )
+    return sanitize_text(text, host=host)
+
 
 # Triage categories, first match wins — ordered most-specific first so, e.g.,
 # "no shadow document received before timeout" is reported as a missing
@@ -118,6 +120,7 @@ _CLOUD_ERROR_CATEGORIES: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     ("parse", re.compile(r"(?i)unparsable|not json|neither a list|malformed|truncated|buffer overflow")),
+    ("status_unavailable", re.compile(r"^Device directory (reports|returned|lookup failed)|^MachineStatus shadow")),
     ("device_lookup", re.compile(r"(?i)/devices|no rest device directory|thing name rejected")),
     ("timeout", re.compile(r"(?i)timed out|timeout")),
     ("unexpected", re.compile(r"(?i)^unexpected cloud error")),
@@ -157,7 +160,7 @@ def _to_iso(value: object) -> str | None:
     return stamp.isoformat()
 
 
-def _sanitize_cloud_error(raw: object, *, host: object = None, serial: object = None) -> dict[str, Any] | None:
+def _sanitize_cloud_error(raw: object, *, host: object, private_values: tuple[str, ...]) -> dict[str, Any] | None:
     """Structured, shareable view of ``coordinator``'s ``cloud_error`` string.
 
     Returns ``None`` when there is no error. Non-strings are ignored: the
@@ -166,8 +169,7 @@ def _sanitize_cloud_error(raw: object, *, host: object = None, serial: object = 
     """
     if not isinstance(raw, str) or not raw.strip():
         return None
-    text = sanitize_text(raw, host=host, serial=serial)
-    text = _JSON_SECRET_RE.sub(lambda m: f'"{m.group(1)}":"***"', text)
+    text = _sanitize_diagnostic_text(raw, host=host, private_values=private_values)
 
     # Category and codes are read off the *full* text: a code sitting past the
     # display ceiling must not be lost, and the truncation marker itself
@@ -214,6 +216,7 @@ def _cloud_diagnostics(
     entry_options: Mapping[str, Any],
     coordinator: Any,
     last_data: Mapping[str, Any],
+    private_values: tuple[str, ...],
 ) -> dict[str, Any]:
     """Cloud connection state for the dump (issue #18)."""
     # The reconfigure flow stores the switch in ``entry.data``; ``options`` is
@@ -229,7 +232,7 @@ def _cloud_diagnostics(
     error = _sanitize_cloud_error(
         raw_error,
         host=entry_data.get(CONF_HOST),
-        serial=entry_data.get(CONF_SERIAL_NUMBER),
+        private_values=private_values,
     )
     if error is not None:
         # Exact wall clock of the failed cloud hop when the coordinator
@@ -243,6 +246,9 @@ def _cloud_diagnostics(
         "last_cloud_message": _to_iso(cloud.get("fetched_at")),
         "cloud_topics_subscribed": _cloud_topics(entry_data, cloud),
         "cloud_error": error,
+        "cloud_status_error": _sanitize_cloud_error(
+            cloud.get("status_error"), host=entry_data.get(CONF_HOST), private_values=private_values
+        ),
     }
 
 
@@ -253,21 +259,37 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     entry_options = _entry_mapping(getattr(entry, "options", None))
 
     coord_state: dict[str, Any] = {}
-    last_data: Mapping[str, Any] = {}
+    last_data = _entry_mapping(getattr(coordinator, "data", None))
+    last_cloud = _entry_mapping(last_data.get("cloud"))
+    private_values = {
+        value
+        for data in (entry_data, entry_options, last_cloud)
+        for key in REDACT_KEYS
+        if isinstance(value := data.get(key), str) and value
+    }
+    # Longest first handles values that contain another private value.
+    private_values_by_length = tuple(sorted(private_values, key=len, reverse=True))
     if coordinator is not None:
-        last_data = _entry_mapping(getattr(coordinator, "data", None))
+        exception = getattr(coordinator, "last_exception", None)
+        exception_message = ""
+        if exception is not None:
+            sanitized = _sanitize_diagnostic_text(
+                str(exception), host=entry_data.get(CONF_HOST), private_values=private_values_by_length
+            )
+            exception_message = f"{type(exception).__name__}: {sanitized}"
         coord_state = {
             "last_update_success": bool(getattr(coordinator, "last_update_success", False)),
-            "last_exception": _redact_last_exception(
-                getattr(coordinator, "last_exception", None),
-                host=entry_data.get(CONF_HOST),
-            ),
+            "last_exception": exception_message,
             "update_interval_s": getattr(
                 getattr(coordinator, "update_interval", None), "total_seconds", lambda: None
             )(),
             "data_keys": sorted(last_data.keys()),
             "lan_connected": bool(last_data.get("connected")),
         }
+        if isinstance(lan_error := last_data.get("lan_error"), str):
+            coord_state["lan_error"] = _sanitize_diagnostic_text(
+                lan_error, host=entry_data.get(CONF_HOST), private_values=private_values_by_length
+            )
 
     return {
         "entry": {
@@ -277,7 +299,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
             "options": async_redact_data(dict(entry_options), REDACT_KEYS),
         },
         "coordinator": coord_state,
-        "cloud": _cloud_diagnostics(entry_data, entry_options, coordinator, last_data),
+        "cloud": _cloud_diagnostics(entry_data, entry_options, coordinator, last_data, private_values_by_length),
     }
 
 

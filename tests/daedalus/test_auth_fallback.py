@@ -14,6 +14,8 @@ from custom_components.delonghi_daedalus.api import (
     DaedalusAuthError,
     DaedalusConnectionError,
 )
+from custom_components.delonghi_daedalus.config_flow import _probe_pools
+from custom_components.delonghi_daedalus.const import GIGYA_POOL_EU
 from custom_components.delonghi_daedalus.lan_protocol import LanProtocolError
 
 HOST = "fd12:b0af::18"  # unique ULA, no collision with other test files
@@ -65,8 +67,9 @@ def test_login_falls_back_to_legacy_on_non_credential_error() -> None:
     asyncio.run(_run())
 
 
-def test_login_does_NOT_retry_legacy_on_wrong_password() -> None:
-    """A credential refusal (403001) must NOT be replayed in the legacy
+@pytest.mark.parametrize("error_code", [403001, 403042])
+def test_login_does_NOT_retry_legacy_on_wrong_password(error_code) -> None:
+    """A credential refusal must NOT be replayed in the legacy
     format: double-firing a wrong password burns Gigya rate limits."""
 
     async def _run() -> None:
@@ -74,7 +77,7 @@ def test_login_does_NOT_retry_legacy_on_wrong_password() -> None:
 
         async def login(request: web.Request) -> web.Response:
             seen.append("attempt")
-            return web.json_response({"errorCode": 403001, "errorMessage": "Wrong loginID/password"})
+            return web.json_response({"errorCode": error_code, "errorMessage": "Wrong loginID/password"})
 
         runner, base = await _serve({"/accounts.login": login})
         try:
@@ -89,10 +92,8 @@ def test_login_does_NOT_retry_legacy_on_wrong_password() -> None:
     asyncio.run(_run())
 
 
-def test_login_does_NOT_retry_on_lockout_codes() -> None:
-    """Review #18 F1: 403023 (invalid loginID/password) and 403025 (account
-    locked) are credential refusals too — replaying the legacy body would
-    double every failed login and deepen a lockout."""
+def test_login_does_NOT_retry_on_credential_refusal_codes() -> None:
+    """Refusals such as 403025 (invalid OAuth2 token) stop the format retry."""
 
     async def _run(code: int) -> None:
         seen: list[str] = []
@@ -219,8 +220,9 @@ def test_auth_rejection_retries_lowercase_and_remembers() -> None:
     async def _run() -> None:
         session = MagicMock()
         session.ws_connect = AsyncMock(side_effect=[first, second])
-        api = DaedalusApi(session=session)
-        conn = await api.connect_lan(host=HOST, serial_number="SN1", jwt="jwt")
+        api = DaedalusApi()
+        api._get_lan_session = lambda: session
+        conn = await api.connect_lan(host=HOST, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         assert conn.auth_message == "auth"
         assert conn.connection_id == 9
         first.close.assert_awaited_once()  # rejected socket must not leak
@@ -250,9 +252,10 @@ def test_both_auth_spellings_rejected_escalates() -> None:
     async def _run() -> None:
         session = MagicMock()
         session.ws_connect = AsyncMock(side_effect=[first, second])
-        api = DaedalusApi(session=session)
+        api = DaedalusApi()
+        api._get_lan_session = lambda: session
         with pytest.raises(DaedalusAuthError, match="both"):
-            await api.connect_lan(host=HOST, serial_number="SN1", jwt="jwt")
+            await api.connect_lan(host=HOST, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         first.close.assert_awaited_once()
         second.close.assert_awaited_once()
         await api.close()
@@ -267,8 +270,11 @@ def test_configured_lowercase_sends_lowercase_first() -> None:
     async def _run() -> None:
         session = MagicMock()
         session.ws_connect = AsyncMock(side_effect=[first])
-        api = DaedalusApi(session=session)
-        conn = await api.connect_lan(host=HOST, serial_number="SN1", jwt="jwt", auth_message="auth")
+        api = DaedalusApi()
+        api._get_lan_session = lambda: session
+        conn = await api.connect_lan(
+            host=HOST, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt", auth_message="auth"
+        )
         frame = json.loads(first.send_str.await_args.args[0])
         assert frame["Message"] == "auth"
         assert conn.auth_message == "auth"
@@ -283,3 +289,75 @@ def test_lan_protocol_error_subclass_ordering() -> None:
     from custom_components.delonghi_daedalus.lan_protocol import LanAuthRejectedError
 
     assert issubclass(LanAuthRejectedError, LanProtocolError)
+
+
+@pytest.mark.parametrize("path", ["/accounts.login", "/accounts.getJWT"])
+@pytest.mark.parametrize(
+    ("status", "payload"),
+    [
+        (429, {"errorCode": 403001}),
+        (502, {"errorCode": 403025}),
+        (200, {"errorCode": "6005"}),
+        (200, {"errorCode": 403048}),
+        (200, {"errorCode": 403120}),
+        (200, {"errorCode": 429000}),
+        (200, {"errorCode": 50001}),
+        (200, {"errorCode": 500001}),
+        (403, {"errorCode": 6005}),
+        (200, ["unexpected response"]),
+    ],
+)
+def test_unavailable_gigya_does_not_try_another_format_or_pool(path, status, payload) -> None:
+    async def _run() -> None:
+        calls = 0
+
+        async def unavailable(_request: web.Request) -> web.Response:
+            nonlocal calls
+            calls += 1
+            return web.json_response(payload, status=status)
+
+        runner, base = await _serve({path: unavailable})
+        api = DaedalusApi(gigya_base_url=base)
+        try:
+            with pytest.raises(DaedalusConnectionError):
+                if path == "/accounts.login":
+                    await _probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU)
+                else:
+                    await api.refresh_jwt(session_token="st", session_secret="ss")
+            assert calls == 1
+        finally:
+            await api.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error", "expected_attempts"),
+    [
+        ({"errorCode": 403012}, DaedalusAuthError, 1),
+        ({"errorCode": 403025}, DaedalusAuthError, 1),
+        ({"errorCode": 400093}, DaedalusConnectionError, 2),
+        ({"errorCode": "unknown"}, DaedalusConnectionError, 2),
+    ],
+)
+def test_refresh_only_reports_explicit_session_denial_as_auth(payload, expected_error, expected_attempts) -> None:
+    async def _run() -> None:
+        calls = 0
+
+        async def get_jwt(_request: web.Request) -> web.Response:
+            nonlocal calls
+            calls += 1
+            return web.json_response(payload)
+
+        runner, base = await _serve({"/accounts.getJWT": get_jwt})
+        api = DaedalusApi(gigya_base_url=base)
+        try:
+            with pytest.raises(expected_error):
+                await api.refresh_jwt(session_token="st", session_secret="ss")
+            assert calls == expected_attempts
+        finally:
+            await api.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
