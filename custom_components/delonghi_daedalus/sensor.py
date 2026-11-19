@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -12,7 +11,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .cloud_keys import KIND_CAPABILITY, CloudKey, lookup_cloud_key, plan_cloud_entities
+from .cloud_keys import KIND_CAPABILITY, CloudEntityDiscovery, CloudKey, cloud_key_display, lookup_cloud_key
 from .const import CONF_CLOUD_TELEMETRY, DOMAIN
 from .coordinator import DaedalusCoordinator
 
@@ -32,38 +31,18 @@ async def async_setup_entry(
     )
     if not entry.data.get(CONF_CLOUD_TELEMETRY):
         return
-    # Cloud shadows arrive late (first successful fetch) and their key set is
-    # only known at runtime: add each planned shadow key exactly once, on the
-    # first coordinator update that carries it. The listener self-unregisters
-    # once the data has arrived (same pattern as the delonghi_coffee button
-    # platform) — it must not fire on every 30 s update for the lifetime of
-    # the entry (review #18, F6).
-    added: set[tuple[str, str]] = set()
-    unsub: Callable[[], None] | None = None
+    discovery = CloudEntityDiscovery(want_binary=False)
 
     def _add_cloud_sensors() -> None:
-        nonlocal unsub
-        cloud = (coordinator.data or {}).get("cloud") or {}
-        new: list[DaedalusCloudSensor] = []
-        # Mapped alarm/bool keys belong to the binary_sensor platform —
-        # plan_cloud_entities partitions the two platforms exactly.
-        for source, key, meta in plan_cloud_entities(cloud, want_binary=False):
-            if (source, key) in added:
-                continue
-            added.add((source, key))
-            new.append(DaedalusCloudSensor(coordinator, source, key, meta=meta))
+        new = [
+            DaedalusCloudSensor(coordinator, source, key, meta=meta)
+            for source, key, meta in discovery.discover((coordinator.data or {}).get("cloud"))
+        ]
         if new:
             async_add_entities(new)
-        if any(cloud.get(s) for s in ("status_flat", "capabilities_flat")) and unsub is not None:
-            unsub()
-            unsub = None
 
-    if any((coordinator.data or {}).get("cloud", {}).get(s) for s in ("status_flat", "capabilities_flat")):
-        # First refresh already carried the shadows — add directly, no listener.
-        _add_cloud_sensors()
-    else:
-        unsub = coordinator.async_add_listener(_add_cloud_sensors)
-    entry.async_on_unload(lambda: unsub() if unsub is not None else None)
+    _add_cloud_sensors()
+    entry.async_on_unload(coordinator.async_add_listener(_add_cloud_sensors))
 
 
 class _DaedalusSensorBase(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
@@ -130,7 +109,7 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
         super().__init__(coordinator)
         self._source = source
         self._key = key
-        display = str(key).strip()[:64]
+        display = cloud_key_display(key)
         if meta is None:
             meta = lookup_cloud_key(key)
         # capabilities_flat keys keep a distinct unique_id namespace so a same

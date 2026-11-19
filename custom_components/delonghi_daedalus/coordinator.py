@@ -280,11 +280,10 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._cloud_data = cloud_data
             self._cloud_fetched_at = now
 
-        # Project the fresh snapshot now instead of on the next tick. Best
-        # effort: a harness without the coordinator base must not blow up the
-        # completed fetch.
+        # Project the fresh snapshot now instead of on the next tick. Keep
+        # the cache lock free while Home Assistant refreshes the coordinator.
         with contextlib.suppress(Exception):
-            self.async_request_refresh()
+            await self.async_request_refresh()
 
     async def async_shutdown(self) -> None:
         if self._cloud_task is not None and not self._cloud_task.done():

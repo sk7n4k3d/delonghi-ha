@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
@@ -14,7 +12,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .cloud_keys import KIND_ALARM, CloudKey, coerce_bool, plan_cloud_entities
+from .cloud_keys import KIND_ALARM, CloudEntityDiscovery, CloudKey, cloud_key_display, coerce_bool
 from .const import CONF_CLOUD_TELEMETRY, DOMAIN
 from .coordinator import DaedalusCoordinator
 
@@ -28,33 +26,19 @@ async def async_setup_entry(
     async_add_entities([DaedalusConnectedSensor(coordinator)])
     if not entry.data.get(CONF_CLOUD_TELEMETRY):
         return
-    # Same lazy pattern as sensor.py: the shadow key set is only known once
-    # the first cloud fetch lands, and the listener self-unregisters after
-    # that (review #18, F6). plan_cloud_entities(want_binary=True) hands this
-    # platform exactly the mapped alarm/bool keys — sensor.py keeps the rest.
-    added: set[tuple[str, str]] = set()
-    unsub: Callable[[], None] | None = None
+    discovery = CloudEntityDiscovery(want_binary=True)
 
     def _add_cloud_binary_sensors() -> None:
-        nonlocal unsub
-        cloud = (coordinator.data or {}).get("cloud") or {}
-        new: list[DaedalusCloudBinarySensor] = []
-        for source, key, meta in plan_cloud_entities(cloud, want_binary=True):
-            if (source, key) in added:
-                continue
-            added.add((source, key))
-            new.append(DaedalusCloudBinarySensor(coordinator, source, key, meta))
+        new = [
+            DaedalusCloudBinarySensor(coordinator, source, key, meta)
+            for source, key, meta in discovery.discover((coordinator.data or {}).get("cloud"))
+            if meta is not None
+        ]
         if new:
             async_add_entities(new)
-        if any(cloud.get(s) for s in ("status_flat", "capabilities_flat")) and unsub is not None:
-            unsub()
-            unsub = None
 
-    if any((coordinator.data or {}).get("cloud", {}).get(s) for s in ("status_flat", "capabilities_flat")):
-        _add_cloud_binary_sensors()
-    else:
-        unsub = coordinator.async_add_listener(_add_cloud_binary_sensors)
-    entry.async_on_unload(lambda: unsub() if unsub is not None else None)
+    _add_cloud_binary_sensors()
+    entry.async_on_unload(coordinator.async_add_listener(_add_cloud_binary_sensors))
 
 
 class DaedalusConnectedSensor(CoordinatorEntity[DaedalusCoordinator], BinarySensorEntity):
@@ -96,7 +80,7 @@ class DaedalusCloudBinarySensor(CoordinatorEntity[DaedalusCoordinator], BinarySe
         super().__init__(coordinator)
         self._source = source
         self._key = key
-        display = str(key).strip()[:64]
+        display = cloud_key_display(key)
         prefix = "cloud" if source == "status_flat" else "cloudcap"
         self._attr_unique_id = f"{coordinator.serial_number}_{prefix}_{display}"
         self._attr_translation_key = f"cloud_{meta.key}"

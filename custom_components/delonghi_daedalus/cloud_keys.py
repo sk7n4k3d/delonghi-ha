@@ -416,6 +416,10 @@ CLOUD_SOURCES: tuple[str, ...] = ("status_flat", "capabilities_flat")
 _MAX_PER_SOURCE = 80
 
 
+def cloud_key_display(key: str) -> str:
+    return str(key).strip()[:64]
+
+
 def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tuple[str, str, CloudKey | None]]:
     """(source, raw key, meta) for every shadow key one platform should own.
 
@@ -432,8 +436,7 @@ def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tup
         flat = cloud.get(source) or {}
         count = 0
         for key in flat:
-            display = str(key).strip()[:64]
-            if not display or normalize(key) in SENSITIVE_KEYS:
+            if not cloud_key_display(key) or normalize(key) in SENSITIVE_KEYS:
                 continue
             meta = lookup_cloud_key(key)
             if bool(meta is not None and meta.binary) != want_binary:
@@ -443,6 +446,31 @@ def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tup
                 break
             plan.append((source, key, meta))
     return plan
+
+
+class CloudEntityDiscovery:
+    """Track new shadow keys for one platform until the entry unloads."""
+
+    def __init__(self, *, want_binary: bool) -> None:
+        self._want_binary = want_binary
+        self._last_cloud: dict[str, Any] | None = None
+        self._added: dict[str, set[str]] = {source: set() for source in CLOUD_SOURCES}
+
+    def discover(self, cloud: dict[str, Any] | None) -> list[tuple[str, str, CloudKey | None]]:
+        # LAN refreshes reuse the cached dict. Either shadow can arrive later,
+        # and a later fetch can also report new fields in a previously seen shadow.
+        if cloud is None or cloud is self._last_cloud:
+            return []
+        self._last_cloud = cloud
+        new: list[tuple[str, str, CloudKey | None]] = []
+        for source, key, meta in plan_cloud_entities(cloud, want_binary=self._want_binary):
+            display = cloud_key_display(key)
+            added = self._added[source]
+            if display in added or len(added) >= _MAX_PER_SOURCE:
+                continue
+            added.add(display)
+            new.append((source, key, meta))
+        return new
 
 
 # "ano"/"ne" are Czech yes/no — mimasek71's fork surfaced those strings, and a

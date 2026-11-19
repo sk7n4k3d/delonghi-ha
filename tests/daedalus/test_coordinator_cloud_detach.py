@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.delonghi_daedalus.cloud import CloudTelemetryError
 from custom_components.delonghi_daedalus.const import (
@@ -47,7 +47,7 @@ def _make_coordinator() -> DaedalusCoordinator:
     # A live LAN connection: _ensure_connected short-circuits, so the refresh
     # duration measures only the cloud path.
     coord._lan = MagicMock(closed=False, connection_id="c1")
-    coord.async_request_refresh = MagicMock()
+    coord.async_request_refresh = AsyncMock()
     return coord
 
 
@@ -150,10 +150,19 @@ def test_successful_fetch_projects_via_one_extra_refresh():
 
     async def _go():
         coord = _make_coordinator()
+
+        async def _refresh():
+            assert not coord._cloud_lock.locked()
+            coord.data = await coord._async_update_data()
+
+        coord.async_request_refresh.side_effect = _refresh
         with patch(_PATCH, side_effect=_slow_fetch(0.0)):
             await coord._async_update_data()
-            await asyncio.wait_for(coord._cloud_task, timeout=5)
-        coord.async_request_refresh.assert_called_once()
+            fetch_task = coord._cloud_task
+            await asyncio.wait_for(fetch_task, timeout=5)
+        coord.async_request_refresh.assert_awaited_once()
+        assert coord._cloud_task is fetch_task
+        assert coord.data["cloud"] is coord._cloud_data
         assert coord._cloud_data["machine_name"] == "thing-1"
 
     asyncio.run(_go())

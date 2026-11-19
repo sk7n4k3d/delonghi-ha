@@ -14,6 +14,7 @@ import pytest
 
 from custom_components.delonghi_daedalus.cloud_keys import (
     CLOUD_KEYS,
+    CloudEntityDiscovery,
     coerce_bool,
     lookup_cloud_key,
     normalize,
@@ -99,6 +100,24 @@ def test_plan_drops_blank_keys() -> None:
 def test_plan_caps_per_source() -> None:
     cloud = {"status_flat": {f"opaque{i}": i for i in range(200)}}
     assert len(plan_cloud_entities(cloud, want_binary=False)) <= 80
+
+
+def test_discovery_caps_accumulated_fields_per_source() -> None:
+    discovery = CloudEntityDiscovery(want_binary=False)
+    first = {"status_flat": {f"opaque{i}": i for i in range(79)}}
+    assert len(discovery.discover(first)) == 79
+    second = {"status_flat": {"OperatingState": "Standby", "CurrMode": 0}, "capabilities_flat": {"Languages": 27}}
+    assert [(source, key) for source, key, _ in discovery.discover(second)] == [
+        ("status_flat", "OperatingState"),
+        ("capabilities_flat", "Languages"),
+    ]
+
+
+def test_discovery_skips_keys_with_the_same_truncated_id() -> None:
+    discovery = CloudEntityDiscovery(want_binary=False)
+    prefix = "x" * 64
+    assert len(discovery.discover({"status_flat": {f"{prefix}.first": 1}})) == 1
+    assert discovery.discover({"status_flat": {f"{prefix}.second": 2}}) == []
 
 
 @pytest.mark.parametrize("lang", ["en", "fr"])

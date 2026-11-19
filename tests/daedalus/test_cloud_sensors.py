@@ -6,8 +6,10 @@ Uses the stubbed homeassistant bases from the root conftest — no HA runtime.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
+import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.helpers.entity import EntityCategory
 
@@ -22,11 +24,16 @@ class _FakeCoordinator:
 
     def __init__(self, data: dict) -> None:
         self.data = data
-        self.listeners = 0
+        self.listeners: list[Callable[[], None]] = []
 
-    def async_add_listener(self, _cb):
-        self.listeners += 1
-        return lambda: None
+    def async_add_listener(self, callback: Callable[[], None]) -> Callable[[], None]:
+        self.listeners.append(callback)
+        return lambda: self.listeners.remove(callback)
+
+    def update(self, data: dict) -> None:
+        self.data = data
+        for callback in list(self.listeners):
+            callback()
 
 
 def _cloud(**flats) -> dict:
@@ -121,7 +128,7 @@ def test_sensor_setup_skips_binary_keys() -> None:
     asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
     cloud_entities = [e for e in added if isinstance(e, sp.DaedalusCloudSensor)]
     assert {e._key for e in cloud_entities} == {"OperatingState", "opaque"}
-    assert coord.listeners == 0  # data already present → no listener
+    assert len(coord.listeners) == 1
 
 
 def test_binary_setup_adds_only_mapped_bools() -> None:
@@ -130,20 +137,64 @@ def test_binary_setup_adds_only_mapped_bools() -> None:
     asyncio.run(bs.async_setup_entry(_hass(coord), _entry(), added.extend))
     cloud_entities = [e for e in added if isinstance(e, bs.DaedalusCloudBinarySensor)]
     assert [e._key for e in cloud_entities] == ["Descale"]
-    assert coord.listeners == 0
+    assert len(coord.listeners) == 1
 
 
-def test_setup_without_cloud_flag() -> None:
+@pytest.mark.parametrize("platform", [sp, bs])
+def test_setup_without_cloud_flag(platform) -> None:
     coord = _FakeCoordinator(_CLOUD)
     sensors: list = []
-    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(cloud_telemetry=False), sensors.extend))
-    assert all(not isinstance(e, sp.DaedalusCloudSensor) for e in sensors)
-    assert coord.listeners == 0
+    asyncio.run(platform.async_setup_entry(_hass(coord), _entry(cloud_telemetry=False), sensors.extend))
+    assert all(not isinstance(e, (sp.DaedalusCloudSensor, bs.DaedalusCloudBinarySensor)) for e in sensors)
+    assert not coord.listeners
 
 
-def test_sensor_setup_registers_listener_when_shadows_absent() -> None:
-    coord = _FakeCoordinator({"connected": True})  # no cloud key yet
+@pytest.mark.parametrize("capabilities_at_setup", [False, True])
+def test_platforms_discover_staggered_shadows_and_late_keys(capabilities_at_setup: bool) -> None:
+    capabilities = {"Languages": 27, "Jug": True}
+    status = {"OperatingState": "Standby", "Descale": True}
+    first = _cloud(capabilities_flat=capabilities)
+    coord = _FakeCoordinator(first if capabilities_at_setup else {"connected": True})
+    entries = [_entry(), _entry()]
     added: list = []
-    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
-    assert coord.listeners == 1
-    assert not any(isinstance(e, sp.DaedalusCloudSensor) for e in added)
+    asyncio.run(sp.async_setup_entry(_hass(coord), entries[0], added.extend))
+    asyncio.run(bs.async_setup_entry(_hass(coord), entries[1], added.extend))
+
+    def cloud_ids(entities):
+        return [
+            e._attr_unique_id for e in entities if isinstance(e, (sp.DaedalusCloudSensor, bs.DaedalusCloudBinarySensor))
+        ]
+
+    capabilities_ids = ["SN-TEST_cloudcap_Languages", "SN-TEST_cloudcap_Jug"]
+    assert cloud_ids(added) == (capabilities_ids if capabilities_at_setup else [])
+    assert len(coord.listeners) == 2
+
+    coord.update(first)
+    assert cloud_ids(added) == capabilities_ids
+    second = _cloud(status_flat=status)
+    coord.update(second)
+    coord.update(second)  # LAN refresh reusing the cloud snapshot
+    coord.update(_cloud(status_flat=dict(status)))  # separate fetch with the same keys
+    status_ids = ["SN-TEST_cloud_OperatingState", "SN-TEST_cloud_Descale"]
+    assert cloud_ids(added) == capabilities_ids + status_ids
+
+    # Both sources have supplied keys. A later snapshot can still introduce
+    # new fields in them, and previously seen keys retain their IDs.
+    latest_status = {**status, "CurrMode": 3, "alarms.Waste": True}
+    latest = _cloud(status_flat=latest_status, capabilities_flat=capabilities)
+    coord.update(latest)
+    late_ids = ["SN-TEST_cloud_CurrMode", "SN-TEST_cloud_alarms.Waste"]
+    assert cloud_ids(added) == capabilities_ids + status_ids + late_ids
+
+    for entry in entries:
+        entry.async_on_unload.call_args.args[0]()
+    assert not coord.listeners
+    coord.update(_cloud(status_flat={**latest_status, "opaque": 1}))
+    assert cloud_ids(added) == capabilities_ids + status_ids + late_ids
+
+    coord.update(latest)
+    reloaded: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), reloaded.extend))
+    asyncio.run(bs.async_setup_entry(_hass(coord), _entry(), reloaded.extend))
+    assert len(coord.listeners) == 2
+    assert sorted(cloud_ids(reloaded)) == sorted(cloud_ids(added))
