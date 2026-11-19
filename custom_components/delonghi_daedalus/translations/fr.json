@@ -165,6 +165,15 @@
       "lan_ip": {
         "name": "Adresse IP locale"
       },
+      "brew_count": {
+        "name": "Nombre de préparations"
+      },
+      "stopped_brew_count": {
+        "name": "Nombre de préparations arrêtées"
+      },
+      "brewing_error_count": {
+        "name": "Nombre d'erreurs de préparation"
+      },
       "cloud_operating_state": {
         "name": "État de la machine"
       },

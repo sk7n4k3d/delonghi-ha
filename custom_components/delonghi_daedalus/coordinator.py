@@ -28,8 +28,11 @@ from .api import (
     DaedalusConnectionError,
     DaedalusLanConnection,
 )
-from .cloud import CloudTelemetryError, fetch_cloud_state, flatten_shadow
+from .cloud import CloudTelemetryError, fetch_brewing_statistics, fetch_cloud_state, flatten_shadow
 from .const import (
+    BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS,
+    BREWING_STATISTICS_POLL_SECONDS,
+    BREWING_STATISTICS_RETRY_SECONDS,
     CLOUD_FETCH_TIMEOUT_SECONDS,
     CLOUD_POLL_SECONDS,
     CONF_CLOUD_TELEMETRY,
@@ -87,6 +90,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cloud_error_at: float | None = None
         self._cloud_lock = asyncio.Lock()
         self._cloud_task: asyncio.Task | None = None
+        self._brewing_statistics_due_at = 0.0
 
     @property
     def serial_number(self) -> str:
@@ -277,6 +281,12 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.hass.config_entries.async_update_entry(
                     self.entry, data={**self.entry.data, CONF_MACHINE_NAME: thing}
                 )
+            if (
+                self._cloud_data
+                and self._cloud_data["machine_name"] == thing
+                and "brewing_statistics" in self._cloud_data
+            ):
+                cloud_data["brewing_statistics"] = self._cloud_data["brewing_statistics"]
             self._cloud_data = cloud_data
             self._cloud_fetched_at = now
 
@@ -284,6 +294,28 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the cache lock free while Home Assistant refreshes the coordinator.
         with contextlib.suppress(Exception):
             await self.async_request_refresh()
+
+        # Cache and request a refresh of the regular shadows before probing.
+        # A refused statistics request can close only its own MQTT session.
+        if time.monotonic() >= self._brewing_statistics_due_at:
+            await self._async_update_brewing_statistics(thing, cloud_data)
+
+    async def _async_update_brewing_statistics(self, thing: str, cloud_data: dict[str, Any]) -> None:
+        counters: dict[str, int] = {}
+        try:
+            async with asyncio.timeout(BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS):
+                counters = await fetch_brewing_statistics(
+                    self._api.http_session, thing_name=thing, jwt=self.entry.data[CONF_JWT]
+                )
+        except Exception as exc:  # noqa: BLE001 — optional shadow, separate from cloud health
+            _LOGGER.debug("Daedalus cloud: brewing statistics unavailable (%s)", type(exc).__name__)
+
+        interval = BREWING_STATISTICS_POLL_SECONDS if counters else BREWING_STATISTICS_RETRY_SECONDS
+        self._brewing_statistics_due_at = time.monotonic() + interval
+        if counters != cloud_data.get("brewing_statistics", {}):
+            self._cloud_data = {**cloud_data, "brewing_statistics": counters}
+            with contextlib.suppress(Exception):
+                await self.async_request_refresh()
 
     async def async_shutdown(self) -> None:
         if self._cloud_task is not None and not self._cloud_task.done():

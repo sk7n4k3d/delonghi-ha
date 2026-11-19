@@ -13,8 +13,13 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from custom_components.delonghi_daedalus.cloud import CloudTelemetryError
 from custom_components.delonghi_daedalus.const import (
+    BREWING_STATISTICS_POLL_SECONDS,
+    BREWING_STATISTICS_RETRY_SECONDS,
+    CLOUD_POLL_SECONDS,
     CONF_CLOUD_TELEMETRY,
     CONF_HOST,
     CONF_JWT,
@@ -24,6 +29,13 @@ from custom_components.delonghi_daedalus.const import (
 from custom_components.delonghi_daedalus.coordinator import DaedalusCoordinator
 
 _PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_cloud_state"
+_STATS_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_brewing_statistics"
+
+
+@pytest.fixture(autouse=True)
+def _mock_statistics():
+    with patch(_STATS_PATCH, return_value={}) as mocked:
+        yield mocked
 
 
 def _make_coordinator() -> DaedalusCoordinator:
@@ -190,5 +202,88 @@ def test_cloud_hop_timeout_sets_descriptive_error():
         assert coord._cloud_error.strip()
         assert "timed out" in coord._cloud_error
         assert coord._cloud_data is None
+
+    asyncio.run(_go())
+
+
+def test_optional_statistics_timeout_leaves_regular_shadows_untouched(_mock_statistics):
+    async def _go():
+        coord = _make_coordinator()
+        await_stats = asyncio.Event()
+
+        async def _refresh():
+            coord.data = await coord._async_update_data()
+
+        async def _statistics(*_args, **_kwargs):
+            await_stats.set()
+            await asyncio.Event().wait()
+
+        coord.async_request_refresh.side_effect = _refresh
+        _mock_statistics.side_effect = _statistics
+        with (
+            patch(_PATCH, return_value=(_DOCS, "thing-1")) as regular_fetch,
+            patch("custom_components.delonghi_daedalus.coordinator.BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS", 0.05),
+        ):
+            start = time.monotonic()
+            await coord._async_update_data()
+            await asyncio.wait_for(await_stats.wait(), timeout=2)
+            assert coord.data["cloud"]["status_flat"] == {"a": 1}
+            assert coord.data["connected"] is True
+            assert not coord._cloud_task.done()
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+            assert coord._cloud_error is None
+            assert coord._brewing_statistics_due_at >= start + BREWING_STATISTICS_RETRY_SECONDS
+            assert "brewing_statistics" not in coord._cloud_data
+            regular_fetch.assert_awaited_once()
+            coord.async_request_refresh.assert_awaited_once()
+
+            # A new regular cycle remains independent of the failed probe.
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert regular_fetch.await_count == 2
+            _mock_statistics.assert_awaited_once()
+
+    asyncio.run(_go())
+
+
+def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statistics):
+    async def _go():
+        coord = _make_coordinator()
+        counters = {"brew_count": 12, "stopped_brew_count": 3, "brewing_error_count": 0}
+        updated_counters = {**counters, "brew_count": 13}
+        _mock_statistics.side_effect = [counters, CloudTelemetryError("broker refused subscriptions"), updated_counters]
+
+        with patch(_PATCH, return_value=(_DOCS, "thing-1")):
+            start = time.monotonic()
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.async_request_refresh.await_count == 2
+            assert coord._brewing_statistics_due_at >= start + BREWING_STATISTICS_POLL_SECONDS
+            assert coord._cloud_data["brewing_statistics"] == counters
+
+            # Simulate a normal fetch before the next statistics poll is due.
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord._cloud_data["brewing_statistics"] == counters
+            _mock_statistics.assert_awaited_once()
+
+            # A denied statistics subscription stops publishing the stale counters.
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._brewing_statistics_due_at -= BREWING_STATISTICS_POLL_SECONDS + 1
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord._cloud_data["brewing_statistics"] == {}
+            assert coord._cloud_data["status_flat"] == {"a": 1}
+            assert coord._cloud_error is None
+            assert coord.async_request_refresh.await_count == 5
+            assert _mock_statistics.await_count == 2
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._brewing_statistics_due_at -= BREWING_STATISTICS_RETRY_SECONDS + 1
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord._cloud_data["brewing_statistics"] == updated_counters
 
     asyncio.run(_go())

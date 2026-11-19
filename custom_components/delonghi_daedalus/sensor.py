@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .cloud_keys import KIND_CAPABILITY, CloudEntityDiscovery, CloudKey, cloud_key_display, lookup_cloud_key
-from .const import CONF_CLOUD_TELEMETRY, DOMAIN
+from .const import BREWING_STATISTICS_KEYS, CONF_CLOUD_TELEMETRY, DOMAIN
 from .coordinator import DaedalusCoordinator
 
 
@@ -32,12 +32,18 @@ async def async_setup_entry(
     if not entry.data.get(CONF_CLOUD_TELEMETRY):
         return
     discovery = CloudEntityDiscovery(want_binary=False)
+    added_statistics: set[str] = set()
 
     def _add_cloud_sensors() -> None:
-        new = [
-            DaedalusCloudSensor(coordinator, source, key, meta=meta)
-            for source, key, meta in discovery.discover((coordinator.data or {}).get("cloud"))
+        cloud = (coordinator.data or {}).get("cloud")
+        new: list[SensorEntity] = [
+            DaedalusCloudSensor(coordinator, source, key, meta=meta) for source, key, meta in discovery.discover(cloud)
         ]
+        counters = (cloud or {}).get("brewing_statistics", {})
+        for key in BREWING_STATISTICS_KEYS.values():
+            if key in counters and key not in added_statistics:
+                added_statistics.add(key)
+                new.append(DaedalusBrewingStatisticSensor(coordinator, key=key))
         if new:
             async_add_entities(new)
 
@@ -84,6 +90,22 @@ class DaedalusLanIpSensor(_DaedalusSensorBase):
     def native_value(self) -> str | None:
         data = self.coordinator.data or {}
         return data.get("host")
+
+
+class DaedalusBrewingStatisticSensor(_DaedalusSensorBase):
+    """One lifetime brewing counter reported by the machine."""
+
+    _attr_entity_category = None
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.native_value is not None
+
+    @property
+    def native_value(self) -> int | None:
+        cloud = (self.coordinator.data or {}).get("cloud") or {}
+        return cloud.get("brewing_statistics", {}).get(self._attr_translation_key)
 
 
 class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):

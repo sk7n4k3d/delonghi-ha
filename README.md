@@ -21,6 +21,9 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > fields to named entities (EN/FR) — alarms surface as `binary_sensor` (`problem`). Field mapping
 > credits: @mimasek71 (issue #18). Example Lovelace card:
 > [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
+>
+> Machines that report lifetime brewing statistics, including the PrimaDonna Aromatic ECAM63070,
+> also expose the `Brew`, `Stopped`, and `InError` counters as separate sensors.
 
 ## Features
 
