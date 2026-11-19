@@ -419,14 +419,14 @@ class DaedalusApi:
                     sanitize_text(f"LAN AUTH: unexpected WS frame type {raw.type!r}", host=host)
                 )
             response = parse_message(raw.data)
-            connection_id = parse_auth_response(response)
             # Some machines omit the echo. When present, it must match the
-            # serial selected in setup, even if the certificate is pinned.
+            # serial selected in setup before a rejection can trigger a retry.
             echoed_serial = response.get("SerialNo", serial_number)
             if not isinstance(echoed_serial, str) or echoed_serial.casefold() != serial_number.casefold():
                 message = "LAN endpoint reported a different machine serial number. Check the LAN address."
                 _LOGGER.error(message)
                 raise DaedalusLanSerialMismatchError(message)
+            connection_id = parse_auth_response(response)
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             # TimeoutError (ws.receive timing out on a machine that accepts
             # TCP but never answers the AUTH frame) and bare OSError (reset,

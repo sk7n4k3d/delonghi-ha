@@ -99,8 +99,17 @@ def test_preflight_is_credential_free_and_connect_checks_pin_before_http(certifi
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("echo", ["other-private-serial", None])
-def test_serial_mismatch_closes_pinned_connection_without_retry(monkeypatch, caplog, echo):
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"Response": "OK", "ConnectionId": 7, "SerialNo": "other-private-serial"},
+        {"Response": "OK", "ConnectionId": 7, "SerialNo": None},
+        {"Response": "UNAUTHORIZED", "SerialNo": "other-private-serial"},
+        {"Response": "OK", "SerialNo": "other-private-serial"},
+    ],
+    ids=["different", "null", "rejected", "missing-connection-id"],
+)
+def test_serial_mismatch_closes_pinned_connection_without_retry(monkeypatch, caplog, response):
     host = "192.168.1.42"
     expected_serial = "paired-private-serial"
     token = "synthetic-private-token"
@@ -108,7 +117,7 @@ def test_serial_mismatch_closes_pinned_connection_without_retry(monkeypatch, cap
     ws.receive = AsyncMock(
         return_value=SimpleNamespace(
             type=aiohttp.WSMsgType.TEXT,
-            data=json.dumps({"Response": "OK", "ConnectionId": 7, "SerialNo": echo}),
+            data=json.dumps(response),
         )
     )
     session = MagicMock(ws_connect=AsyncMock(return_value=ws))
