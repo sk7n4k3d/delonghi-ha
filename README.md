@@ -27,6 +27,9 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > Core 2026.11.1 using an EU owner account. The LAN connection, standby state and firmware
 > sensors worked with display/main board 1.2.0 and Wi-Fi module 2.5.3.
 >
+> Machines that report lifetime brewing statistics, including the PrimaDonna Aromatic ECAM63070,
+> also expose the `Brew`, `Stopped`, and `InError` counters as separate sensors.
+>
 > The optional **Warm up** action supports the EU PrimaDonna Aromatic ECAM630.70 with UI and mainboard
 > firmware 1.2.0 and Wi-Fi firmware 2.5.3. An attended test confirmed startup, initial heating and
 > rinsing on that combination. Enable **Warm up** in the integration options and press **Warm up** on

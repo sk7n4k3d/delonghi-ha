@@ -21,8 +21,11 @@ from .api import (
     DaedalusLanIdentityError,
     DaedalusLanSerialMismatchError,
 )
-from .cloud import CloudTelemetryError, fetch_cloud_state, flatten_shadow
+from .cloud import CloudTelemetryError, fetch_brewing_statistics, fetch_cloud_state, flatten_shadow
 from .const import (
+    BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS,
+    BREWING_STATISTICS_POLL_SECONDS,
+    BREWING_STATISTICS_RETRY_SECONDS,
     CLOUD_FETCH_TIMEOUT_SECONDS,
     CLOUD_POLL_SECONDS,
     CONF_CLOUD_TELEMETRY,
@@ -89,6 +92,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cloud_auth_failed_for: tuple[str | None, ...] | None = None
         self._cloud_expiry: asyncio.TimerHandle | None = None
         self._cloud_task: asyncio.Task | None = None
+        self._brewing_statistics_due_at = 0.0
         self._stopping = False
 
     @property
@@ -381,11 +385,35 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cloud_error_at = None
         if thing != self.entry.data.get(CONF_MACHINE_NAME):
             self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_MACHINE_NAME: thing})
+            self._brewing_statistics_due_at = 0.0
+        previous = self._cloud_data
+        if previous and previous.get("machine_name") == thing and "brewing_statistics" in previous:
+            cloud_data["brewing_statistics"] = previous["brewing_statistics"]
         self._cloud_data = cloud_data
         self._cloud_fetched_at = time.monotonic()
         self._cancel_cloud_expiry()
         self._cloud_expiry = asyncio.get_running_loop().call_later(_CLOUD_MAX_AGE, self._expire_cloud)
         self._publish_snapshot()
+
+        # The optional read uses a separate session after publishing the regular shadows.
+        if time.monotonic() >= self._brewing_statistics_due_at:
+            await self._async_update_brewing_statistics(thing, jwt, cloud_data)
+
+    async def _async_update_brewing_statistics(self, thing: str, jwt: str, cloud_data: dict[str, Any]) -> None:
+        counters: dict[str, int] = {}
+        try:
+            async with asyncio.timeout(BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS):
+                counters = await fetch_brewing_statistics(self._api.http_session, thing_name=thing, jwt=jwt)
+        except Exception as exc:  # noqa: BLE001 — optional shadow, separate from cloud health
+            _LOGGER.debug("Daedalus cloud: brewing statistics unavailable (%s)", type(exc).__name__)
+
+        if self._cloud_data is not cloud_data:
+            return  # The original snapshot expired while statistics were pending.
+        interval = BREWING_STATISTICS_POLL_SECONDS if counters else BREWING_STATISTICS_RETRY_SECONDS
+        self._brewing_statistics_due_at = time.monotonic() + interval
+        if counters != cloud_data.get("brewing_statistics", {}):
+            self._cloud_data = {**cloud_data, "brewing_statistics": counters}
+            self._publish_snapshot()
 
     def _record_cloud_failure(self, error: str) -> None:
         self._cloud_error = error

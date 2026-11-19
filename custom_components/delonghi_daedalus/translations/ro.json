@@ -207,6 +207,15 @@
       "lan_ip": {
         "name": "Adresă IP în rețeaua locală"
       },
+      "brew_count": {
+        "name": "Număr de preparări"
+      },
+      "stopped_brew_count": {
+        "name": "Număr de preparări oprite"
+      },
+      "brewing_error_count": {
+        "name": "Număr de erori la preparare"
+      },
       "cloud_operating_state": {
         "name": "Starea aparatului"
       },

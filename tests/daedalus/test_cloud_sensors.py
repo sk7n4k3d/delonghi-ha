@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+from homeassistant.components.sensor import SensorStateClass
 from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.delonghi_daedalus import binary_sensor as bs
@@ -334,3 +335,32 @@ def test_platforms_discover_staggered_shadows_and_late_keys(capabilities_at_setu
     asyncio.run(bs.async_setup_entry(_hass(coord), _entry(), reloaded.extend))
     assert len(coord.listeners) == 2
     assert sorted(cloud_ids(reloaded)) == sorted(cloud_ids(added))
+
+
+def test_brewing_counters_discovered_when_optional_statistics_arrive() -> None:
+    coord = _FakeCoordinator(_CLOUD)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+
+    def counters():
+        return {e._attr_translation_key: e for e in added if isinstance(e, sp.DaedalusBrewingStatisticSensor)}
+
+    assert counters() == {}
+    coord.update(_cloud(brewing_statistics={"stopped_brew_count": 0}))
+    assert counters()["stopped_brew_count"].native_value == 0
+    totals = {"brew_count": 12, "stopped_brew_count": 1, "brewing_error_count": 0}
+    coord.update(_cloud(brewing_statistics=totals))
+    coord.update(_cloud(brewing_statistics=totals))
+    assert sum(isinstance(e, sp.DaedalusBrewingStatisticSensor) for e in added) == 3
+    for key, value in totals.items():
+        entity = counters()[key]
+        assert entity._attr_unique_id == f"SN-TEST_{key}"
+        assert entity._attr_state_class == SensorStateClass.TOTAL_INCREASING
+        assert entity.native_value == value
+        assert entity.available
+
+    coord.update(_cloud(brewing_statistics={}))
+    assert all(not entity.available for entity in counters().values())
+    coord.update(_cloud(brewing_statistics=totals))
+    assert all(entity.available for entity in counters().values())
+    assert sum(isinstance(e, sp.DaedalusBrewingStatisticSensor) for e in added) == 3

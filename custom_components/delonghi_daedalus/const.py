@@ -81,3 +81,15 @@ CLOUD_POLL_SECONDS: Final = 120
 # DEFAULT_UPDATE_INTERVAL_SECONDS: the hop runs detached from the refresh
 # (finding 9), so the LAN snapshot never waits on it.
 CLOUD_FETCH_TIMEOUT_SECONDS: Final = 75
+
+
+# Statistics use a separate MQTT session so shadow authorization or timeouts
+# cannot interfere with MachineStatus and MachineCapabilities.
+BREWING_STATISTICS_POLL_SECONDS: Final = 15 * 60
+BREWING_STATISTICS_RETRY_SECONDS: Final = 60 * 60
+BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS: Final = 10
+BREWING_STATISTICS_KEYS: Final = {
+    "Brew": "brew_count",
+    "Stopped": "stopped_brew_count",
+    "InError": "brewing_error_count",
+}

@@ -8,7 +8,8 @@ Two hops, both JWT-authenticated:
    machine. The directory answers grouped under ``ownedByMe`` /
    ``sharedToMe``.
 2. AWS IoT Core device shadows over MQTT 5 / WebSocket (WSS:443): read the
-   named shadows ``MachineStatus`` and ``MachineCapabilities``. Read-only —
+   named shadows ``MachineStatus``, ``MachineCapabilities``, and optional
+   ``BrewingStatisticsTotals``. Read-only —
    the only publishes are the standard ``$aws/things/.../get`` requests,
    which only ask the shadow service for the stored document.
 
@@ -48,6 +49,7 @@ from .const import (
     AWS_REST_BASE_URL_LEGACY_PROD,
     AWS_REST_BASE_URL_PROD,
     AWS_REST_SOURCE_HEADER,
+    BREWING_STATISTICS_KEYS,
     CLOUD_POLL_SECONDS,
 )
 from .lan_protocol import LanProtocolError, validate_lan_host
@@ -56,6 +58,7 @@ from .redact import get_logger, mask_serial, sanitize_text
 _LOGGER = get_logger(__name__)
 
 SHADOWS: tuple[str, ...] = ("MachineStatus", "MachineCapabilities")
+_BREWING_STATISTICS_SHADOW = "BrewingStatisticsTotals"
 
 _CONNECT = 1
 _CONNACK = 2
@@ -488,13 +491,13 @@ def shadow_rejected_topic(thing: str, shadow: str) -> str:
     return f"$aws/things/{thing}/shadow/name/{shadow}/get/rejected"
 
 
-def _shadow_from_topic(topic: str) -> str | None:
-    """Which of SHADOWS does this $aws topic belong to?"""
+def _shadow_from_topic(topic: str, shadows: tuple[str, ...] = SHADOWS) -> str | None:
+    """Return the shadow name if the topic belongs to a requested shadow."""
     parts = topic.split("/")
     # $aws/things/<thing>/shadow/name/<shadow>/get[/suffix]
     if len(parts) >= 6 and parts[:2] == ["$aws", "things"] and parts[3] == "shadow":
         shadow = parts[5]
-        return shadow if shadow in SHADOWS else None
+        return shadow if shadow in shadows else None
     return None
 
 
@@ -556,14 +559,14 @@ class ShadowClient:
         self._scheme = scheme
         self._port = port
 
-    async def fetch(self, *, timeout: float = 20.0) -> dict[str, dict[str, Any]]:
+    async def fetch(self, *, timeout: float = 20.0, shadows: tuple[str, ...] = SHADOWS) -> dict[str, dict[str, Any]]:
         """Return {shadow name: parsed shadow document} (partial OK)."""
         results: dict[str, dict[str, Any]] = {}
         errors: dict[str, str] = {}
         ws, protocol_version = await self._connect()
         try:
             topics: list[str] = []
-            for shadow in SHADOWS:
+            for shadow in shadows:
                 topics.append(shadow_accepted_topic(self._thing, shadow))
                 topics.append(shadow_rejected_topic(self._thing, shadow))
             await ws.send_bytes(mqtt_subscribe_packet(1, topics, protocol_version=protocol_version))
@@ -620,13 +623,13 @@ class ShadowClient:
                     len(suback_codes),
                     next(code for code in suback_codes if code >= 0x80),
                 )
-            _LOGGER.debug("Daedalus cloud: requesting get for %s", ", ".join(SHADOWS))
-            for shadow in SHADOWS:
+            _LOGGER.debug("Daedalus cloud: requesting get for %s", ", ".join(shadows))
+            for shadow in shadows:
                 await ws.send_bytes(
                     mqtt_publish_packet(shadow_get_topic(self._thing, shadow), "{}", protocol_version=protocol_version)
                 )
             deadline = time.monotonic() + timeout
-            while len(results) + len(errors) < len(SHADOWS):
+            while len(results) + len(errors) < len(shadows):
                 packet = reader.next_packet()
                 if packet is None:
                     remaining = deadline - time.monotonic()
@@ -660,9 +663,9 @@ class ShadowClient:
                     continue
                 if packet.type != _PUBLISH:
                     continue
-                self._route_publish(packet, results, errors)
+                self._route_publish(packet, results, errors, shadows)
             if results:
-                missing = [s for s in SHADOWS if s not in results and s not in errors]
+                missing = [s for s in shadows if s not in results and s not in errors]
                 if missing:
                     _LOGGER.debug(
                         "Daedalus cloud: partial shadow set after %.0fs, no answer for %s",
@@ -692,9 +695,10 @@ class ShadowClient:
         packet: MqttPacket,
         results: dict[str, dict[str, Any]],
         errors: dict[str, str],
+        shadows: tuple[str, ...],
     ) -> None:
         topic, body = packet.publish_parts()
-        shadow = _shadow_from_topic(topic)
+        shadow = _shadow_from_topic(topic, shadows)
         if shadow is None or shadow in results or shadow in errors:
             return
         if topic not in (shadow_accepted_topic(self._thing, shadow), shadow_rejected_topic(self._thing, shadow)):
@@ -716,7 +720,8 @@ class ShadowClient:
             # and keep the raw body out of the log line (it can echo the
             # request context); the shadow name is what a retest needs.
             errors[shadow] = f"shadow get rejected by broker: {body[:200]}"
-            _LOGGER.warning("Daedalus cloud: shadow get for %s rejected by the broker", shadow)
+            log = _LOGGER.debug if shadow == _BREWING_STATISTICS_SHADOW else _LOGGER.warning
+            log("Daedalus cloud: shadow get for %s rejected by the broker", shadow)
 
     def _ws_url(self, *, app_style: bool) -> str:
         """WebSocket endpoint; only the app-style one carries the authorizer."""
@@ -943,6 +948,22 @@ async def fetch_cloud_state(
     if status_error is not None:
         docs = {name: doc for name, doc in docs.items() if name != "MachineStatus"}
     return CloudState(docs, thing, status_error)
+
+
+async def fetch_brewing_statistics(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> dict[str, int]:
+    """Read the verified lifetime counters from the optional statistics shadow."""
+    client = ShadowClient(session, thing_name=thing_name, jwt=jwt)
+    documents = await client.fetch(shadows=(_BREWING_STATISTICS_SHADOW,), timeout=5)
+    state = documents[_BREWING_STATISTICS_SHADOW].get("state")
+    reported = state.get("reported") if isinstance(state, dict) else None
+    if not isinstance(reported, dict):
+        return {}
+    counters: dict[str, int] = {}
+    for field, key in BREWING_STATISTICS_KEYS.items():
+        value = reported.get(field)
+        if type(value) is int and value >= 0:
+            counters[key] = value
+    return counters
 
 
 async def fetch_reported_lan_ip(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> str | None:

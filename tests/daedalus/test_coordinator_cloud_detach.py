@@ -24,6 +24,8 @@ from custom_components.delonghi_daedalus.api import (
 )
 from custom_components.delonghi_daedalus.cloud import CloudState, CloudTelemetryError
 from custom_components.delonghi_daedalus.const import (
+    BREWING_STATISTICS_POLL_SECONDS,
+    BREWING_STATISTICS_RETRY_SECONDS,
     CLOUD_POLL_SECONDS,
     CONF_CLOUD_TELEMETRY,
     CONF_HOST,
@@ -36,6 +38,13 @@ from custom_components.delonghi_daedalus.const import (
 from custom_components.delonghi_daedalus.coordinator import DaedalusCoordinator
 
 _PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_cloud_state"
+_STATS_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_brewing_statistics"
+
+
+@pytest.fixture(autouse=True)
+def _mock_statistics():
+    with patch(_STATS_PATCH, return_value={}) as mocked:
+        yield mocked
 
 
 def _make_coordinator() -> DaedalusCoordinator:
@@ -500,5 +509,141 @@ def test_lan_listener_detects_disconnect_and_reconnects_without_commands():
         original.send_command.assert_not_awaited()
         replacement.send_command.assert_not_awaited()
         await coord._stop_lan_listener()
+
+    asyncio.run(_go())
+
+
+def test_optional_statistics_timeout_leaves_regular_shadows_untouched(_mock_statistics):
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        await_stats = asyncio.Event()
+
+        async def _statistics(*_args, **_kwargs):
+            await_stats.set()
+            await asyncio.Event().wait()
+
+        _mock_statistics.side_effect = _statistics
+        with (
+            patch(_PATCH, return_value=_CLOUD_STATE) as regular_fetch,
+            patch("custom_components.delonghi_daedalus.coordinator.BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS", 0.05),
+        ):
+            start = time.monotonic()
+            await coord._async_update_data()
+            await asyncio.wait_for(await_stats.wait(), timeout=2)
+            assert coord.data["cloud"]["status_flat"] == {"a": 1}
+            assert coord.data["connected"] is True
+            assert not coord._cloud_task.done()
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+            assert coord._cloud_error is None
+            assert coord._brewing_statistics_due_at >= start + BREWING_STATISTICS_RETRY_SECONDS
+            assert "brewing_statistics" not in coord._cloud_data
+            regular_fetch.assert_awaited_once()
+            coord.async_update_listeners.assert_called_once()
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert regular_fetch.await_count == 2
+            _mock_statistics.assert_awaited_once()
+
+    asyncio.run(_go())
+
+
+def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statistics):
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        counters = {"brew_count": 12, "stopped_brew_count": 3, "brewing_error_count": 0}
+        updated_counters = {**counters, "brew_count": 13}
+        _mock_statistics.side_effect = [counters, CloudTelemetryError("broker refused subscriptions"), updated_counters]
+
+        with patch(_PATCH, return_value=_CLOUD_STATE):
+            start = time.monotonic()
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.async_update_listeners.call_count == 2
+            assert coord._brewing_statistics_due_at >= start + BREWING_STATISTICS_POLL_SECONDS
+            assert coord.data["cloud"]["brewing_statistics"] == counters
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["brewing_statistics"] == counters
+            _mock_statistics.assert_awaited_once()
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._brewing_statistics_due_at -= BREWING_STATISTICS_POLL_SECONDS + 1
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["brewing_statistics"] == {}
+            assert coord.data["cloud"]["status_flat"] == {"a": 1}
+            assert coord._cloud_error is None
+            assert coord.async_update_listeners.call_count == 5
+            assert _mock_statistics.await_count == 2
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._brewing_statistics_due_at -= BREWING_STATISTICS_RETRY_SECONDS + 1
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["brewing_statistics"] == updated_counters
+
+    asyncio.run(_go())
+
+
+def test_statistics_cannot_restore_expired_cloud_snapshot(_mock_statistics):
+    async def _go():
+        coord = _make_coordinator()
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _statistics(*_args, **_kwargs):
+            started.set()
+            await release.wait()
+            return {"brew_count": 12}
+
+        _mock_statistics.side_effect = _statistics
+        with patch(_PATCH, return_value=_CLOUD_STATE):
+            await coord._async_update_data()
+            await asyncio.wait_for(started.wait(), timeout=2)
+            assert coord.data["cloud"]["status_flat"] == {"a": 1}
+            coord._cancel_cloud_expiry()
+            coord._expire_cloud()
+            release.set()
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+
+        assert "cloud" not in coord.data
+        assert coord._cloud_data is None
+        assert coord._brewing_statistics_due_at == 0.0
+
+    asyncio.run(_go())
+
+
+def test_statistics_repoll_after_thing_remap_without_reusing_old_counters(_mock_statistics):
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+
+        async def _statistics(_session, *, thing_name, jwt):
+            if thing_name == "thing-1":
+                return {"brew_count": 12}
+            assert thing_name == "thing-2"
+            assert "brewing_statistics" not in coord.data["cloud"]
+            return {"stopped_brew_count": 0}
+
+        _mock_statistics.side_effect = _statistics
+        with patch(_PATCH, side_effect=[_CLOUD_STATE, CloudState(_DOCS, "thing-2")]):
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["brewing_statistics"] == {"brew_count": 12}
+            assert coord._brewing_statistics_due_at > time.monotonic()
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+
+        assert _mock_statistics.await_count == 2
+        assert coord.data["cloud"]["machine_name"] == "thing-2"
+        assert coord.data["cloud"]["brewing_statistics"] == {"stopped_brew_count": 0}
 
     asyncio.run(_go())

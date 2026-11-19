@@ -20,6 +20,7 @@ from custom_components.delonghi_daedalus.cloud import (
     ShadowClient,
     _shadow_from_topic,
     extract_machine_name,
+    fetch_brewing_statistics,
     fetch_cloud_state,
     flatten_shadow,
     lookup_machine_name,
@@ -546,6 +547,7 @@ def _mqtt_server(
     require_subprotocol: bool = False,
     deny_subscriptions: bool = False,
     silent_suback: bool = False,
+    reported_by_shadow: dict[str, dict] | None = None,
 ) -> tuple[web.Application, dict]:
     """Minimal MQTT-over-WS broker stub: CONNACK, SUBACK, then one accepted
     PUBLISH per shadow get, encoded in the level the client connected with.
@@ -631,7 +633,8 @@ def _mqtt_server(
                         thing, shadow = parts[2], parts[5]
                         if answer_shadows is not None and shadow not in answer_shadows:
                             continue
-                        doc = {"state": {"reported": {"shadow": shadow}}}
+                        reported = (reported_by_shadow or {}).get(shadow, {"shadow": shadow})
+                        doc = {"state": {"reported": reported}}
                         await ws.send_bytes(
                             mqtt_publish_packet(
                                 shadow_accepted_topic(thing, shadow),
@@ -658,6 +661,36 @@ def test_shadow_client_fetches_both_shadows() -> None:
             assert [c["level"] for c in seen["connects"]] == [5]  # app style first, no retry needed
         finally:
             await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("reported", "counters"),
+    [
+        (
+            {"Brew": 12, "Stopped": 3, "InError": 0, "Undocumented": 99},
+            {"brew_count": 12, "stopped_brew_count": 3, "brewing_error_count": 0},
+        ),
+        ({"Brew": True, "Stopped": -2, "InError": "3"}, {}),
+        ({"Stopped": 0}, {"stopped_brew_count": 0}),
+    ],
+)
+def test_fetch_brewing_statistics_reads_only_verified_counters(monkeypatch, reported, counters) -> None:
+    async def _run() -> None:
+        app, seen = _mqtt_server(reported_by_shadow={"BrewingStatisticsTotals": reported})
+        runner, port = await _serve(app)
+        monkeypatch.setattr(
+            cloud,
+            "ShadowClient",
+            lambda session, **kwargs: ShadowClient(session, broker="127.0.0.1", scheme="ws", port=port, **kwargs),
+        )
+        try:
+            async with aiohttp_session() as session:
+                assert await fetch_brewing_statistics(session, thing_name="thing1", jwt="jwt") == counters
+            assert seen["publishes"] == ["$aws/things/thing1/shadow/name/BrewingStatisticsTotals/get"]
+        finally:
             await runner.cleanup()
 
     asyncio.run(_run())
