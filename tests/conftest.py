@@ -18,8 +18,10 @@ _HA_MODULES = [
     "homeassistant.exceptions",
     "homeassistant.helpers",
     "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.device_registry",
     "homeassistant.helpers.update_coordinator",
     "homeassistant.helpers.storage",
+    "homeassistant.helpers.service",
     "homeassistant.helpers.event",
     "homeassistant.components",
     "homeassistant.components.sensor",
@@ -44,6 +46,7 @@ for mod_name in _HA_MODULES:
 
 # Diagnostics needs the real redacter, not a MagicMock that returns another MagicMock.
 sys.modules["homeassistant.components.diagnostics"].async_redact_data = _real_redact
+sys.modules["homeassistant.const"].MAX_LENGTH_STATE_STATE = 255
 
 
 class _MockStore:
@@ -67,6 +70,9 @@ class _MockStore:
 
 
 sys.modules["homeassistant.helpers.storage"].Store = _MockStore
+
+
+sys.modules["homeassistant.helpers.device_registry"].DeviceInfo = dict
 
 
 def _wire_submodule(parent: str, child: str) -> None:
