@@ -7,12 +7,12 @@ import pytest
 from custom_components.delonghi_daedalus.gigya_auth import (
     GIGYA_JWT_TTL_SECONDS,
     GigyaAuthError,
-    _check_gigya_error,
     build_jwt_app_request,
     build_jwt_request_params,
     build_login_params,
     build_login_params_legacy,
     build_login_query,
+    check_gigya_error,
     is_credential_error,
     parse_jwt_response,
     parse_login_response,
@@ -160,12 +160,12 @@ def test_malformed_errorcode_degrades_without_traceback() -> None:
     """Audit #18 A4: non-numeric errorCode must not raise ValueError out of
     the parser; it becomes an unknown code (fallback-eligible)."""
     with pytest.raises(GigyaAuthError) as caught:
-        _check_gigya_error({"errorCode": "INVALID", "errorMessage": "weird proxy"})
+        check_gigya_error({"errorCode": "INVALID", "errorMessage": "weird proxy"})
     assert caught.value.error_code == -1
 
 
 def test_string_zero_errorcode_is_success() -> None:
-    _check_gigya_error({"errorCode": "0"})  # must not raise
+    check_gigya_error({"errorCode": "0"})  # must not raise
 
 
 def test_is_credential_error_normalizes_types() -> None:

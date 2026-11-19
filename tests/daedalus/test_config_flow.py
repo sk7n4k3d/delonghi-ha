@@ -393,7 +393,7 @@ class TestProbePools:
         api = MagicMock()
         api.login_and_get_jwt = AsyncMock(
             side_effect=[
-                DaedalusAuthError("Gigya error 403005: Unauthorized user"),
+                DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005),
                 ("session", "ss", "jwt"),
             ]
         )
@@ -412,7 +412,9 @@ class TestProbePools:
     def test_all_pools_403005_raises_all_pools_marker(self) -> None:
         """Every pool returns 403005 → raise with `all_pools:` prefix for caller mapping."""
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+        )
 
         with pytest.raises(DaedalusAuthError, match="^all_pools:"):
             asyncio.run(_probe_pools(api, email="u@example.com", password="p", preferred_pool=GIGYA_POOL_EU))
@@ -447,7 +449,7 @@ class TestProbePools:
         api = MagicMock()
         api.login_and_get_jwt = AsyncMock(
             side_effect=[
-                DaedalusAuthError("Gigya error 403005: Unauthorized user"),
+                DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005),
                 ("session", "ss", "jwt"),
             ]
         )
@@ -517,9 +519,17 @@ class TestReauthFlow:
         assert CONF_PASSWORD not in new_data  # still not persisted
         flow.hass.config_entries.async_reload.assert_awaited_once_with("entry-1")
 
-    def test_reauth_confirm_invalid_password_keeps_form(self) -> None:
+    @pytest.mark.parametrize(
+        ("failure", "error"),
+        [
+            (DaedalusAuthError("Gigya error 403042: bad password"), "invalid_auth"),
+            (DaedalusConnectionError("Gigya error 6005: Rate limited"), "cannot_login"),
+            (TimeoutError(), "cannot_login"),
+        ],
+    )
+    def test_reauth_confirm_failure_keeps_form(self, failure, error) -> None:
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403042: bad password"))
+        api.login_and_get_jwt = AsyncMock(side_effect=failure)
         api.close = AsyncMock()
         entry = self._make_entry(
             data={
@@ -534,15 +544,18 @@ class TestReauthFlow:
         flow = self._make_reauth_flow(api, entry)
         asyncio.run(flow.async_step_reauth({}))
 
-        result = asyncio.run(flow.async_step_reauth_confirm({CONF_PASSWORD: "wrong"}))
+        result = asyncio.run(flow.async_step_reauth_confirm({CONF_PASSWORD: "user-input"}))
 
         assert result["type"] == "form"
-        assert result["errors"]["base"] == "invalid_auth"
+        assert result["errors"]["base"] == error
+        api.login_and_get_jwt.assert_awaited_once()
         flow.hass.config_entries.async_update_entry.assert_not_called()
 
     def test_reauth_confirm_all_pools_failure_maps_to_dedicated_error(self) -> None:
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+        )
         api.close = AsyncMock()
         entry = self._make_entry(
             data={
@@ -566,7 +579,9 @@ class TestReauthFlow:
 def test_step_user_maps_all_pools_failure_to_dedicated_error_key() -> None:
     """End-to-end: when probe burns all pools, surface the all_pools_unauthorized error key."""
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+    api.login_and_get_jwt = AsyncMock(
+        side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+    )
     api.close = AsyncMock()
 
     flow = _make_flow(api)
@@ -592,7 +607,9 @@ class TestProbePoolsEmailPrivacy:
     def test_all_pools_message_masks_email(self):
         async def _run_probe():
             api = MagicMock()
-            api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+            api.login_and_get_jwt = AsyncMock(
+                side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+            )
             return await _probe_pools(
                 api,
                 email="sebastien.martin@example.com",

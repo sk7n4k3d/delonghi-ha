@@ -144,7 +144,7 @@ def test_login_uses_custom_api_key_when_pool_is_eu_us() -> None:
 
 def test_400093_message_includes_apikey_fingerprint() -> None:
     """When Gigya rejects an apiKey with errorCode 400093, the raised
-    ``DaedalusAuthError`` must include the apiKey fingerprint (non-secret,
+    error must include the apiKey fingerprint (non-secret,
     public OAuth-client-id-equivalent) so a remote bug reporter can
     confirm whether their installed const matches the source-of-truth.
     Live ticket: Issue #18 (stivxgamer, Eletta Ultra)."""
@@ -156,7 +156,7 @@ def test_400093_message_includes_apikey_fingerprint() -> None:
         runner, base = await _start_gigya({"/accounts.login": login})
         try:
             api = DaedalusApi(gigya_base_url=base)
-            with pytest.raises(DaedalusAuthError) as excinfo:
+            with pytest.raises(DaedalusConnectionError) as excinfo:
                 # Pass a known-truncated apiKey so the test asserts the
                 # exact length the helper surfaces.
                 await api.login_and_get_jwt(email="u", password="p", api_key="4_truncated")

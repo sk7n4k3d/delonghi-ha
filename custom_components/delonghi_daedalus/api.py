@@ -11,7 +11,6 @@ Brewing commands are intentionally out of scope until we capture the exact
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import re
 import ssl
@@ -28,7 +27,10 @@ from .gigya_auth import (
     build_login_params,
     build_login_params_legacy,
     build_login_query,
+    check_gigya_error,
     is_credential_error,
+    is_session_error,
+    is_transient_error,
     parse_jwt_response,
     parse_login_response,
 )
@@ -70,11 +72,15 @@ class DaedalusError(RuntimeError):
 
 
 class DaedalusAuthError(DaedalusError):
-    """Credentials refused or JWT unobtainable."""
+    """Credentials explicitly refused by Gigya or the machine."""
+
+    def __init__(self, message: str, *, login_error_code: int | None = None) -> None:
+        super().__init__(message)
+        self.login_error_code = login_error_code
 
 
 class DaedalusConnectionError(DaedalusError):
-    """Transport / network-level failure against Gigya or the LAN WS."""
+    """Request or service failure against Gigya or the LAN WebSocket."""
 
 
 class DaedalusLanIdentityError(DaedalusConnectionError):
@@ -143,14 +149,17 @@ class DaedalusApi:
 
         `api_key` must match the Gigya Pool the account was created under
         (EU / EU_US / CH — see const.GIGYA_API_KEYS). Using the wrong key
-        yields errorCode 400093 ("Invalid parameter value: apiKey"), which
-        the UI translates as 'invalid credentials' and is misleading.
+        yields errorCode 400093 ("Invalid parameter value: apiKey").
         Returns (sessionToken, sessionSecret, jwt). The sessionToken (plus
         its secret) is what we'll pass to getJWT later to rotate the JWT
         without asking the user again.
         """
         session_token, session_secret = await self._gigya_login(email, password, api_key)
-        jwt = await self._gigya_get_jwt(session_token, api_key, session_secret=session_secret)
+        try:
+            jwt = await self._gigya_get_jwt(session_token, api_key, session_secret=session_secret)
+        except DaedalusAuthError as exc:
+            # The login succeeded, but Gigya rejected its new session.
+            raise DaedalusConnectionError(str(exc)) from None
         return session_token, session_secret, jwt
 
     async def refresh_jwt(
@@ -181,11 +190,12 @@ class DaedalusApi:
             )
             return parse_login_response(payload)
         except GigyaAuthError as exc:
+            message = _augment_400093(sanitize_text(exc), api_key)
+            if is_transient_error(exc):
+                raise DaedalusConnectionError(message) from None
             if is_credential_error(exc):
-                raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
-            _LOGGER.debug("Daedalus: app-aligned login rejected (%s), retrying legacy format", sanitize_text(str(exc)))
-        except aiohttp.ClientError as exc:  # pragma: no cover — transport kept uniform
-            raise DaedalusConnectionError(sanitize_text(f"Gigya request to /accounts.login failed: {exc}")) from exc
+                raise DaedalusAuthError(message, login_error_code=exc.error_code) from None
+            _LOGGER.debug("Daedalus: app-aligned login rejected (%s), retrying legacy format", message)
         try:
             payload = await self._post_gigya(
                 "/accounts.login",
@@ -193,10 +203,10 @@ class DaedalusApi:
             )
             return parse_login_response(payload)
         except GigyaAuthError as exc:
-            # Gigya error text is server-controlled and can echo the loginID
-            # (audit 2026-11-05): scrub before it propagates into logs,
-            # error strings and last_exception.
-            raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
+            message = _augment_400093(sanitize_text(exc), api_key)
+            if is_credential_error(exc):
+                raise DaedalusAuthError(message, login_error_code=exc.error_code) from None
+            raise DaedalusConnectionError(message) from None
 
     async def _gigya_get_jwt(
         self,
@@ -213,11 +223,12 @@ class DaedalusApi:
                 payload = await self._post_gigya("/accounts.getJWT", body, query=query, headers=headers)
                 return parse_jwt_response(payload)
             except GigyaAuthError as exc:
-                if is_credential_error(exc):
-                    raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
-                _LOGGER.debug(
-                    "Daedalus: app-aligned getJWT rejected (%s), retrying legacy format", sanitize_text(str(exc))
-                )
+                message = _augment_400093(sanitize_text(exc), api_key)
+                if is_transient_error(exc):
+                    raise DaedalusConnectionError(message) from None
+                if is_session_error(exc):
+                    raise DaedalusAuthError(message) from None
+                _LOGGER.debug("Daedalus: app-aligned getJWT rejected (%s), retrying legacy format", message)
         try:
             payload = await self._post_gigya(
                 "/accounts.getJWT",
@@ -225,7 +236,10 @@ class DaedalusApi:
             )
             return parse_jwt_response(payload)
         except GigyaAuthError as exc:
-            raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
+            message = _augment_400093(sanitize_text(exc), api_key)
+            if is_session_error(exc):
+                raise DaedalusAuthError(message) from None
+            raise DaedalusConnectionError(message) from None
 
     async def _post_gigya(
         self,
@@ -243,26 +257,20 @@ class DaedalusApi:
             ) as resp:
                 if 300 <= resp.status < 400:
                     raise DaedalusConnectionError(f"Gigya request to {path} returned an unexpected redirect")
+                if resp.status in {408, 429} or resp.status >= 500:
+                    raise DaedalusConnectionError(f"Gigya request to {path} failed: HTTP {resp.status}")
+                payload = await resp.json(content_type=None)
+                if not isinstance(payload, dict):
+                    raise DaedalusConnectionError(f"Gigya request to {path} returned an invalid response")
                 if resp.status >= 400:
-                    # Gigya normally answers 200 + errorCode, but a proxy or
-                    # a stricter screen-set can answer 4xx/5xx with the same
-                    # JSON body. Parse it anyway: the errorCode is what lets
-                    # is_credential_error() short-circuit — degrading a 403
-                    # refusal into a generic connection error would let the
-                    # legacy fallback replay the password (review #18, F2).
-                    body: Any = None
-                    with contextlib.suppress(Exception):
-                        body = await resp.json(content_type=None)
-                    if isinstance(body, dict) and body.get("errorCode"):
-                        raise GigyaAuthError(
-                            f"Gigya error {body['errorCode']} (HTTP {resp.status}): "
-                            f"{body.get('errorMessage') or body.get('errorDetails') or 'unknown'}",
-                            error_code=int(body["errorCode"]),
-                        )
-                    raise DaedalusConnectionError(sanitize_text(f"Gigya request to {path} failed: HTTP {resp.status}"))
-                return await resp.json(content_type=None)
-        except (aiohttp.ClientError, TimeoutError) as exc:
-            raise DaedalusConnectionError(sanitize_text(f"Gigya request to {path} failed: {exc}")) from exc
+                    # Some Gigya deployments send a 4xx with the application
+                    # code. Preserve the code so a credential refusal stops
+                    # both format fallback and pool probing.
+                    check_gigya_error(payload)
+                    raise DaedalusConnectionError(f"Gigya request to {path} failed: HTTP {resp.status}")
+                return payload
+        except (aiohttp.ClientError, TimeoutError, ValueError, RecursionError) as exc:
+            raise DaedalusConnectionError(f"Gigya request to {path} failed: {type(exc).__name__}") from None
 
     def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None:

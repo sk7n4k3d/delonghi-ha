@@ -50,7 +50,7 @@ _LOGGER = get_logger(__name__)
 # Gigya errorCode returned when the account exists but has no access to this
 # application's apiKey.  Happens when the account was registered via a
 # different Gigya site (OIDC / OAuth2 redirect) rather than direct login.
-_GIGYA_UNAUTHORIZED_USER = "403005"
+_GIGYA_UNAUTHORIZED_USER = 403005
 
 
 _USER_SCHEMA = vol.Schema(
@@ -110,8 +110,8 @@ async def _probe_pools(
             return pool, session_token, session_secret, jwt
         except DaedalusAuthError as exc:
             last_exc = exc
-            if _GIGYA_UNAUTHORIZED_USER not in str(exc):
-                raise  # wrong password / rate-limit — no point probing other pools
+            if exc.login_error_code != _GIGYA_UNAUTHORIZED_USER:
+                raise  # credential refusal — no point probing other pools
             _LOGGER.debug("Daedalus: pool %s → 403005, probing next pool", pool)
 
     raise DaedalusAuthError(f"all_pools: every Gigya pool returned 403005 for {_mask_email(email)}") from last_exc
@@ -469,6 +469,8 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     sanitize_text(exc, host=entry.data.get(CONF_HOST)),
                 )
                 errors["base"] = "all_pools_unauthorized" if str(exc).startswith("all_pools:") else "invalid_auth"
+            except (DaedalusConnectionError, TimeoutError):
+                errors["base"] = "cannot_login"
             except Exception:  # noqa: BLE001 — reauth must always render a form
                 _LOGGER.exception("Unexpected error during Daedalus reauth")
                 errors["base"] = "unknown"

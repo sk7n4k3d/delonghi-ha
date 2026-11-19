@@ -47,6 +47,7 @@ from .redact import get_logger, mask_serial, sanitize_text
 
 _LOGGER = get_logger(__name__)
 _LAN_CONNECT_TIMEOUT = 35
+_LAN_MAX_RETRY_SECONDS = 300
 _CLOUD_MAX_AGE = CLOUD_POLL_SECONDS + CLOUD_FETCH_TIMEOUT_SECONDS + DEFAULT_UPDATE_INTERVAL_SECONDS
 
 
@@ -71,8 +72,10 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lan: DaedalusLanConnection | None = None
         self._lan_task: asyncio.Task | None = None
         self._lan_error: str | None = None
-        self._lan_reauth_started = False
-        self._reauth_requested = False
+        self._lan_retry_at = 0.0
+        self._lan_retry_delay = DEFAULT_UPDATE_INTERVAL_SECONDS
+        self._lan_retry_for: tuple[str | None, ...] | None = None
+        self._reauth_requested_for: tuple[str | None, ...] | None = None
         self._lock = asyncio.Lock()
         self._jwt_lock = asyncio.Lock()
         self._refresh_auth_failed_for: tuple[str | None, ...] | None = None
@@ -103,32 +106,50 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             host = self.entry.data.get(CONF_HOST)
             if self._lan is not None and self._lan.closed:
                 await self._stop_lan_listener()
-            if host and not self._stopping and not self._lan_reauth_started:
+            credentials = self._credentials()
+            if self._lan_retry_for is not None and self._lan_retry_for != credentials:
+                self._reset_lan_backoff()
+            if host and not self._stopping and time.monotonic() >= self._lan_retry_at:
                 previous_connection = self._lan
                 try:
                     async with asyncio.timeout(_LAN_CONNECT_TIMEOUT):
                         await self._ensure_connected()
                 except ConfigEntryAuthFailed as exc:
-                    if not cloud_enabled:
-                        raise
+                    # Home Assistant stops polling after ConfigEntryAuthFailed.
+                    # Start reauth directly so LAN can still recover in the background.
                     self._lan_error = sanitize_text(exc, host=host)
-                    self._lan_reauth_started = True
+                    self._defer_lan_retry()
                     self._request_reauth()
                 except DaedalusLanIdentityError as exc:
                     self._lan_error = sanitize_text(exc, host=host)
                     async_raise_lan_issue(self.hass, self.entry.entry_id)
                 except (DaedalusAuthError, DaedalusConnectionError) as exc:
                     self._lan_error = sanitize_text(exc, host=host)
+                    self._defer_lan_retry()
                 except TimeoutError:
                     self._lan_error = "LAN connection attempt timed out"
+                    self._defer_lan_retry()
                 else:
                     self._lan_error = None
+                    self._reset_lan_backoff()
                     if self._lan is not None and self._lan is not previous_connection:
                         async_clear_lan_issue(self.hass, self.entry.entry_id)
                         self._lan_task = self.hass.async_create_background_task(
                             self._async_listen_lan(self._lan), f"{DOMAIN} LAN listener"
                         )
         return self._snapshot()
+
+    def _defer_lan_retry(self) -> None:
+        # A connection attempt can rotate the JWT before failing. Back off
+        # for the new JWT as well until the next attempt or credential update.
+        self._lan_retry_for = self._credentials()
+        self._lan_retry_at = time.monotonic() + self._lan_retry_delay
+        self._lan_retry_delay = min(self._lan_retry_delay * 2, _LAN_MAX_RETRY_SECONDS)
+
+    def _reset_lan_backoff(self) -> None:
+        self._lan_retry_for = None
+        self._lan_retry_at = 0.0
+        self._lan_retry_delay = DEFAULT_UPDATE_INTERVAL_SECONDS
 
     def _snapshot(self) -> dict[str, Any]:
         connected = self._lan is not None and not self._lan.closed
@@ -167,7 +188,6 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._cloud_auth_failed_for == self._credentials():
                 return
             self._cloud_auth_failed_for = None
-            self._reauth_requested = False
             self._cloud_retry_at = 0.0
         now = time.monotonic()
         if now < self._cloud_retry_at:
@@ -206,18 +226,26 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     def _request_reauth(self) -> None:
-        if not self._reauth_requested:
-            self._reauth_requested = True
+        # LAN and cloud share the account session. Rotating its JWT must
+        # not open another reauth flow for the same session.
+        session = self._credentials()[1:]
+        if self._reauth_requested_for != session:
+            self._reauth_requested_for = session
             self.entry.async_start_reauth(self.hass)
 
     def _credentials(self) -> tuple[str | None, ...]:
         entry = self.entry.data
-        return entry.get(CONF_JWT), entry.get(CONF_SESSION_TOKEN), entry.get(CONF_SESSION_SECRET)
+        return (
+            entry.get(CONF_JWT),
+            entry.get(CONF_SESSION_TOKEN),
+            entry.get(CONF_SESSION_SECRET),
+            entry.get(CONF_POOL, GIGYA_POOL_EU),
+        )
 
     async def _rotate_jwt(self, stale_jwt: str) -> str:
         """Renew credentials once when LAN and cloud need them together."""
         async with self._jwt_lock:
-            current, session_token, session_secret = credentials = self._credentials()
+            current, session_token, session_secret, pool = credentials = self._credentials()
             if current is not None and current != stale_jwt:
                 return current
             if self._refresh_auth_failed_for == credentials:
@@ -225,7 +253,6 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not session_token:
                 self._refresh_auth_failed_for = credentials
                 raise ConfigEntryAuthFailed("Daedalus session token missing, reauth required")
-            pool = self.entry.data.get(CONF_POOL, GIGYA_POOL_EU)
             api_key = GIGYA_API_KEYS.get(pool, GIGYA_API_KEYS[GIGYA_POOL_EU])
             try:
                 fresh_jwt = await self._api.refresh_jwt(
