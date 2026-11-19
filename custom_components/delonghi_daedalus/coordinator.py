@@ -1,10 +1,4 @@
-"""Data coordinator for Daedalus.
-
-Holds the LAN WebSocket connection, exposes a snapshot dict to entities,
-and reconnects on failure. Optional read-only cloud telemetry (issue #18,
-opt-in via CONF_CLOUD_TELEMETRY) adds the AWS IoT shadow documents on
-top; cloud failures never poison the LAN snapshot.
-"""
+"""Combine authenticated LAN updates and optional read-only cloud telemetry."""
 
 from __future__ import annotations
 
@@ -15,18 +9,17 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
-    UpdateFailed,
-)
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import (
     DaedalusApi,
     DaedalusAuthError,
     DaedalusConnectionError,
     DaedalusLanConnection,
+    DaedalusLanIdentityError,
+    DaedalusLanSerialMismatchError,
 )
 from .cloud import CloudTelemetryError, fetch_cloud_state, flatten_shadow
 from .const import (
@@ -36,6 +29,7 @@ from .const import (
     CONF_HOST,
     CONF_JWT,
     CONF_LAN_AUTH_MESSAGE,
+    CONF_LAN_TLS_FINGERPRINT,
     CONF_MACHINE_NAME,
     CONF_POOL,
     CONF_SERIAL_NUMBER,
@@ -46,9 +40,16 @@ from .const import (
     GIGYA_API_KEYS,
     GIGYA_POOL_EU,
 )
-from .redact import get_logger, sanitize_text
+from .device import DaedalusDevice
+from .gigya_auth import jwt_expiry
+from .lan_protocol import LanProtocolError
+from .lan_repairs import async_clear_lan_issue, async_raise_lan_issue
+from .redact import get_logger, mask_serial, sanitize_text
 
 _LOGGER = get_logger(__name__)
+_LAN_CONNECT_TIMEOUT = 35
+_LAN_MAX_RETRY_SECONDS = 300
+_CLOUD_MAX_AGE = CLOUD_POLL_SECONDS + CLOUD_FETCH_TIMEOUT_SECONDS + DEFAULT_UPDATE_INTERVAL_SECONDS
 
 
 class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -63,30 +64,32 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # reauth-escalation lookup — an implicit dependency HA warns
             # custom integrations off.
             config_entry=entry,
-            name=f"{DOMAIN}:{entry.data.get(CONF_SERIAL_NUMBER, '?')}",
+            name=f"{DOMAIN}:{mask_serial(entry.data.get(CONF_SERIAL_NUMBER, '?'))}",
             update_interval=timedelta(seconds=DEFAULT_UPDATE_INTERVAL_SECONDS),
         )
         self.entry = entry
+        self.device = DaedalusDevice(self)
         self._api = DaedalusApi()
         self._lan: DaedalusLanConnection | None = None
+        self._lan_task: asyncio.Task | None = None
+        self._lan_error: str | None = None
+        self._lan_retry_at = 0.0
+        self._lan_retry_delay = DEFAULT_UPDATE_INTERVAL_SECONDS
+        self._lan_retry_for: tuple[str | None, ...] | None = None
+        self._reauth_requested_for: tuple[str | None, ...] | None = None
+        self._lan_serial_mismatch: tuple[str | None, str | None, str] | None = None
         self._lock = asyncio.Lock()
-        # Cloud telemetry cache (opt-in): refreshed at most every
-        # CLOUD_POLL_SECONDS, independent of the 30 s LAN cycle. The lock
-        # serializes overlapping cycles (manual refresh + timer) so the
-        # cache fields never interleave writes (review #18, F5).
-        #
-        # Budget review (finding 9): the cloud hop may burn
-        # CLOUD_FETCH_TIMEOUT_SECONDS (75 s on a black-holed broker) while the
-        # refresh interval is 30 s — awaited inline it would delay the LAN
-        # snapshot by more than two full cycles. The fetch therefore runs in a
-        # background task (``_cloud_task`` is the anti-overlap guard); the
-        # refresh only ever attaches the cached snapshot and returns.
+        self._jwt_lock = asyncio.Lock()
+        self._refresh_auth_failed_for: tuple[str | None, ...] | None = None
         self._cloud_data: dict[str, Any] | None = None
         self._cloud_fetched_at: float = 0.0
         self._cloud_error: str | None = None
         self._cloud_error_at: float | None = None
-        self._cloud_lock = asyncio.Lock()
+        self._cloud_retry_at = 0.0
+        self._cloud_auth_failed_for: tuple[str | None, ...] | None = None
+        self._cloud_expiry: asyncio.TimerHandle | None = None
         self._cloud_task: asyncio.Task | None = None
+        self._stopping = False
 
     @property
     def serial_number(self) -> str:
@@ -97,48 +100,111 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self.entry.data.get(CONF_MACHINE_NAME, self.serial_number)
 
     async def _async_update_data(self) -> dict[str, Any]:
+        cloud_enabled = self.entry.data.get(CONF_CLOUD_TELEMETRY)
+        if cloud_enabled:
+            self._schedule_cloud_fetch()
+
         async with self._lock:
             host = self.entry.data.get(CONF_HOST)
-            try:
-                await self._ensure_connected()
-            except DaedalusAuthError as exc:
-                raise UpdateFailed(f"auth failed: {sanitize_text(exc, host=host)}") from exc
-            except DaedalusConnectionError as exc:
-                # Sanitized (with the configured host so private IPv6 forms
-                # are scrubbed too): the text embeds the LAN WS URL, and
-                # UpdateFailed lands in HA's error log + last_exception →
-                # diagnostics (audit 2026-11-05).
-                raise UpdateFailed(f"connect failed: {sanitize_text(exc, host=host)}") from exc
+            if self._lan is not None and self._lan.closed:
+                await self._stop_lan_listener()
+            lan_identity = (host, self.entry.data.get(CONF_LAN_TLS_FINGERPRINT), self.serial_number)
+            if self._lan_serial_mismatch == lan_identity:
+                return self._snapshot()
+            self._lan_serial_mismatch = None
+            credentials = self._credentials()
+            if self._lan_retry_for is not None and self._lan_retry_for != credentials:
+                self._reset_lan_backoff()
+            if host and not self._stopping and time.monotonic() >= self._lan_retry_at:
+                previous_connection = self._lan
+                try:
+                    async with asyncio.timeout(_LAN_CONNECT_TIMEOUT):
+                        await self._ensure_connected()
+                except ConfigEntryAuthFailed as exc:
+                    # Home Assistant stops polling after ConfigEntryAuthFailed.
+                    # Start reauth directly so LAN can still recover in the background.
+                    self._lan_error = sanitize_text(exc, host=host)
+                    self._defer_lan_retry()
+                    self._request_reauth()
+                except DaedalusLanIdentityError as exc:
+                    if isinstance(exc, DaedalusLanSerialMismatchError):
+                        self._lan_serial_mismatch = lan_identity
+                    self._lan_error = sanitize_text(exc, host=host)
+                    async_raise_lan_issue(self.hass, self.entry.entry_id)
+                except (DaedalusAuthError, DaedalusConnectionError) as exc:
+                    self._lan_error = sanitize_text(exc, host=host)
+                    self._defer_lan_retry()
+                except TimeoutError:
+                    self._lan_error = "LAN connection attempt timed out"
+                    self._defer_lan_retry()
+                else:
+                    self._lan_error = None
+                    self._reset_lan_backoff()
+                    if self._lan is not None and self._lan is not previous_connection:
+                        async_clear_lan_issue(self.hass, self.entry.entry_id)
+                        self._lan_task = self.hass.async_create_background_task(
+                            self._async_listen_lan(self._lan), f"{DOMAIN} LAN listener"
+                        )
+        return self._snapshot()
 
-            assert self._lan is not None  # ensured above
-            data: dict[str, Any] = {
-                "connected": not self._lan.closed,
-                "connection_id": self._lan.connection_id,
-                "serial_number": self.serial_number,
-                "host": self.entry.data.get(CONF_HOST),
-            }
+    def _defer_lan_retry(self) -> None:
+        # A connection attempt can rotate the JWT before failing. Back off
+        # for the new JWT as well until the next attempt or credential update.
+        self._lan_retry_for = self._credentials()
+        # Match Home Assistant's whole-second polling base so rounding the
+        # next poll down cannot defer a retry for another full poll interval.
+        self._lan_retry_at = int(time.monotonic()) + self._lan_retry_delay
+        self._lan_retry_delay = min(self._lan_retry_delay * 2, _LAN_MAX_RETRY_SECONDS)
+
+    def _reset_lan_backoff(self) -> None:
+        self._lan_retry_for = None
+        self._lan_retry_at = 0.0
+        self._lan_retry_delay = DEFAULT_UPDATE_INTERVAL_SECONDS
+
+    def _snapshot(self) -> dict[str, Any]:
+        connected = self._lan is not None and not self._lan.closed
+        data: dict[str, Any] = {
+            "connected": connected,
+            "serial_number": self.serial_number,
+            "host": self.entry.data.get(CONF_HOST),
+        }
+        if connected:
+            data["connection_id"] = self._lan.connection_id
+        elif self._lan_error:
+            data["lan_error"] = self._lan_error
         if self.entry.data.get(CONF_CLOUD_TELEMETRY):
-            # Outside the LAN lock, and off the critical path entirely: the
-            # refresh attaches the *cached* shadow and (re)starts the fetch in
-            # the background, so a slow or black-holed broker delays the cloud
-            # projection only — never the LAN snapshot (finding 9).
-            if self._cloud_data is not None:
+            if self._cloud_data is not None and time.monotonic() - self._cloud_fetched_at < _CLOUD_MAX_AGE:
                 data["cloud"] = self._cloud_data
             if self._cloud_error:
                 data["cloud_error"] = self._cloud_error
-            self._schedule_cloud_fetch()
         return data
+
+    @callback
+    def _publish_snapshot(self) -> None:
+        if self._stopping or self.data is None:
+            return
+        snapshot = self._snapshot()
+        if snapshot != self.data:
+            # async_set_updated_data resets the polling deadline. Publishing
+            # transport events here preserves the regular reconnect cadence.
+            self.data = snapshot
+            self.async_update_listeners()
 
     def _schedule_cloud_fetch(self) -> None:
         """Start a background shadow fetch when one is due and none is running."""
-        if self._cloud_task is not None and not self._cloud_task.done():
-            _LOGGER.debug("Daedalus cloud: fetch already running, skipping this cycle")
-            return  # anti-overlap guard: one cloud hop at a time
+        if self._stopping or self._cloud_task is not None and not self._cloud_task.done():
+            return
+        if self._cloud_auth_failed_for is not None:
+            if self._cloud_auth_failed_for == self._credentials():
+                return
+            self._cloud_auth_failed_for = None
+            self._cloud_retry_at = 0.0
         now = time.monotonic()
+        if now < self._cloud_retry_at:
+            return
         if self._cloud_data is not None and now - self._cloud_fetched_at < CLOUD_POLL_SECONDS:
-            return  # cache still fresh
-        _LOGGER.debug("Daedalus cloud: starting background shadow fetch")
-        self._cloud_task = self.hass.async_create_task(self._async_cloud_fetch())
+            return
+        self._cloud_task = self.hass.async_create_background_task(self._async_cloud_fetch(), f"{DOMAIN} cloud fetch")
 
     async def _ensure_connected(self) -> None:
         if self._lan is not None and not self._lan.closed:
@@ -146,50 +212,19 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         host = self.entry.data[CONF_HOST]
         jwt = self.entry.data[CONF_JWT]
-        auth_message = self.entry.data.get(CONF_LAN_AUTH_MESSAGE, "AUTH")
+        connect_options = {
+            "host": host,
+            "serial_number": self.serial_number,
+            "auth_message": self.entry.data.get(CONF_LAN_AUTH_MESSAGE, "AUTH"),
+            "fingerprint": self.entry.data.get(CONF_LAN_TLS_FINGERPRINT),
+        }
         try:
-            self._lan = await self._api.connect_lan(
-                host=host, serial_number=self.serial_number, jwt=jwt, auth_message=auth_message
-            )
-        except DaedalusAuthError as initial_exc:
-            # Likely JWT expired — try to rotate via the stored session token.
-            # If the session token itself is revoked, escalate to a HA reauth
-            # flow so the user is prompted for the password again instead of
-            # failing silently every 30 s.
-            session_token = self.entry.data.get(CONF_SESSION_TOKEN)
-            if not session_token:
-                raise ConfigEntryAuthFailed("Daedalus session token missing, reauth required") from initial_exc
-            pool = self.entry.data.get(CONF_POOL, GIGYA_POOL_EU)
-            api_key = GIGYA_API_KEYS.get(pool, GIGYA_API_KEYS[GIGYA_POOL_EU])
+            self._lan = await self._api.connect_lan(jwt=jwt, **connect_options)
+        except DaedalusAuthError:
+            fresh_jwt = await self._rotate_jwt(jwt)
             try:
-                fresh_jwt = await self._api.refresh_jwt(
-                    session_token=session_token,
-                    api_key=api_key,
-                    session_secret=self.entry.data.get(CONF_SESSION_SECRET),
-                )
-            except DaedalusAuthError as refresh_exc:
-                raise ConfigEntryAuthFailed(
-                    f"Daedalus session token rejected by Gigya: {sanitize_text(refresh_exc, host=host)}"
-                ) from refresh_exc
-            self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_JWT: fresh_jwt})
-            try:
-                self._lan = await self._api.connect_lan(
-                    host=host,
-                    serial_number=self.serial_number,
-                    jwt=fresh_jwt,
-                    auth_message=auth_message,
-                )
+                self._lan = await self._api.connect_lan(jwt=fresh_jwt, **connect_options)
             except DaedalusAuthError as second_exc:
-                # A *fresh* JWT the device still rejects is not transient —
-                # retrying the same rotation every cycle would loop in
-                # UpdateFailed forever (the documented reauth escalation never
-                # fires). Raise the flow the user can actually act on (audit
-                # 2026-11-05). Only an explicit machine rejection reaches this
-                # branch now: malformed frames map to DaedalusConnectionError
-                # in api.connect_lan, so a booting/upgrade-ing machine keeps
-                # the 30 s auto-healing retry instead of locking the entry
-                # behind a password prompt. Transport errors keep propagating
-                # as DaedalusConnectionError → UpdateFailed (retry is correct).
                 raise ConfigEntryAuthFailed(
                     f"Daedalus machine rejected freshly rotated JWT: {sanitize_text(second_exc, host=host)}"
                 ) from second_exc
@@ -200,100 +235,175 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.entry, data={**self.entry.data, CONF_LAN_AUTH_MESSAGE: self._lan.auth_message}
             )
 
-    async def _async_cloud_fetch(self) -> None:
-        """Fetch the shadow documents in the background. Never raises.
+    def _request_reauth(self) -> None:
+        # LAN and cloud share the account session. Rotating its JWT must
+        # not open another reauth flow for the same session.
+        session = self._credentials()[1:]
+        if self._reauth_requested_for != session:
+            self._reauth_requested_for = session
+            self.entry.async_start_reauth(self.hass)
 
-        Runs off the refresh path (finding 9): a slow broker delays the cloud
-        projection, never the LAN snapshot. On success one extra refresh is
-        requested so the fresh shadow is projected without waiting for the
-        next 30 s tick; on failure nothing is requested — the normal refresh
-        cycle retries by itself, and an error→refresh→fetch→error chain would
-        otherwise turn the fetch latency into a hot loop.
+    def _credentials(self) -> tuple[str | None, ...]:
+        entry = self.entry.data
+        return (
+            entry.get(CONF_JWT),
+            entry.get(CONF_SESSION_TOKEN),
+            entry.get(CONF_SESSION_SECRET),
+            entry.get(CONF_POOL, GIGYA_POOL_EU),
+        )
 
-        The whole body — fetch AND cache write — sits under one lock +
-        try/except: a pathological shadow document (deep nesting, unparsable
-        shapes) and overlapping cycles must both degrade to cloud_error,
-        never reach DataUpdateCoordinator (review #18, F3/F5).
-        """
-        async with self._cloud_lock:
-            now = time.monotonic()
-            if self._cloud_data is not None and now - self._cloud_fetched_at < CLOUD_POLL_SECONDS:
-                return  # a concurrent cycle already refreshed the cache
+    async def _rotate_jwt(self, stale_jwt: str) -> str:
+        """Renew credentials once when LAN and cloud need them together."""
+        async with self._jwt_lock:
+            current, session_token, session_secret, pool = credentials = self._credentials()
+            if current is not None and current != stale_jwt:
+                return current
+            if self._refresh_auth_failed_for == credentials:
+                raise ConfigEntryAuthFailed("Daedalus session credentials need reauthentication")
+            if not session_token:
+                self._refresh_auth_failed_for = credentials
+                raise ConfigEntryAuthFailed("Daedalus session token missing, reauth required")
+            api_key = GIGYA_API_KEYS.get(pool, GIGYA_API_KEYS[GIGYA_POOL_EU])
             try:
-                stored_name = self.entry.data.get(CONF_MACHINE_NAME)
-                docs, thing = await asyncio.wait_for(
-                    fetch_cloud_state(
-                        self._api.http_session,
-                        serial=self.serial_number,
-                        jwt=self.entry.data[CONF_JWT],
-                        # CONF_MACHINE_NAME defaults to the serial at setup time —
-                        # only a different value means a real cloud thing name.
-                        machine_name=stored_name if stored_name and stored_name != self.serial_number else None,
-                    ),
-                    # Global budget for the whole cloud hop (2 REST stages +
-                    # 3 MQTT connect spellings + shadow wait; the MQTT phase
-                    # is itself capped by ShadowClient._connect's 30 s budget):
-                    # without it a black-holed broker could hold _cloud_lock —
-                    # and pile up cloud hops — on aiohttp's 300 s session
-                    # default (audit #18, D1). The LAN refresh no longer waits
-                    # on it at all (finding 9); this cap now bounds the
-                    # background task itself.
-                    timeout=CLOUD_FETCH_TIMEOUT_SECONDS,
+                fresh_jwt = await self._api.refresh_jwt(
+                    session_token=session_token,
+                    api_key=api_key,
+                    session_secret=session_secret,
                 )
-                cloud_data = {
-                    "machine_name": thing,
-                    "status_flat": flatten_shadow(docs.get("MachineStatus", {})),
-                    "capabilities_flat": flatten_shadow(docs.get("MachineCapabilities", {})),
-                    "fetched_at": time.time(),
-                }
-            except CloudTelemetryError as exc:
-                self._cloud_error = sanitize_text(exc, host=self.entry.data.get(CONF_HOST))
-                self._cloud_error_at = time.time()
-                _LOGGER.debug("Daedalus cloud telemetry failed (non-fatal): %s", self._cloud_error)
-                return
-            except TimeoutError:
-                # The wait_for budget above. str(TimeoutError) is empty, so
-                # the generic branch used to store "unexpected cloud error: "
-                # — the valueless cloud_error of the issue #18 retest.
-                self._cloud_error = f"cloud hop timed out after {CLOUD_FETCH_TIMEOUT_SECONDS}s"
-                self._cloud_error_at = time.time()
-                _LOGGER.warning("Daedalus cloud telemetry timed out after %ss (non-fatal)", CLOUD_FETCH_TIMEOUT_SECONDS)
-                return
-            except Exception as exc:  # noqa: BLE001 — cloud must never take the entry down
-                self._cloud_error = sanitize_text(
+            except DaedalusAuthError as exc:
+                self._refresh_auth_failed_for = credentials
+                host = self.entry.data.get(CONF_HOST)
+                raise ConfigEntryAuthFailed(
+                    f"Daedalus session token rejected by Gigya: {sanitize_text(exc, host=host)}"
+                ) from exc
+            self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_JWT: fresh_jwt})
+            self._refresh_auth_failed_for = None
+            return fresh_jwt
+
+    async def _async_listen_lan(self, connection: DaedalusLanConnection) -> None:
+        """Keep reading so aiohttp handles heartbeat and close frames."""
+        try:
+            while not connection.closed:
+                try:
+                    await connection.receive(timeout=None)
+                except LanProtocolError:
+                    continue
+        except DaedalusConnectionError:
+            pass  # The normal refresh reconnects without sending any commands.
+        finally:
+            if connection is self._lan:
+                self._lan = None
+                self._publish_snapshot()
+            with contextlib.suppress(DaedalusConnectionError):
+                await connection.close()
+
+    async def _stop_lan_listener(self) -> None:
+        connection, self._lan = self._lan, None
+        task, self._lan_task = self._lan_task, None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if connection is not None and not connection.closed:
+            await connection.close()
+
+    @callback
+    def _cancel_cloud_expiry(self) -> None:
+        if self._cloud_expiry is not None:
+            self._cloud_expiry.cancel()
+            self._cloud_expiry = None
+
+    @callback
+    def _expire_cloud(self) -> None:
+        self._cloud_expiry = None
+        self._clear_cloud()
+        self._publish_snapshot()
+
+    def _clear_cloud(self) -> None:
+        self._cancel_cloud_expiry()
+        self._cloud_data = None
+
+    async def _async_cloud_fetch(self) -> None:
+        """Fetch and publish the available shadows without reconnecting LAN."""
+        credentials = self._credentials()
+        try:
+            stored_name = self.entry.data.get(CONF_MACHINE_NAME)
+            async with asyncio.timeout(CLOUD_FETCH_TIMEOUT_SECONDS):
+                jwt = self.entry.data[CONF_JWT]
+                expires_at = jwt_expiry(jwt)
+                if expires_at is not None and expires_at <= time.time():
+                    jwt = await self._rotate_jwt(jwt)
+                cloud_state = await fetch_cloud_state(
+                    self._api.http_session,
+                    serial=self.serial_number,
+                    jwt=jwt,
+                    machine_name=stored_name if stored_name and stored_name != self.serial_number else None,
+                    check_device_status=True,
+                )
+            thing = cloud_state.machine_name
+            cloud_data = {"machine_name": thing, "fetched_at": time.time()}
+            for name, key in (("MachineStatus", "status_flat"), ("MachineCapabilities", "capabilities_flat")):
+                document = cloud_state.shadows.get(name)
+                state = document.get("state") if isinstance(document, dict) else None
+                if isinstance(state, dict) and isinstance(state.get("reported"), dict):
+                    try:
+                        flat = flatten_shadow(document)
+                    except (AttributeError, TypeError, ValueError, RecursionError):
+                        _LOGGER.debug("Daedalus cloud: invalid %s shadow", name)
+                    else:
+                        if flat:
+                            cloud_data[key] = flat
+            if "status_flat" not in cloud_data:
+                status_error = cloud_state.status_error or "MachineStatus shadow has no usable reported data"
+                if "capabilities_flat" not in cloud_data:
+                    raise CloudTelemetryError(status_error)
+                cloud_data["status_error"] = status_error
+                _LOGGER.debug("Daedalus cloud status unavailable: %s", status_error)
+        except ConfigEntryAuthFailed as exc:
+            self._cloud_auth_failed_for = credentials
+            self._request_reauth()
+            self._record_cloud_failure(sanitize_text(exc, host=self.entry.data.get(CONF_HOST)))
+            return
+        except (CloudTelemetryError, DaedalusConnectionError) as exc:
+            self._record_cloud_failure(sanitize_text(exc, host=self.entry.data.get(CONF_HOST)))
+            return
+        except TimeoutError:
+            self._record_cloud_failure(f"cloud hop timed out after {CLOUD_FETCH_TIMEOUT_SECONDS}s")
+            return
+        except Exception as exc:  # noqa: BLE001 — cloud must never take the entry down
+            self._record_cloud_failure(
+                sanitize_text(
                     f"unexpected cloud error: {exc or type(exc).__name__}", host=self.entry.data.get(CONF_HOST)
                 )
-                self._cloud_error_at = time.time()
-                _LOGGER.warning("Daedalus cloud telemetry unexpected failure (non-fatal): %s", self._cloud_error)
-                return
-            self._cloud_error = None
-            self._cloud_error_at = None
-            _LOGGER.debug(
-                "Daedalus cloud: shadows fetched (%d status keys, %d capability keys)",
-                len(cloud_data["status_flat"]),
-                len(cloud_data["capabilities_flat"]),
             )
-            if thing != self.entry.data.get(CONF_MACHINE_NAME):
-                self.hass.config_entries.async_update_entry(
-                    self.entry, data={**self.entry.data, CONF_MACHINE_NAME: thing}
-                )
-            self._cloud_data = cloud_data
-            self._cloud_fetched_at = now
+            return
+        self._cloud_error = None
+        self._cloud_error_at = None
+        if thing != self.entry.data.get(CONF_MACHINE_NAME):
+            self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_MACHINE_NAME: thing})
+        self._cloud_data = cloud_data
+        self._cloud_fetched_at = time.monotonic()
+        self._cancel_cloud_expiry()
+        self._cloud_expiry = asyncio.get_running_loop().call_later(_CLOUD_MAX_AGE, self._expire_cloud)
+        self._publish_snapshot()
 
-        # Project the fresh snapshot now instead of on the next tick. Keep
-        # the cache lock free while Home Assistant refreshes the coordinator.
-        with contextlib.suppress(Exception):
-            await self.async_request_refresh()
+    def _record_cloud_failure(self, error: str) -> None:
+        self._cloud_error = error
+        self._cloud_error_at = time.time()
+        self._cloud_retry_at = time.monotonic() + DEFAULT_UPDATE_INTERVAL_SECONDS
+        self._clear_cloud()
+        _LOGGER.debug("Daedalus cloud telemetry failed: %s", error)
+        self._publish_snapshot()
 
     async def async_shutdown(self) -> None:
-        if self._cloud_task is not None and not self._cloud_task.done():
-            self._cloud_task.cancel()
-        self._cloud_task = None
-        if self._lan is not None:
-            await self._lan.close()
-            self._lan = None
-        await self._api.close()
-        # Cancel the refresh timer + config-entry listener (audit #18, F3):
-        # entry.py now also calls this on a failed platform setup, where
-        # async_unload_entry never runs.
+        self._stopping = True
         await super().async_shutdown()
+        if self._cloud_task is not None:
+            self._cloud_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._cloud_task
+        self._cloud_task = None
+        self._cancel_cloud_expiry()
+        async with self._lock:
+            await self._stop_lan_listener()
+        await self._api.close()

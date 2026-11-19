@@ -29,7 +29,9 @@ HOST6 = "fd12:b0af::7"
 def _lan_api_with_ws(ws: MagicMock) -> DaedalusApi:
     session = MagicMock()
     session.ws_connect = AsyncMock(return_value=ws)
-    return DaedalusApi(session=session)
+    api = DaedalusApi()
+    api._get_lan_session = lambda: session
+    return api
 
 
 def _auth_timeout_ws(side_effect: BaseException) -> MagicMock:
@@ -46,7 +48,7 @@ def test_connect_lan_closes_ws_and_raises_connection_error(exc: BaseException) -
         ws = _auth_timeout_ws(exc)
         api = _lan_api_with_ws(ws)
         with pytest.raises(DaedalusConnectionError) as caught:
-            await api.connect_lan(host=HOST6, serial_number="SN1", jwt="jwt")
+            await api.connect_lan(host=HOST6, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         ws.close.assert_awaited_once()
         assert caught.value.__cause__ is exc
 
@@ -74,7 +76,7 @@ def test_malformed_reply_text_is_host_scrubbed_at_birth() -> None:
             ),
             pytest.raises(DaedalusConnectionError) as caught,
         ):
-            await api.connect_lan(host=HOST6, serial_number="SN1", jwt="jwt")
+            await api.connect_lan(host=HOST6, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         assert HOST6 not in str(caught.value)
         assert "LAN AUTH got a malformed reply" in str(caught.value)
 
@@ -86,9 +88,10 @@ def test_ws_connect_failure_message_scrubs_host() -> None:
         session = MagicMock()
         connect_exc = aiohttp.ClientConnectorError(MagicMock(), OSError(113, "No route to host"))
         session.ws_connect = AsyncMock(side_effect=connect_exc)
-        api = DaedalusApi(session=session)
+        api = DaedalusApi()
+        api._get_lan_session = lambda: session
         with pytest.raises(DaedalusConnectionError) as caught:
-            await api.connect_lan(host=HOST6, serial_number="SN1", jwt="jwt")
+            await api.connect_lan(host=HOST6, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         text = str(caught.value)
         # Scrubbed from {url} and from the copied exception text; the WS URL
         # keeps its wss://**REDACTED** shape for triage.
@@ -119,7 +122,7 @@ def test_register_lan_host_happens_on_connect_attempt() -> None:
         ws = _auth_timeout_ws(TimeoutError())
         api = _lan_api_with_ws(ws)
         with pytest.raises(DaedalusConnectionError):
-            await api.connect_lan(host=HOST6, serial_number="SN1", jwt="jwt")
+            await api.connect_lan(host=HOST6, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         assert HOST6 in redact._KNOWN_HOST_FORMS
 
     asyncio.run(_run())

@@ -14,7 +14,9 @@ frame on the LAN WebSocket (wss://<ip>/ws/lan2lan).
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 from typing import Any
 
 GIGYA_BASE_URL = "https://accounts.eu1.gigya.com"
@@ -30,13 +32,13 @@ GIGYA_JWT_TTL_SECONDS = 90 * 24 * 60 * 60  # 7_776_000s, Daedalus default
 MCL_APP_SESSION_EXPIRATION_SECONDS = 7_776_000  # 90 days, verbatim from the app
 MCL_APP_LOGIN_INCLUDE = "id_token,profile,data,preferences"
 
-# Gigya errorCodes that prove the CREDENTIALS were seen and refused, or that
-# the account is locked/rate-limited. The legacy-format retry must never fire
-# on these: replaying a wrong password would double every failed login against
-# Gigya's rate limiter and deepen a lockout. Covers both the classic
-# (403001/403005) and the newer flow codes (403023/403025/403026) — see the
-# SAP CDC error catalog.
-_CREDENTIAL_ERROR_CODES = frozenset({403001, 403002, 403005, 403023, 403025, 403026})
+# Definite account and credential refusals from the SAP CDC response catalog.
+# In particular, retrying 403042 (invalid login ID or password) would submit
+# the same credentials twice.
+_CREDENTIAL_ERROR_CODES = frozenset({403001, 403002, 403005, 403023, 403025, 403026, 403042})
+_SESSION_ERROR_CODES = frozenset({403012, 403035})
+# Gigya can return rate limits or temporary account/IP blocks in an HTTP 200.
+_TRANSIENT_ERROR_CODES = frozenset({408, 429, 6005, 403048, 403120, 429000})
 
 
 class GigyaAuthError(RuntimeError):
@@ -45,6 +47,20 @@ class GigyaAuthError(RuntimeError):
     def __init__(self, message: str, *, error_code: int = 0) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+
+def jwt_expiry(token: str) -> int | None:
+    """Read the expiry hint for refresh scheduling; services verify the token."""
+    parts = token.split(".")
+    if len(parts) != 3 or len(parts[1]) > 16_384:
+        return None
+    payload = parts[1]
+    try:
+        claims = json.loads(base64.b64decode(payload + "=" * (-len(payload) % 4), altchars=b"-_", validate=True))
+    except (ValueError, RecursionError):
+        return None
+    expiry = claims.get("exp") if isinstance(claims, dict) else None
+    return expiry if type(expiry) is int else None
 
 
 def build_login_params(
@@ -99,13 +115,13 @@ def parse_login_response(payload: dict[str, Any]) -> tuple[str, str]:
 
     Raises GigyaAuthError on non-zero errorCode or missing session block.
     """
-    _check_gigya_error(payload)
+    check_gigya_error(payload)
     session = payload.get("sessionInfo")
     if not isinstance(session, dict):
         raise GigyaAuthError("Gigya login succeeded but sessionInfo is missing")
     token = session.get("sessionToken")
     secret = session.get("sessionSecret")
-    if not token or not secret:
+    if not isinstance(token, str) or not token or not isinstance(secret, str) or not secret:
         raise GigyaAuthError("Gigya login succeeded but session credentials are empty")
     return token, secret
 
@@ -154,14 +170,15 @@ def build_jwt_app_request(
 
 def parse_jwt_response(payload: dict[str, Any]) -> str:
     """Extract the JWT string from a getJWT response."""
-    _check_gigya_error(payload)
+    check_gigya_error(payload)
     token = payload.get("id_token")
     if not isinstance(token, str) or not token:
         raise GigyaAuthError("Gigya getJWT response contained no id_token")
     return token
 
 
-def _check_gigya_error(payload: dict[str, Any]) -> None:
+def check_gigya_error(payload: dict[str, Any]) -> None:
+    """Raise for a Gigya application error regardless of HTTP status."""
     error_code = payload.get("errorCode", 0)
     if error_code:
         # Audit #18 (A4): a malformed errorCode ("403001.5", "INVALID") must
@@ -170,7 +187,7 @@ def _check_gigya_error(payload: dict[str, Any]) -> None:
         # means success and must NOT raise.
         try:
             code = int(error_code)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             code = -1
         if not code:
             return
@@ -191,9 +208,20 @@ def is_credential_error(exc: GigyaAuthError) -> bool:
     """
     try:
         code = int(exc.error_code)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return False
     return code in _CREDENTIAL_ERROR_CODES
+
+
+def is_session_error(exc: GigyaAuthError) -> bool:
+    """True when Gigya rejects the credentials sent to accounts.getJWT."""
+    return is_credential_error(exc) or exc.error_code in _SESSION_ERROR_CODES
+
+
+def is_transient_error(exc: GigyaAuthError) -> bool:
+    """Identify rate limits and service errors encoded in Gigya's payload."""
+    code = exc.error_code
+    return code in _TRANSIENT_ERROR_CODES or str(code).startswith("5")
 
 
 def apikey_fingerprint(api_key: str) -> str:

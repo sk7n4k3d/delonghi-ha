@@ -1,9 +1,4 @@
-"""Tests for the Daedalus config flow.
-
-Validates happy path + auth/connection error branches. The flow intentionally
-accepts the host/SN from the user (no BLE provisioning yet) and uses the LAN
-WS to validate they're reachable before creating the entry.
-"""
+"""Tests for My Coffee Lounge discovery, LAN verification and account reauth."""
 
 from __future__ import annotations
 
@@ -14,21 +9,28 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from custom_components.delonghi_daedalus import config_flow
 from custom_components.delonghi_daedalus.api import (
     DaedalusAuthError,
     DaedalusConnectionError,
+    DaedalusLanIdentityError,
+    DaedalusLanSerialMismatchError,
 )
+from custom_components.delonghi_daedalus.cloud import CloudTelemetryError, DirectoryMachine
 from custom_components.delonghi_daedalus.config_flow import (
     DaedalusConfigFlow,
     _probe_pools,
 )
 from custom_components.delonghi_daedalus.const import (
+    CONF_AROMATIC_WARMUP,
     CONF_CLOUD_TELEMETRY,
     CONF_EMAIL,
     CONF_HOST,
     CONF_JWT,
     CONF_LAN_AUTH_MESSAGE,
+    CONF_LAN_TLS_FINGERPRINT,
     CONF_MACHINE_NAME,
+    CONF_MODEL,
     CONF_PASSWORD,
     CONF_POOL,
     CONF_SERIAL_NUMBER,
@@ -54,217 +56,348 @@ def test_show_form_when_no_input() -> None:
     assert result["step_id"] == "user"
 
 
-def test_create_entry_on_success() -> None:
+_CREDENTIALS = {CONF_EMAIL: "user@example.com", CONF_PASSWORD: "test-password"}
+_PIN = "ab" * 32
+_NEW_PIN = "ba" * 32
+_OWNER = DirectoryMachine("SN1234", "owner-thing", "ECAM63070")
+_SHARED = DirectoryMachine("SN4321", "shared-thing", "ECAM65075")
+_HOST = "192.168.1.42"
+
+
+@pytest.fixture
+def setup_flow(monkeypatch):
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("session-abc", "secret-1", "jwt-xyz"))
-    lan = MagicMock()
-    lan.connection_id = 7
-    lan.auth_message = "AUTH"
-    lan.close = AsyncMock()
+    api.login_and_get_jwt = AsyncMock(return_value=("session", "secret", "jwt"))
+    api.probe_lan_fingerprint = AsyncMock(return_value=_PIN)
+    lan = MagicMock(auth_message="auth", close=AsyncMock())
     api.connect_lan = AsyncMock(return_value=lan)
     api.close = AsyncMock()
-
-    flow = _make_flow(api)
-    user_input = {
-        CONF_EMAIL: "user@example.com",
-        CONF_PASSWORD: "hunter2",
-        CONF_HOST: "192.168.1.42",
-        CONF_SERIAL_NUMBER: "SN1234",
-    }
-
-    result = asyncio.run(flow.async_step_user(user_input))
-
-    assert result["type"] == "create_entry"
-    assert result["title"].startswith("My Coffee Lounge")
-    data = result["data"]
-    assert data[CONF_EMAIL] == "user@example.com"
-    # Password is intentionally NOT persisted — reauth flow is used to
-    # ask the user for it again if the session token is ever revoked.
-    assert CONF_PASSWORD not in data
-    assert data[CONF_HOST] == "192.168.1.42"
-    assert data[CONF_SERIAL_NUMBER] == "SN1234"
-    assert data[CONF_JWT] == "jwt-xyz"
-    assert data[CONF_SESSION_TOKEN] == "session-abc"
-    assert data[CONF_SESSION_SECRET] == "secret-1"
-    assert data[CONF_LAN_AUTH_MESSAGE] == "AUTH"
-    assert data[CONF_CLOUD_TELEMETRY] is False
-    # machine_name defaults to SN until we can pull it from the cloud /devices
-    assert data[CONF_MACHINE_NAME] == "SN1234"
-    # Probe connection must have been closed.
-    lan.close.assert_awaited()
+    directory = AsyncMock(return_value=[_OWNER, _SHARED])
+    shadow = AsyncMock(return_value=_HOST)
+    monkeypatch.setattr(config_flow, "list_machines", directory)
+    monkeypatch.setattr(config_flow, "fetch_reported_lan_ip", shadow)
+    return _make_flow(api), api, directory, shadow
 
 
-def test_invalid_auth_shows_form_error() -> None:
-    api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("bad creds"))
-    api.close = AsyncMock()
+def _option_key(flow, serial):
+    return next(key for key, machine in flow._machines.items() if machine.serial == serial)
 
-    flow = _make_flow(api)
-    result = asyncio.run(
-        flow.async_step_user(
-            {
-                CONF_EMAIL: "u",
-                CONF_PASSWORD: "p",
-                CONF_HOST: "192.168.1.42",
-                CONF_SERIAL_NUMBER: "SN",
-            }
+
+def test_device_choices_use_opaque_keys_and_mask_duplicate_labels(setup_flow):
+    flow, _, directory, _ = setup_flow
+    directory.return_value = [_OWNER, DirectoryMachine("SN4321", "shared", "ECAM63070")]
+    result = asyncio.run(flow.async_step_user(_CREDENTIALS))
+    choices = next(iter(result["data_schema"].schema.values())).container
+    assert set(choices.values()) == {"PrimaDonna Aromatic (…1234)", "PrimaDonna Aromatic (…4321)"}
+    assert not set(choices) & {"SN1234", "SN4321"}
+
+
+def test_explicit_shared_machine_selection_and_pin_confirmation(setup_flow):
+    flow, api, _, shadow = setup_flow
+
+    async def run():
+        result = await flow.async_step_user(_CREDENTIALS)
+        assert result["step_id"] == "device"
+        assert result["data_schema"]({"device": _option_key(flow, "SN1234")})
+        assert result["data_schema"]({"device": _option_key(flow, "SN4321")})
+        assert (await flow.async_step_device({"device": "other"}))["step_id"] == "device"
+        shadow.assert_not_awaited()
+        result = await flow.async_step_device({"device": _option_key(flow, "SN4321")})
+        shadow.assert_awaited_once_with(api.http_session, thing_name="shared-thing", jwt="jwt")
+        assert result["data_schema"]({})[CONF_HOST] == _HOST
+        result = await flow.async_step_lan({CONF_HOST: _HOST})
+        assert result["step_id"] == "verify_lan"
+        assert result["description_placeholders"]["serial"] == "…4321"
+        assert result["description_placeholders"]["fingerprint"] == ":".join(["AB"] * 32)
+        api.probe_lan_fingerprint.assert_awaited_once_with(host=_HOST)
+        api.connect_lan.assert_not_awaited()
+        assert (await flow.async_step_verify_lan({"verified_fingerprint": False}))["errors"]["base"] == (
+            "fingerprint_not_verified"
         )
+        api.connect_lan.assert_not_awaited()
+
+        result = await flow.async_step_verify_lan({"verified_fingerprint": True})
+        assert result["type"] == "create_entry"
+        assert result["title"] == "ECAM65075"
+        data = result["data"]
+        assert data[CONF_SERIAL_NUMBER] == "SN4321"
+        assert data[CONF_MODEL] == "ECAM65075"
+        assert data[CONF_MACHINE_NAME] == "shared-thing"
+        assert data[CONF_EMAIL] == _CREDENTIALS[CONF_EMAIL]
+        assert CONF_PASSWORD not in data
+        assert data[CONF_HOST] == _HOST
+        assert data[CONF_LAN_TLS_FINGERPRINT] == _PIN
+        assert data[CONF_JWT] == "jwt"
+        assert data[CONF_SESSION_TOKEN] == "session"
+        assert data[CONF_SESSION_SECRET] == "secret"
+        assert data[CONF_LAN_AUTH_MESSAGE] == "auth"
+        api.connect_lan.assert_awaited_once_with(
+            host=_HOST, serial_number="SN4321", jwt="jwt", auth_message="AUTH", fingerprint=_PIN
+        )
+        api.connect_lan.return_value.close.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+def test_zero_machines_aborts_and_one_machine_still_requires_selection(setup_flow):
+    flow, api, directory, shadow = setup_flow
+    directory.return_value = []
+    assert asyncio.run(flow.async_step_user(_CREDENTIALS))["reason"] == "no_devices"
+    directory.return_value = [_OWNER]
+    assert asyncio.run(flow.async_step_user(_CREDENTIALS))["step_id"] == "device"
+    shadow.assert_not_awaited()
+    api.connect_lan.assert_not_awaited()
+
+
+def test_directory_outage_supports_manual_serial_and_address(setup_flow):
+    flow, api, directory, shadow = setup_flow
+    directory.side_effect = CloudTelemetryError("offline")
+
+    async def run():
+        result = await flow.async_step_user(_CREDENTIALS)
+        assert result["step_id"] == "manual"
+        assert result["errors"]["base"] == "discovery_unavailable"
+        result = await flow.async_step_manual({CONF_SERIAL_NUMBER: "SN1234"})
+        assert result["step_id"] == "lan"
+        assert result["data_schema"]({})[CONF_HOST] == ""
+        shadow.assert_not_awaited()
+        result = await flow.async_step_lan({CONF_HOST: _HOST})
+        assert result["step_id"] == "verify_lan"
+        result = await flow.async_step_verify_lan({"verified_fingerprint": True})
+        assert result["data"][CONF_MACHINE_NAME] == "SN1234"
+
+    asyncio.run(run())
+
+
+def test_shadow_outage_allows_manual_host_and_cloud_only(setup_flow):
+    flow, api, _, shadow = setup_flow
+    shadow.side_effect = TimeoutError
+
+    async def run():
+        await flow.async_step_user({**_CREDENTIALS, CONF_CLOUD_TELEMETRY: True})
+        result = await flow.async_step_device({"device": _option_key(flow, "SN1234")})
+        assert result["data_schema"]({})[CONF_HOST] == ""
+        result = await flow.async_step_lan({"cloud_only": True})
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_CLOUD_TELEMETRY] is True
+        assert result["data"][CONF_LAN_TLS_FINGERPRINT] is None
+        api.probe_lan_fingerprint.assert_not_awaited()
+        api.connect_lan.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("host", ["172.32.0.1", "169.254.169.254", "127.0.0.1", "192.168.1.10/other"])
+def test_invalid_hosts_never_probe_or_authenticate(setup_flow, host):
+    flow, api, _, _ = setup_flow
+
+    async def run():
+        await flow.async_step_user(_CREDENTIALS)
+        await flow.async_step_device({"device": _option_key(flow, "SN1234")})
+        result = await flow.async_step_lan({CONF_HOST: host})
+        assert result["errors"][CONF_HOST] == "invalid_host"
+        api.probe_lan_fingerprint.assert_not_awaited()
+        api.connect_lan.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_reconfigure_moves_address_with_known_certificate(setup_flow):
+    flow, api, _, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin=_PIN)
+    new_host = "192.168.1.81"
+
+    async def run():
+        assert (await flow.async_step_reconfigure())["step_id"] == "lan"
+        result = await flow.async_step_lan({CONF_HOST: new_host})
+        assert result["reason"] == "reconfigure_successful"
+        assert flow.hass.config_entries.async_update_entry.call_args.kwargs["data"] == {
+            **entry.data,
+            CONF_HOST: new_host,
+            CONF_LAN_AUTH_MESSAGE: "auth",
+        }
+        api.connect_lan.assert_awaited_once_with(
+            host=new_host, serial_number="OLD-SN", jwt="existing-jwt", auth_message="AUTH", fingerprint=_PIN
+        )
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("pin", [None, _PIN])
+def test_reconfigure_requires_confirmation_for_missing_or_replaced_pin(setup_flow, pin):
+    flow, api, _, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin)
+    api.probe_lan_fingerprint.return_value = _NEW_PIN
+
+    async def run():
+        await flow.async_step_reconfigure()
+        result = await flow.async_step_lan({CONF_HOST: _HOST})
+        assert result["step_id"] == "verify_lan"
+        api.connect_lan.assert_not_awaited()
+        flow.hass.config_entries.async_update_entry.assert_not_called()
+
+        api.connect_lan.side_effect = DaedalusLanIdentityError("test")
+        result = await flow.async_step_verify_lan({"verified_fingerprint": True})
+        assert result["step_id"] == "lan"
+        assert result["errors"]["base"] == "certificate_changed"
+        flow.hass.config_entries.async_update_entry.assert_not_called()
+
+        api.connect_lan.side_effect = None
+        await flow.async_step_lan({CONF_HOST: _HOST})
+        result = await flow.async_step_verify_lan({"verified_fingerprint": True})
+        assert result["reason"] == "reconfigure_successful"
+        data = flow.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert data[CONF_SERIAL_NUMBER] == entry.data[CONF_SERIAL_NUMBER]
+        assert data[CONF_LAN_TLS_FINGERPRINT] == _NEW_PIN
+        flow.hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
+
+    asyncio.run(run())
+
+
+def test_reconfigure_serial_mismatch_rejects_candidate_without_writing(setup_flow):
+    flow, api, directory, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin=_PIN)
+    original_data = entry.data.copy()
+    api.probe_lan_fingerprint.return_value = _NEW_PIN
+    api.connect_lan.side_effect = DaedalusLanSerialMismatchError("different machine")
+    api.refresh_jwt = AsyncMock()
+
+    async def run():
+        await flow.async_step_reconfigure()
+        result = await flow.async_step_lan({CONF_HOST: "192.168.1.81"})
+        assert result["step_id"] == "verify_lan"
+        api.connect_lan.assert_not_awaited()
+        result = await flow.async_step_verify_lan({"verified_fingerprint": True})
+        assert result["step_id"] == "lan"
+        assert result["errors"]["base"] == "serial_mismatch"
+
+    asyncio.run(run())
+    api.connect_lan.assert_awaited_once_with(
+        host="192.168.1.81",
+        serial_number=original_data[CONF_SERIAL_NUMBER],
+        jwt=original_data[CONF_JWT],
+        auth_message="AUTH",
+        fingerprint=_NEW_PIN,
     )
-    assert result["type"] == "form"
-    assert result["errors"]["base"] == "invalid_auth"
+    api.refresh_jwt.assert_not_awaited()
+    directory.assert_not_awaited()
+    flow.hass.config_entries.async_update_entry.assert_not_called()
+    flow.hass.config_entries.async_reload.assert_not_awaited()
+    assert entry.data == original_data
 
 
-def test_cannot_connect_shows_form_error() -> None:
-    api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "jwt"))
-    api.connect_lan = AsyncMock(side_effect=DaedalusConnectionError("no route"))
-    api.close = AsyncMock()
+def test_warmup_option_and_cloud_only_reconfigure_preserve_a_transport(setup_flow, monkeypatch):
+    flow, _, _, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin=_PIN)
+    entry.data.update({CONF_CLOUD_TELEMETRY: True, CONF_POOL: GIGYA_POOL_EU})
+    flow.hass.config_entries.async_update_entry.side_effect = lambda entry, *, data, **_: setattr(entry, "data", data)
+    options = config_flow.DaedalusOptionsFlow(entry)
+    options.hass = flow.hass
 
-    flow = _make_flow(api)
-    result = asyncio.run(
-        flow.async_step_user(
-            {
-                CONF_EMAIL: "u",
-                CONF_PASSWORD: "p",
-                CONF_HOST: "192.168.1.42",
-                CONF_SERIAL_NUMBER: "SN",
-            }
+    async def run():
+        saving = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def save_pending(*_args):
+            saving.set()
+            await finish.wait()
+
+        monkeypatch.setattr(config_flow, "save_pending", save_pending)
+        await flow.async_step_reconfigure()
+        disable_cloud = asyncio.create_task(
+            options.async_step_init({CONF_CLOUD_TELEMETRY: False, CONF_AROMATIC_WARMUP: True})
         )
-    )
-    assert result["type"] == "form"
-    assert result["errors"]["base"] == "cannot_connect"
+        await saving.wait()
+        cloud_only = asyncio.create_task(flow.async_step_lan({"cloud_only": True}))
+        await asyncio.sleep(0)
+        assert not cloud_only.done()
+        finish.set()
+        assert (await disable_cloud)["type"] == "create_entry"
+        assert (await cloud_only)["errors"]["base"] == "cloud_only_unavailable"
+
+    asyncio.run(run())
+    assert entry.data[CONF_CLOUD_TELEMETRY] is False
+    assert entry.data[CONF_AROMATIC_WARMUP] is True
+    assert entry.data[CONF_LAN_TLS_FINGERPRINT] == _PIN
 
 
-def test_pool_selection_passes_matching_api_key_to_login() -> None:
-    """When user picks Pool EU_US, the flow must forward the EU_US Gigya apiKey."""
-    api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("session-abc", "secret-1", "jwt-xyz"))
-    lan = MagicMock()
-    lan.connection_id = 7
-    lan.auth_message = "AUTH"
-    lan.close = AsyncMock()
-    api.connect_lan = AsyncMock(return_value=lan)
-    api.close = AsyncMock()
+@pytest.mark.parametrize(
+    ("current_title", "expected_title"),
+    [
+        ("My Coffee Lounge (OLD-SN)", "PrimaDonna Aromatic"),
+        ("Kitchen Coffee", "Kitchen Coffee"),
+    ],
+)
+def test_reconfigure_enriches_legacy_metadata_without_changing_serial_or_custom_title(
+    setup_flow, current_title, expected_title
+):
+    flow, api, directory, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin=_PIN)
+    entry.title = current_title
+    directory.return_value = [DirectoryMachine("old-sn", "existing-thing", "ECAM63070")]
 
-    flow = _make_flow(api)
-    result = asyncio.run(
-        flow.async_step_user(
-            {
-                CONF_EMAIL: "user@example.com",
-                CONF_PASSWORD: "hunter2",
-                CONF_HOST: "192.168.1.42",
-                CONF_SERIAL_NUMBER: "SN1234",
-                CONF_POOL: GIGYA_POOL_EU_US,
-            }
-        )
-    )
+    async def run():
+        await flow.async_step_reconfigure()
+        result = await flow.async_step_lan({CONF_HOST: _HOST})
+        assert result["reason"] == "reconfigure_successful"
+        update = flow.hass.config_entries.async_update_entry.call_args.kwargs
+        assert update["title"] == expected_title
+        assert update["data"][CONF_MODEL] == "ECAM63070"
+        assert update["data"][CONF_MACHINE_NAME] == "existing-thing"
+        assert update["data"][CONF_SERIAL_NUMBER] == "OLD-SN"
+        directory.assert_awaited_once_with(api.http_session, jwt="existing-jwt")
 
-    assert result["type"] == "create_entry"
-    api.login_and_get_jwt.assert_awaited_once()
-    call = api.login_and_get_jwt.await_args
-    assert call.kwargs["api_key"] == GIGYA_API_KEYS[GIGYA_POOL_EU_US]
-    assert result["data"][CONF_POOL] == GIGYA_POOL_EU_US
+    asyncio.run(run())
 
 
-def test_pool_defaults_to_eu_when_not_provided() -> None:
-    """Backwards-compat: existing flows without pool field keep using Pool EU."""
-    api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "j"))
-    lan = MagicMock()
-    lan.connection_id = 1
-    lan.close = AsyncMock()
-    api.connect_lan = AsyncMock(return_value=lan)
-    api.close = AsyncMock()
+def test_reconfigure_merges_concurrent_credentials_and_settings(setup_flow):
+    flow, api, _, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin=_PIN)
+    validate = api.connect_lan.return_value
 
-    flow = _make_flow(api)
-    asyncio.run(
-        flow.async_step_user(
-            {
-                CONF_EMAIL: "u",
-                CONF_PASSWORD: "p",
-                CONF_HOST: "192.168.1.42",
-                CONF_SERIAL_NUMBER: "SN",
-            }
-        )
-    )
-    assert api.login_and_get_jwt.await_args.kwargs["api_key"] == GIGYA_API_KEYS[GIGYA_POOL_EU]
+    async def change_entry(**kwargs):
+        entry.data = {**entry.data, CONF_JWT: "rotated-jwt", CONF_CLOUD_TELEMETRY: True}
+        return validate
 
+    api.connect_lan.side_effect = change_entry
 
-def test_invalid_auth_logs_reason(caplog: pytest.LogCaptureFixture) -> None:
-    """Auth rejection must surface the upstream Gigya error in HA logs.
+    async def run():
+        await flow.async_step_reconfigure()
+        result = await flow.async_step_lan({CONF_HOST: "192.168.1.81"})
+        assert result["reason"] == "reconfigure_successful"
+        data = flow.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+        assert data[CONF_JWT] == "rotated-jwt"
+        assert data[CONF_CLOUD_TELEMETRY] is True
+        assert data[CONF_HOST] == "192.168.1.81"
+        assert data[CONF_LAN_TLS_FINGERPRINT] == _PIN
 
-    Without this, users see only the translated 'Invalid credentials' form
-    error and can't tell a real bad-password apart from a pool/apiKey
-    mismatch — which is exactly what happened with Eletta Ultra users who
-    sit on Gigya Pool EU_US while the integration defaulted to EU.
-    """
-    api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 400093: invalid apiKey"))
-    api.close = AsyncMock()
-
-    flow = _make_flow(api)
-    with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_daedalus.config_flow"):
-        asyncio.run(
-            flow.async_step_user(
-                {
-                    CONF_EMAIL: "u",
-                    CONF_PASSWORD: "p",
-                    CONF_HOST: "192.168.1.42",
-                    CONF_SERIAL_NUMBER: "SN",
-                }
-            )
-        )
-    assert any(
-        "400093" in record.getMessage() or "invalid apiKey" in record.getMessage() for record in caplog.records
-    ), f"expected Gigya error detail in logs, got: {[r.getMessage() for r in caplog.records]}"
+    asyncio.run(run())
 
 
-def test_cannot_connect_logs_reason(caplog: pytest.LogCaptureFixture) -> None:
-    api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "jwt"))
-    api.connect_lan = AsyncMock(
-        side_effect=DaedalusConnectionError(
-            "LAN WS connect to wss://10.0.0.5/ws/lan2lan failed: [Errno 113] No route to host"
-        )
-    )
-    api.close = AsyncMock()
-
-    flow = _make_flow(api)
-    with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_daedalus.config_flow"):
-        asyncio.run(
-            flow.async_step_user(
-                {
-                    CONF_EMAIL: "u",
-                    CONF_PASSWORD: "p",
-                    CONF_HOST: "10.0.0.5",
-                    CONF_SERIAL_NUMBER: "SN",
-                }
-            )
-        )
-    assert any(
-        "No route to host" in record.getMessage() or "LAN WS connect" in record.getMessage()
-        for record in caplog.records
-    ), f"expected LAN connect detail in logs, got: {[r.getMessage() for r in caplog.records]}"
+def _reconfigure_entry(flow, pin):
+    data = {CONF_HOST: _HOST, CONF_JWT: "existing-jwt", CONF_SERIAL_NUMBER: "OLD-SN", CONF_EMAIL: "user@example.com"}
+    if pin is not None:
+        data[CONF_LAN_TLS_FINGERPRINT] = pin
+    entry = MagicMock(entry_id="entry-1", data=data)
+    flow.hass.data = {}
+    flow.hass.config_entries.async_get_entry.return_value = entry
+    flow.hass.config_entries.async_reload = AsyncMock()
+    flow.context = {"entry_id": entry.entry_id}
+    return entry
 
 
-def test_unknown_error_shows_form_error() -> None:
-    api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(side_effect=RuntimeError("boom"))
-    api.close = AsyncMock()
-
-    flow = _make_flow(api)
-    result = asyncio.run(
-        flow.async_step_user(
-            {
-                CONF_EMAIL: "u",
-                CONF_PASSWORD: "p",
-                CONF_HOST: "192.168.1.42",
-                CONF_SERIAL_NUMBER: "SN",
-            }
-        )
-    )
-    assert result["type"] == "form"
-    assert result["errors"]["base"] == "unknown"
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [(DaedalusAuthError("bad creds"), "invalid_auth"), (DaedalusConnectionError("unavailable"), "cannot_login")],
+)
+def test_login_errors_leave_form_and_hide_credentials(setup_flow, caplog, error, message):
+    flow, api, _, _ = setup_flow
+    api.login_and_get_jwt.side_effect = error
+    result = asyncio.run(flow.async_step_user(_CREDENTIALS))
+    assert result["step_id"] == "user"
+    assert result["errors"]["base"] == message
+    assert _CREDENTIALS[CONF_EMAIL] not in caplog.text
+    assert _CREDENTIALS[CONF_PASSWORD] not in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +429,7 @@ class TestProbePools:
         api = MagicMock()
         api.login_and_get_jwt = AsyncMock(
             side_effect=[
-                DaedalusAuthError("Gigya error 403005: Unauthorized user"),
+                DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005),
                 ("session", "ss", "jwt"),
             ]
         )
@@ -315,7 +448,9 @@ class TestProbePools:
     def test_all_pools_403005_raises_all_pools_marker(self) -> None:
         """Every pool returns 403005 → raise with `all_pools:` prefix for caller mapping."""
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+        )
 
         with pytest.raises(DaedalusAuthError, match="^all_pools:"):
             asyncio.run(_probe_pools(api, email="u@example.com", password="p", preferred_pool=GIGYA_POOL_EU))
@@ -350,7 +485,7 @@ class TestProbePools:
         api = MagicMock()
         api.login_and_get_jwt = AsyncMock(
             side_effect=[
-                DaedalusAuthError("Gigya error 403005: Unauthorized user"),
+                DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005),
                 ("session", "ss", "jwt"),
             ]
         )
@@ -420,9 +555,17 @@ class TestReauthFlow:
         assert CONF_PASSWORD not in new_data  # still not persisted
         flow.hass.config_entries.async_reload.assert_awaited_once_with("entry-1")
 
-    def test_reauth_confirm_invalid_password_keeps_form(self) -> None:
+    @pytest.mark.parametrize(
+        ("failure", "error"),
+        [
+            (DaedalusAuthError("Gigya error 403042: bad password"), "invalid_auth"),
+            (DaedalusConnectionError("Gigya error 6005: Rate limited"), "cannot_login"),
+            (TimeoutError(), "cannot_login"),
+        ],
+    )
+    def test_reauth_confirm_failure_keeps_form(self, failure, error) -> None:
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403042: bad password"))
+        api.login_and_get_jwt = AsyncMock(side_effect=failure)
         api.close = AsyncMock()
         entry = self._make_entry(
             data={
@@ -437,15 +580,18 @@ class TestReauthFlow:
         flow = self._make_reauth_flow(api, entry)
         asyncio.run(flow.async_step_reauth({}))
 
-        result = asyncio.run(flow.async_step_reauth_confirm({CONF_PASSWORD: "wrong"}))
+        result = asyncio.run(flow.async_step_reauth_confirm({CONF_PASSWORD: "user-input"}))
 
         assert result["type"] == "form"
-        assert result["errors"]["base"] == "invalid_auth"
+        assert result["errors"]["base"] == error
+        api.login_and_get_jwt.assert_awaited_once()
         flow.hass.config_entries.async_update_entry.assert_not_called()
 
     def test_reauth_confirm_all_pools_failure_maps_to_dedicated_error(self) -> None:
         api = MagicMock()
-        api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+        api.login_and_get_jwt = AsyncMock(
+            side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+        )
         api.close = AsyncMock()
         entry = self._make_entry(
             data={
@@ -469,7 +615,9 @@ class TestReauthFlow:
 def test_step_user_maps_all_pools_failure_to_dedicated_error_key() -> None:
     """End-to-end: when probe burns all pools, surface the all_pools_unauthorized error key."""
     api = MagicMock()
-    api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+    api.login_and_get_jwt = AsyncMock(
+        side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+    )
     api.close = AsyncMock()
 
     flow = _make_flow(api)
@@ -495,7 +643,9 @@ class TestProbePoolsEmailPrivacy:
     def test_all_pools_message_masks_email(self):
         async def _run_probe():
             api = MagicMock()
-            api.login_and_get_jwt = AsyncMock(side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user"))
+            api.login_and_get_jwt = AsyncMock(
+                side_effect=DaedalusAuthError("Gigya error 403005: Unauthorized user", login_error_code=403005)
+            )
             return await _probe_pools(
                 api,
                 email="sebastien.martin@example.com",
@@ -510,62 +660,6 @@ class TestProbePoolsEmailPrivacy:
         assert msg.startswith("all_pools:")
         assert "sebastien.martin@example.com" not in msg
         assert "s***n@***.com" in msg
-
-
-class TestFailureLogsMaskIdentifiers:
-    """Audit 2026-11-05 (M3): the flow logged host + serial number verbatim
-    at WARNING while the component's own REDACT_KEYS masks both for the
-    diagnostics dump — same public-issue-tracker channel, same bar."""
-
-    def _run_user_step(self, *, login_error=None, connect_error=None):
-        api = MagicMock()
-        if login_error is not None:
-            api.login_and_get_jwt = AsyncMock(side_effect=login_error)
-        else:
-            api.login_and_get_jwt = AsyncMock(return_value=("s", "ss", "jwt"))
-        if connect_error is not None:
-            api.connect_lan = AsyncMock(side_effect=connect_error)
-        else:
-            lan = MagicMock()
-            lan.close = AsyncMock()
-            api.connect_lan = AsyncMock(return_value=lan)
-        api.close = AsyncMock()
-        flow = _make_flow(api)
-        asyncio.run(
-            flow.async_step_user(
-                {
-                    CONF_EMAIL: "user@example.com",
-                    CONF_PASSWORD: "p",
-                    CONF_HOST: "192.168.1.42",
-                    CONF_SERIAL_NUMBER: "SN1234567890",
-                }
-            )
-        )
-
-    def test_auth_failure_warning_masks_host(self, caplog: pytest.LogCaptureFixture) -> None:
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_daedalus.config_flow"):
-            self._run_user_step(login_error=DaedalusAuthError("bad creds"))
-        joined = "\n".join(r.getMessage() for r in caplog.records)
-        assert "login refused" in joined
-        assert "192.168.x.x" in joined, "masked host expected for subnet triage"
-        assert "192.168.1.42" not in joined
-
-    def test_connect_failure_warning_masks_host_and_serial(self, caplog: pytest.LogCaptureFixture) -> None:
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_daedalus.config_flow"):
-            self._run_user_step(
-                connect_error=DaedalusConnectionError("LAN WS connect to wss://192.168.1.42/ws/lan2lan failed")
-            )
-        joined = "\n".join(r.getMessage() for r in caplog.records)
-        assert "LAN probe failed" in joined
-        assert "SN1234567890" not in joined
-        assert joined.count("192.168.1.42") == 0, "host must be masked in args AND in the exception text"
-        # triage value preserved: last serial digits + error detail survive
-        assert "********7890" in joined
-        assert "LAN WS connect" in joined
 
 
 # --------------------------------------------------------------------------- #
@@ -629,3 +723,22 @@ def test_options_no_change_does_not_reload() -> None:
     assert result["type"] == "create_entry"
     flow.hass.config_entries.async_update_entry.assert_not_called()
     flow.hass.config_entries.async_reload.assert_not_called()
+
+
+def test_cloud_only_options_cannot_disable_last_transport() -> None:
+    entry = _make_entry(True)
+    flow = _make_options_flow(entry)
+    result = asyncio.run(flow.async_step_init({CONF_CLOUD_TELEMETRY: False}))
+    assert result["type"] == "form"
+    flow.hass.config_entries.async_update_entry.assert_not_called()
+    flow.hass.config_entries.async_reload.assert_not_awaited()
+
+
+def test_options_can_disable_cloud_when_lan_is_verified() -> None:
+    entry = _make_entry(True)
+    entry.data[CONF_LAN_TLS_FINGERPRINT] = _PIN
+    flow = _make_options_flow(entry)
+    result = asyncio.run(flow.async_step_init({CONF_CLOUD_TELEMETRY: False}))
+    assert result["type"] == "create_entry"
+    assert flow.hass.config_entries.async_update_entry.call_args.kwargs["data"][CONF_CLOUD_TELEMETRY] is False
+    flow.hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)

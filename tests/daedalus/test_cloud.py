@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import time
+from unittest.mock import AsyncMock, patch
 
 import aiohttp
 import pytest
@@ -1014,10 +1015,160 @@ def test_fetch_cloud_state_accepts_normal_thing_name() -> None:
         try:
             with patch("custom_components.delonghi_daedalus.cloud.ShadowClient") as client_cls:
                 client_cls.return_value.fetch = AsyncMock(return_value={"MachineStatus": {}})
-                docs, thing = await fetch_cloud_state(session, serial="SN1", jwt="jwt", machine_name="Eletta-Ultra_01")
-                assert thing == "Eletta-Ultra_01"
-                assert docs == {"MachineStatus": {}}
+                state = await fetch_cloud_state(session, serial="SN1", jwt="jwt", machine_name="Eletta-Ultra_01")
+                assert state.machine_name == "Eletta-Ultra_01"
+                assert state.shadows == {"MachineStatus": {}}
         finally:
             await session.close()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("record", "reported_at", "error"),
+    [
+        ({"status": " offline "}, 990, "reports the machine offline"),
+        ({"status": "ONLINE"}, 1, None),
+        ({}, 1, None),
+        ({"status": FAKE_JWT}, 1, "unknown presence"),
+        ({"status": "UNKNOWN"}, 990, None),
+    ],
+)
+def test_cloud_machine_status_uses_directory_presence(record, reported_at, error) -> None:
+    async def _run() -> None:
+        stats = {"MachineCapabilities": {"state": {"reported": {"version": "1.2.0"}}}}
+        status = {
+            "state": {"reported": {"Status": "Idle"}},
+            "metadata": {"reported": {"Status": {"timestamp": reported_at}}},
+        }
+        full = {**stats, "MachineStatus": status}
+        thing_name = "Aromatic_70"
+        payload = {"ownedByMe": [{"serialNumber": "SN1", "machineName": thing_name, **record}]}
+        async with aiohttp.ClientSession() as session:
+            with (
+                patch.object(cloud, "_fetch_devices", return_value=payload),
+                patch.object(cloud, "ShadowClient") as client,
+                patch.object(cloud.time, "time", return_value=1000),
+            ):
+                client.return_value.fetch = AsyncMock(return_value=full)
+                state = await fetch_cloud_state(
+                    session, serial="SN1", jwt="jwt", machine_name=thing_name, check_device_status=True
+                )
+                assert state.machine_name == thing_name
+                assert state.shadows == (stats if error else full)
+                assert full["MachineStatus"] == status
+                if error:
+                    assert error in state.status_error
+                    assert FAKE_JWT not in state.status_error
+                else:
+                    assert state.status_error is None
+                client.return_value.fetch.assert_awaited_once_with()
+
+    asyncio.run(_run())
+
+
+def test_cloud_directory_prefers_explicit_offline_for_duplicate_records() -> None:
+    async def _run() -> None:
+        record = {"serialNumber": "SN1", "machineName": "thing-1"}
+        payload = {"ownedByMe": [record], "sharedToMe": [{**record, "status": "OFFLINE"}]}
+        docs = {"MachineStatus": {"state": {"reported": {"Status": "Idle"}}}}
+        async with aiohttp.ClientSession() as session:
+            with (
+                patch.object(cloud, "_fetch_devices", return_value=payload),
+                patch.object(cloud, "ShadowClient") as client,
+            ):
+                client.return_value.fetch = AsyncMock(return_value=docs)
+                state = await fetch_cloud_state(
+                    session, serial="SN1", jwt="jwt", machine_name=None, check_device_status=True
+                )
+        assert "MachineStatus" not in state.shadows
+        assert state.status_error == "Device directory reports the machine offline"
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("reported_at", "accepted"),
+    [
+        (880, True),
+        (879.999, False),
+        (990.5, True),
+        (1001.5, True),
+        (1120, True),
+        (1120.001, False),
+        (float("nan"), False),
+        (float("inf"), False),
+        (float("-inf"), False),
+        ("1000", False),
+        (True, False),
+        (None, False),
+    ],
+)
+def test_cloud_directory_failure_requires_recent_report_with_clock_tolerance(reported_at, accepted) -> None:
+    async def _run() -> None:
+        docs = {
+            "MachineCapabilities": {"state": {"reported": {"version": "1.2.0"}}},
+            "MachineStatus": {
+                "timestamp": 1000,
+                "state": {"reported": {"Status": "Idle"}},
+                "metadata": {"reported": {"Status": {"timestamp": reported_at}}},
+            },
+        }
+        async with aiohttp.ClientSession() as session:
+            with (
+                patch.object(cloud, "_lookup_machine_record", side_effect=CloudTelemetryError(FAKE_JWT)),
+                patch.object(cloud, "ShadowClient") as client,
+                patch.object(cloud.time, "time", return_value=1000),
+            ):
+                client.return_value.fetch = AsyncMock(return_value=docs)
+                state = await fetch_cloud_state(
+                    session, serial="SN1", jwt="jwt", machine_name="prior", check_device_status=True
+                )
+        assert state.shadows["MachineCapabilities"] == docs["MachineCapabilities"]
+        if accepted:
+            assert state.shadows["MachineStatus"] == docs["MachineStatus"]
+            assert state.status_error is None
+        else:
+            assert "MachineStatus" not in state.shadows
+            assert (
+                state.status_error == "Device directory lookup failed and MachineStatus has no recent Status timestamp"
+            )
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize("outcome", ["unreachable", "removed", "remapped"])
+def test_cloud_handles_directory_changes_without_reusing_old_status(outcome):
+    async def _run():
+        prior = "Previous_Thing"
+        replacement = "Replacement_Thing"
+        caps = {"MachineCapabilities": {}}
+        docs = {**caps, "MachineStatus": {"timestamp": int(time.time())}}
+        async with aiohttp.ClientSession() as session:
+            with (
+                patch.object(cloud, "_lookup_machine_record") as directory,
+                patch.object(cloud, "ShadowClient") as client,
+            ):
+                client.return_value.fetch = AsyncMock(return_value=docs)
+                if outcome == "removed":
+                    directory.side_effect = cloud.CloudMachineNotFound("removed")
+                    with pytest.raises(cloud.CloudMachineNotFound):
+                        await fetch_cloud_state(
+                            session, serial="SN1", jwt="jwt", machine_name=prior, check_device_status=True
+                        )
+                    client.assert_not_called()
+                else:
+                    if outcome == "unreachable":
+                        directory.side_effect = CloudTelemetryError("unreachable")
+                    else:
+                        directory.return_value = {"status": "ONLINE"}, replacement
+                    result = await fetch_cloud_state(
+                        session, serial="SN1", jwt="jwt", machine_name=prior, check_device_status=True
+                    )
+                    client.assert_called_once_with(session, thing_name=result.machine_name, jwt="jwt")
+                    if outcome == "unreachable":
+                        assert (result.shadows, result.machine_name) == (caps, prior)
+                    else:
+                        assert (result.shadows, result.machine_name) == (docs, replacement)
 
     asyncio.run(_run())

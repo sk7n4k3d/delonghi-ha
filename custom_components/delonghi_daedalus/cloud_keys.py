@@ -372,13 +372,44 @@ CLOUD_KEYS: tuple[CloudKey, ...] = _TABLE
 # Shadow keys that must NEVER become entities: the BLE pairing code is a
 # credential and MAC/SN are device identifiers — the raw fallback would
 # persist them in the HA recorder and in exported diagnostics.
-SENSITIVE_KEYS: frozenset[str] = frozenset({"blepasscode", "mac", "sn"})
+SENSITIVE_KEYS: frozenset[str] = frozenset(
+    {
+        "apikey",
+        "authtoken",
+        "blepasscode",
+        "clienttoken",
+        "deviceid",
+        "email",
+        "idtoken",
+        "jwt",
+        "lanipaddress",
+        "mac",
+        "macaddress",
+        "machinename",
+        "oauthtoken",
+        "password",
+        "secret",
+        "serial",
+        "serialno",
+        "serialnumber",
+        "sessionsecret",
+        "sessiontoken",
+        "sn",
+        "thingname",
+        "uid",
+    }
+)
 
 
 def normalize(name: object) -> str:
     """Last dot-segment of a flattened key, lowercase alphanumerics only."""
     last = str(name).rsplit(".", 1)[-1]
     return "".join(ch for ch in last.lower() if ch.isascii() and ch.isalnum())
+
+
+def is_sensitive_cloud_key(flat_key: str) -> bool:
+    """Check each segment of a shadow path for a sensitive field name."""
+    return any(normalize(segment) in SENSITIVE_KEYS for segment in flat_key.split("."))
 
 
 def normalize_path(name: object) -> str:
@@ -429,14 +460,14 @@ def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tup
     fallback). Audit #18 (E1) guards live here: shadow keys are
     cloud-controlled — blank ones are dropped and the display length is
     capped so a hostile key cannot build a colliding or oversized entity id.
-    ``SENSITIVE_KEYS`` (BLE passcode, MAC, SN) are dropped entirely.
+    ``SENSITIVE_KEYS`` are dropped entirely.
     """
     plan: list[tuple[str, str, CloudKey | None]] = []
     for source in CLOUD_SOURCES:
         flat = cloud.get(source) or {}
         count = 0
         for key in flat:
-            if not cloud_key_display(key) or normalize(key) in SENSITIVE_KEYS:
+            if not cloud_key_display(key) or is_sensitive_cloud_key(key):
                 continue
             meta = lookup_cloud_key(key)
             if bool(meta is not None and meta.binary) != want_binary:

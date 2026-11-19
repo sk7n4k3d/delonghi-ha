@@ -10,11 +10,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .cloud_keys import KIND_ALARM, CloudEntityDiscovery, CloudKey, cloud_key_display, coerce_bool
+from .cloud_keys import KIND_ALARM, CloudEntityDiscovery, CloudKey, coerce_bool
 from .const import CONF_CLOUD_TELEMETRY, DOMAIN
 from .coordinator import DaedalusCoordinator
+from .entity import DaedalusCloudEntity, DaedalusEntity
 
 
 async def async_setup_entry(
@@ -41,16 +41,18 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_add_cloud_binary_sensors))
 
 
-class DaedalusConnectedSensor(CoordinatorEntity[DaedalusCoordinator], BinarySensorEntity):
-    _attr_has_entity_name = True
+# These peripherals describe conditions a user can resolve at the machine.
+_USER_FACING_PERIPHERALS = frozenset({"low_water", "drip_tray_presence", "spout_presence", "peripheral_tank_presence"})
+
+
+class DaedalusConnectedSensor(DaedalusEntity, BinarySensorEntity):
     _attr_translation_key = "connected"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     # Wiring-state, not a brewing-state — keep off the main dashboard.
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator: DaedalusCoordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.serial_number}_connected"
+        super().__init__(coordinator, key="connected")
 
     @property
     def is_on(self) -> bool:
@@ -58,17 +60,15 @@ class DaedalusConnectedSensor(CoordinatorEntity[DaedalusCoordinator], BinarySens
         return bool(data.get("connected"))
 
 
-class DaedalusCloudBinarySensor(CoordinatorEntity[DaedalusCoordinator], BinarySensorEntity):
+class DaedalusCloudBinarySensor(DaedalusCloudEntity, BinarySensorEntity):
     """A mapped boolean shadow field (issue #18, mimasek71 snapshot).
 
     Alarms use ``device_class=problem`` (on = problem detected) and stay on
-    the dashboard; peripherals/accessories are wiring states and land in the
-    DIAGNOSTIC category. Raw values are coerced defensively (bool / 0-1 /
+    the dashboard, as do user-facing peripherals. Internal switches and raw
+    accessories are optional diagnostics. Values are coerced (bool / 0-1 /
     "true"/"false" / "Ano"/"Ne"); anything unparsable is unknown, never a
     silent False.
     """
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -77,24 +77,14 @@ class DaedalusCloudBinarySensor(CoordinatorEntity[DaedalusCoordinator], BinarySe
         key: str,
         meta: CloudKey,
     ) -> None:
-        super().__init__(coordinator)
-        self._source = source
-        self._key = key
-        display = cloud_key_display(key)
-        prefix = "cloud" if source == "status_flat" else "cloudcap"
-        self._attr_unique_id = f"{coordinator.serial_number}_{prefix}_{display}"
+        super().__init__(coordinator, source, key)
         self._attr_translation_key = f"cloud_{meta.key}"
         if meta.kind == KIND_ALARM:
             self._attr_device_class = BinarySensorDeviceClass.PROBLEM
-        if source == "capabilities_flat" or meta.kind != KIND_ALARM:
+        if source == "capabilities_flat" or (meta.kind != KIND_ALARM and meta.key not in _USER_FACING_PERIPHERALS):
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def is_on(self) -> bool | None:
-        cloud = (self.coordinator.data or {}).get("cloud") or {}
-        return coerce_bool(cloud.get(self._source, {}).get(self._key))
-
-    @property
-    def extra_state_attributes(self) -> dict[str, object]:
-        cloud = (self.coordinator.data or {}).get("cloud") or {}
-        return {"shadow_key": self._key, "machine_name": cloud.get("machine_name")}
+        return coerce_bool(self._cloud_value)
