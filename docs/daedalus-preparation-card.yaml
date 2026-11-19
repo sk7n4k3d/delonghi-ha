@@ -1,0 +1,29 @@
+type: vertical-stack
+cards:
+  - type: entities
+    title: Preparations today
+    entities:
+      - entity: sensor.coffee_brew_today
+        name: Brew
+      - entity: sensor.coffee_stopped_today
+        name: Stopped
+      - entity: sensor.coffee_errors_today
+        name: In error
+  - type: entities
+    title: Preparations this week
+    entities:
+      - entity: sensor.coffee_brew_this_week
+        name: Brew
+      - entity: sensor.coffee_stopped_this_week
+        name: Stopped
+      - entity: sensor.coffee_errors_this_week
+        name: In error
+  - type: entities
+    title: Lifetime source counters
+    entities:
+      - entity: sensor.example_brew_count
+        name: Brew
+      - entity: sensor.example_stopped_brew_count
+        name: Stopped
+      - entity: sensor.example_brewing_error_count
+        name: In error

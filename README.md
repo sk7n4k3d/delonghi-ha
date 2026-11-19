@@ -22,6 +22,8 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > credits: @mimasek71 (issue #18). Example Lovelace card:
 > [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
 > [Set up My Coffee Lounge and upgrade an existing LAN connection](docs/daedalus-setup.md).
+> [Show daily and weekly preparation counts](docs/daedalus-preparation-dashboard.md)
+> on a Home Assistant dashboard if your machine reports lifetime brewing statistics.
 >
 > PrimaDonna Aromatic **ECAM63070** monitoring was verified with Daedalus v0.4.7 on Home Assistant
 > Core 2026.11.1 using an EU owner account. The LAN connection, standby state and firmware
