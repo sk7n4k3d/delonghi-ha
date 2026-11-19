@@ -407,9 +407,9 @@ def normalize(name: object) -> str:
     return "".join(ch for ch in last.lower() if ch.isascii() and ch.isalnum())
 
 
-def is_lan_ip_key(flat_key: str) -> bool:
-    """Match the private LAN address in a shadow or its old registry key."""
-    return any(normalize(segment) == "lanipaddress" for segment in flat_key.split("."))
+def is_sensitive_cloud_key(flat_key: str) -> bool:
+    """Check each segment of a shadow path for a sensitive field name."""
+    return any(normalize(segment) in SENSITIVE_KEYS for segment in flat_key.split("."))
 
 
 def normalize_path(name: object) -> str:
@@ -467,7 +467,7 @@ def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tup
         flat = cloud.get(source) or {}
         count = 0
         for key in flat:
-            if not cloud_key_display(key) or any(normalize(part) in SENSITIVE_KEYS for part in key.split(".")):
+            if not cloud_key_display(key) or is_sensitive_cloud_key(key):
                 continue
             meta = lookup_cloud_key(key)
             if bool(meta is not None and meta.binary) != want_binary:

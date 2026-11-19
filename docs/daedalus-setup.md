@@ -16,7 +16,7 @@ Each machine has its own device page. Assign it to an area to keep the operating
 
 ### Upgrading an existing installation
 
-Home Assistant keeps entity IDs, user names, and enabled or disabled choices for retained entities. The upgrade removes the obsolete raw cloud LAN address sensor. The dedicated **LAN IP address** sensor remains in **Diagnostic** with its existing settings. Update any automations or dashboards that reference the obsolete cloud sensor to use the dedicated sensor.
+Home Assistant keeps entity IDs, user names, and enabled or disabled choices for retained entities, including cloud entities whose fields are temporarily missing or whose telemetry is disabled. The upgrade removes cloud entities registered for private fields, including the obsolete raw cloud LAN address sensor. The dedicated **LAN IP address** sensor remains in **Diagnostic** with its existing settings. Update any automations or dashboards that reference the obsolete cloud sensor to use the dedicated sensor. The My Coffee Lounge machine name is now private and has been removed from cloud entity attributes.
 
 Existing LAN configurations require certificate approval after upgrade. Open the integration entry’s menu and select **Reconfigure**. The same menu lets you change the LAN address without deleting the entry. Cloud telemetry can continue while local access is pending. If a previously approved certificate changes, investigate the change before accepting its replacement.
 

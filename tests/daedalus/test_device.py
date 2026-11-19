@@ -75,7 +75,7 @@ def test_late_cloud_model_does_not_expose_private_values() -> None:
     assert managed.info()["sw_version"] == "1.2.0"
 
 
-def test_upgrade_removes_only_registered_raw_cloud_lan_ip() -> None:
+def test_upgrade_removes_only_registered_sensitive_cloud_fields() -> None:
     coord = MagicMock(entry=MagicMock(data={}), serial_number="SN-test", data={})
     entities = [
         SimpleNamespace(
@@ -88,11 +88,21 @@ def test_upgrade_removes_only_registered_raw_cloud_lan_ip() -> None:
         for domain, platform, slug, suffix in (
             ("sensor", DOMAIN, "renamed_address", "cloud_LanIpAddress"),
             ("sensor", DOMAIN, "old_address", "cloudcap_Network.LanIpAddress"),
+            ("sensor", DOMAIN, "old_name", "cloudcap_Machine_Name"),
+            ("binary_sensor", DOMAIN, "old_flag", "cloud_Network.Ble-PassCODE.valid"),
             ("sensor", DOMAIN, "lan_diagnostic", "lan_ip"),
             ("sensor", DOMAIN, "machine_state", "cloud_Status"),
+            ("binary_sensor", DOMAIN, "drip_tray", "cloud_peripherals.DripPresence"),
+            ("binary_sensor", DOMAIN, "ip_assigned", "cloud_Network.LanIpAddressAssigned"),
             ("sensor", "other", "external", "cloud_LanIpAddress"),
+            ("switch", DOMAIN, "switch", "cloud_LanIpAddress"),
         )
     ]
+    entities.append(
+        SimpleNamespace(
+            entity_id="sensor.wrong_machine", domain="sensor", platform=DOMAIN, unique_id="SN-other_cloud_LanIpAddress"
+        )
+    )
     registry = MagicMock()
     with (
         patch("custom_components.delonghi_daedalus.device.device_registry.async_get") as devices,
@@ -107,4 +117,6 @@ def test_upgrade_removes_only_registered_raw_cloud_lan_ip() -> None:
     assert [call.args[0] for call in registry.async_remove.call_args_list] == [
         "sensor.renamed_address",
         "sensor.old_address",
+        "sensor.old_name",
+        "binary_sensor.old_flag",
     ]

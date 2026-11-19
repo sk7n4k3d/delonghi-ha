@@ -11,7 +11,7 @@ from homeassistant.helpers import device_registry, entity_registry
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .cloud import machine_model_code
-from .cloud_keys import is_lan_ip_key, lookup_cloud_key
+from .cloud_keys import is_sensitive_cloud_key, lookup_cloud_key
 from .const import CONF_MACHINE_NAME, CONF_MODEL, DOMAIN, MANUFACTURER
 
 if TYPE_CHECKING:
@@ -88,7 +88,7 @@ class DaedalusDevice:
 
     @callback
     def async_setup(self) -> None:
-        """Watch for device metadata and remove obsolete raw LAN address entities."""
+        """Watch for device metadata and remove entities for private cloud fields."""
         coordinator = self._coordinator
         entry = coordinator.entry
         registry = device_registry.async_get(coordinator.hass)
@@ -97,7 +97,7 @@ class DaedalusDevice:
                 if value := getattr(existing, field):
                     self._metadata[field] = value
 
-        self._async_remove_cloud_ip_entities()
+        self._async_remove_sensitive_cloud_entities()
 
         @callback
         def _update_metadata() -> None:
@@ -113,15 +113,15 @@ class DaedalusDevice:
         entry.async_on_unload(coordinator.async_add_listener(_update_metadata))
 
     @callback
-    def _async_remove_cloud_ip_entities(self) -> None:
+    def _async_remove_sensitive_cloud_entities(self) -> None:
         coordinator = self._coordinator
         registry = entity_registry.async_get(coordinator.hass)
         prefixes = (f"{coordinator.serial_number}_cloud_", f"{coordinator.serial_number}_cloudcap_")
         for entity in entity_registry.async_entries_for_config_entry(registry, coordinator.entry.entry_id):
-            if entity.platform != DOMAIN or entity.domain != "sensor":
+            if entity.platform != DOMAIN or entity.domain not in {"sensor", "binary_sensor"}:
                 continue
             if any(
-                entity.unique_id.startswith(prefix) and is_lan_ip_key(entity.unique_id[len(prefix) :])
+                entity.unique_id.startswith(prefix) and is_sensitive_cloud_key(entity.unique_id[len(prefix) :])
                 for prefix in prefixes
             ):
                 registry.async_remove(entity.entity_id)
