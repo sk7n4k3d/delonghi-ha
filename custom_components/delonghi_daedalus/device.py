@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 _VERSION = re.compile(r"[vV]?\d{1,4}(?:\.\d{1,4}){1,3}(?:[-+][a-zA-Z0-9.-]{1,20})?", re.ASCII)
 _AROMATIC_MODEL = "PrimaDonna Aromatic ECAM630.70"
-_DEFAULT_NAME = f"{MANUFACTURER} Coffee Machine"
+_DEFAULT_NAME = f"{MANUFACTURER} My Coffee Lounge"
 
 
 class DaedalusDevice:

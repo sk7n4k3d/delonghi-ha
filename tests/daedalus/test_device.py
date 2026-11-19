@@ -67,7 +67,7 @@ def test_late_cloud_model_does_not_expose_private_values() -> None:
             "machine_name": "private-thing",
         }
     }
-    assert managed.info()["name"] == "De'Longhi Coffee Machine"
+    assert managed.info()["name"] == "De'Longhi My Coffee Lounge"
     assert "sw_version" not in managed.info()
 
     coord.data = {"cloud": {"capabilities_flat": {"MachineModelUi": "ECAM630.70", "FwUiVersion": "1.2.0"}}}
