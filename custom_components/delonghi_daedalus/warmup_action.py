@@ -49,6 +49,8 @@ def has_unique_warmup_serial(hass: HomeAssistant, serial: str) -> bool:
 def register_warmup_action(hass: HomeAssistant) -> None:
     """Register one action with no implicit machine or group target."""
     running: set[str] = set()
+    # The pending marker survives restart while delivery is uncertain. After a
+    # successful reply and marker clear, restarting drops any remaining cooldown.
     cooldown: dict[str, float] = {}
 
     async def warm_up(call: ServiceCall) -> None:
