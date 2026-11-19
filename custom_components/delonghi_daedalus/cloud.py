@@ -40,6 +40,7 @@ import json
 import re
 import secrets
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -51,6 +52,7 @@ from .const import (
     AWS_REST_BASE_URL_PROD,
     AWS_REST_SOURCE_HEADER,
 )
+from .lan_protocol import LanProtocolError, validate_lan_host
 from .redact import get_logger, mask_serial, sanitize_text
 
 _LOGGER = get_logger(__name__)
@@ -74,11 +76,101 @@ class CloudTelemetryError(RuntimeError):
     """Any failure on the cloud path. Callers must treat it as optional."""
 
 
+class CloudMachineNotFound(CloudTelemetryError):
+    """The directory did not confirm one machine for this serial."""
+
+
 # --------------------------------------------------------------------- REST --
 
 # The live /devices answer groups the machines by ownership (issue #18,
 # mimasek71's capture); older captures were a bare list or a wrapper dict.
 _GROUPED_DEVICE_KEYS: tuple[str, ...] = ("ownedByMe", "sharedToMe")
+_DIRECTORY_SERIAL_KEYS = ("serialNumber", "serial_number", "serial", "serialNo", "SerialNo")
+_DIRECTORY_NAME_KEYS = ("machineName", "machine_name", "thingName", "thing_name", "name")
+_DIRECTORY_MODEL_RE = re.compile(r"(?:ECAM|EXAM)[0-9]{3}\.?[0-9]{2}[A-Z]{0,3}", re.ASCII | re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class DirectoryMachine:
+    """Identity fields copied from one authenticated account directory record."""
+
+    serial: str
+    thing_name: str | None
+    model: str | None
+
+
+def _directory_records(payload: Any) -> list[Any]:
+    if isinstance(payload, dict):
+        grouped = [key for key in _GROUPED_DEVICE_KEYS if isinstance(payload.get(key), list)]
+        if grouped:
+            return [device for key in grouped for device in payload[key]]
+        for wrapper in ("devices", "items", "result", "data"):
+            inner = payload.get(wrapper)
+            if isinstance(inner, list):
+                return inner
+    if isinstance(payload, list):
+        return payload
+    raise CloudTelemetryError("/devices response was neither a list nor a known wrapper")
+
+
+def machine_model_code(value: object) -> str | None:
+    """Validate the De'Longhi product code used in device metadata."""
+    model = value.strip().upper() if isinstance(value, str) else ""
+    return model if _DIRECTORY_MODEL_RE.fullmatch(model) else None
+
+
+def _directory_machines(payload: Any) -> list[DirectoryMachine]:
+    records = _directory_records(payload)
+    machines: dict[str, DirectoryMachine] = {}
+    ambiguous: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        serial = next(
+            (
+                str(value).strip()
+                for field in _DIRECTORY_SERIAL_KEYS
+                if isinstance(value := record.get(field), (str, int))
+                and not isinstance(value, bool)
+                and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", str(value).strip())
+            ),
+            None,
+        )
+        if serial is None:
+            continue
+        thing = next(
+            (
+                value
+                for field in _DIRECTORY_NAME_KEYS
+                if isinstance(value := record.get(field), str) and _THING_NAME_RE.fullmatch(value)
+            ),
+            None,
+        )
+        model = machine_model_code(record.get("machineModel"))
+        if model is not None and model.casefold() in (
+            serial.casefold(),
+            (thing or "").casefold(),
+        ):
+            model = None
+        key = serial.casefold()
+        machine = DirectoryMachine(serial, thing, model)
+        existing = machines.get(key)
+        if existing is None:
+            machines[key] = machine
+        elif existing.thing_name != machine.thing_name:
+            ambiguous.add(key)
+    result = [machine for key, machine in machines.items() if key not in ambiguous]
+    if records and not result:
+        raise CloudTelemetryError("/devices response contained no usable machine records")
+    return result
+
+
+async def list_machines(session: aiohttp.ClientSession, *, jwt: str) -> list[DirectoryMachine]:
+    """List owner and shared machines from the current app directory."""
+    payload = await _fetch_devices(
+        session, url=f"{AWS_REST_BASE_URL_PROD.rstrip('/')}/devices", jwt=jwt, allow_redirects=False
+    )
+    return _directory_machines(payload)
 
 
 def extract_machine_name(payload: Any, serial: str) -> str:
@@ -90,20 +182,14 @@ def extract_machine_name(payload: Any, serial: str) -> str:
     (``devices`` / ``items`` / ``result`` / ``data``), and matches the serial
     case-insensitively against any key containing ``serial``.
     """
-    if isinstance(payload, dict):
-        grouped = [key for key in _GROUPED_DEVICE_KEYS if isinstance(payload.get(key), list)]
-        if grouped:
-            payload = [device for key in grouped for device in payload[key]]
-        else:
-            for wrapper in ("devices", "items", "result", "data"):
-                inner = payload.get(wrapper)
-                if isinstance(inner, list):
-                    payload = inner
-                    break
-    if not isinstance(payload, list):
-        raise CloudTelemetryError("/devices response was neither a list nor a known wrapper")
+    _, name = _extract_machine_record(payload, serial)
+    return name
+
+
+def _extract_machine_record(payload: Any, serial: str) -> tuple[dict[str, Any], str]:
     target = serial.strip().lower()
-    for device in payload:
+    match = None
+    for device in _directory_records(payload):
         if not isinstance(device, dict):
             continue
         serials = {
@@ -115,15 +201,20 @@ def extract_machine_name(payload: Any, serial: str) -> str:
             for key in ("machineName", "machine_name", "thingName", "thing_name", "name"):
                 value = device.get(key)
                 if isinstance(value, str) and value:
-                    return value
-    raise CloudTelemetryError(f"serial {mask_serial(serial)} not found in /devices response")
+                    if match is not None and match[1] != value:
+                        raise CloudMachineNotFound(f"serial {mask_serial(serial)} is ambiguous in /devices response")
+                    match = match or (device, value)
+                    break
+    if match is None:
+        raise CloudMachineNotFound(f"serial {mask_serial(serial)} not found in /devices response")
+    return match
 
 
-async def _fetch_devices(session: aiohttp.ClientSession, *, url: str, jwt: str) -> Any:
+async def _fetch_devices(session: aiohttp.ClientSession, *, url: str, jwt: str, allow_redirects: bool = False) -> Any:
     """GET one /devices URL. Raises CloudTelemetryError on any bad answer."""
     headers = {"Authorization": f"Bearer {jwt}", "source": AWS_REST_SOURCE_HEADER}
     try:
-        async with session.get(url, headers=headers, timeout=_REQUEST_TIMEOUT) as resp:
+        async with session.get(url, headers=headers, timeout=_REQUEST_TIMEOUT, allow_redirects=allow_redirects) as resp:
             if resp.status != 200:
                 raise CloudTelemetryError(f"/devices returned HTTP {resp.status}")
             try:
@@ -161,6 +252,20 @@ async def lookup_machine_name(
     A 200 that simply does not mention the serial is a real answer and is
     never retried against the other host.
     """
+    _, name = await _lookup_machine_record(
+        session, serial=serial, jwt=jwt, base_url=base_url, fallback_base_url=fallback_base_url
+    )
+    return name
+
+
+async def _lookup_machine_record(
+    session: aiohttp.ClientSession,
+    *,
+    serial: str,
+    jwt: str,
+    base_url: str = AWS_REST_BASE_URL_PROD,
+    fallback_base_url: str = AWS_REST_BASE_URL_LEGACY_PROD,
+) -> tuple[dict[str, Any], str]:
     candidates = [base_url]
     if fallback_base_url and fallback_base_url.rstrip("/") != base_url.rstrip("/"):
         candidates.append(fallback_base_url)
@@ -172,7 +277,7 @@ async def lookup_machine_name(
         except CloudTelemetryError as exc:
             failures.append(str(exc))
             continue
-        return extract_machine_name(payload, serial)
+        return _extract_machine_record(payload, serial)
     raise CloudTelemetryError("; ".join(failures) if failures else "no REST device directory configured")
 
 
@@ -509,10 +614,13 @@ class ShadowClient:
                     if msg.type == aiohttp.WSMsgType.BINARY:
                         reader.feed(msg.data)
                     elif msg.type in (
+                        aiohttp.WSMsgType.CLOSE,
                         aiohttp.WSMsgType.CLOSED,
                         aiohttp.WSMsgType.CLOSING,
                         aiohttp.WSMsgType.ERROR,
                     ):
+                        if results:
+                            break
                         raise CloudTelemetryError("MQTT WS closed by broker")
                     continue
                 if packet.type == _SUBACK:
@@ -537,6 +645,8 @@ class ShadowClient:
                 f"({len(topics)} topics subscribed, no get/accepted or get/rejected answer)"
             )
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+            if results:
+                return results
             # WS resets must surface as the optional cloud error the
             # coordinator logs, never as a raw crash. The text falls back to
             # the exception type: several transport errors stringify empty.
@@ -554,6 +664,8 @@ class ShadowClient:
         topic, body = packet.publish_parts()
         shadow = _shadow_from_topic(topic)
         if shadow is None or shadow in results or shadow in errors:
+            return
+        if topic not in (shadow_accepted_topic(self._thing, shadow), shadow_rejected_topic(self._thing, shadow)):
             return
         if topic.endswith("/get/accepted"):
             try:
@@ -755,16 +867,64 @@ async def fetch_cloud_state(
     serial: str,
     jwt: str,
     machine_name: str | None,
+    check_device_status: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], str]:
-    """Resolve the thing name if needed + read the shadows.
+    """Read shadows, requiring current evidence before returning machine status.
 
     Returns (shadow documents by name, machine_name actually used).
     Raises CloudTelemetryError on any failure.
     """
-    thing = machine_name or await lookup_machine_name(session, serial=serial, jwt=jwt)
+    thing = machine_name
+    presence = None
+    if check_device_status or not thing:
+        try:
+            device, name = await _lookup_machine_record(session, serial=serial, jwt=jwt)
+        except CloudMachineNotFound:
+            raise
+        except CloudTelemetryError:
+            if not thing:
+                raise
+        else:
+            thing = name
+            presence = device.get("status")
     if not _THING_NAME_RE.fullmatch(str(thing)):
         # Never echo the rejected value: it is the hostile input itself.
         raise CloudTelemetryError(f"cloud thing name rejected by shape check ({len(str(thing))} chars)")
     client = ShadowClient(session, thing_name=thing, jwt=jwt)
     docs = await client.fetch()
+    if (
+        check_device_status
+        and presence != "ONLINE"
+        and (presence == "OFFLINE" or not _recent_reported_status(docs.get("MachineStatus")))
+    ):
+        docs.pop("MachineStatus", None)
     return docs, thing
+
+
+async def fetch_reported_lan_ip(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> str | None:
+    """Get the selected machine's reported LAN address as an untrusted hint."""
+    if not _THING_NAME_RE.fullmatch(thing_name):
+        raise CloudTelemetryError("Invalid cloud thing name")
+    client = ShadowClient(session, thing_name=thing_name, jwt=jwt)
+    try:
+        async with asyncio.timeout(12):
+            documents = await client.fetch(timeout=3)
+    except (aiohttp.ClientError, OSError) as exc:
+        raise CloudTelemetryError("The machine's LAN address could not be read") from exc
+    state = documents.get("MachineStatus", {}).get("state")
+    reported = state.get("reported") if isinstance(state, dict) else None
+    value = reported.get("LanIpAddress") if isinstance(reported, dict) else None
+    if isinstance(value, str):
+        with contextlib.suppress(LanProtocolError):
+            return validate_lan_host(value.strip())
+    return None
+
+
+def _recent_reported_status(document: Any) -> bool:
+    """Check when the device reported Status, using the per-field AWS timestamp."""
+    for key in ("metadata", "reported", "Status", "timestamp"):
+        if not isinstance(document, dict):
+            return False
+        document = document.get(key)
+    now = int(time.time())
+    return type(document) is int and now - 30 <= document <= now

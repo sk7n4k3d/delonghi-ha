@@ -23,6 +23,7 @@ from custom_components.delonghi_daedalus.const import (
     CONF_POOL,
     CONF_SERIAL_NUMBER,
     CONF_SESSION_TOKEN,
+    DOMAIN,
 )
 from custom_components.delonghi_daedalus.coordinator import DaedalusCoordinator
 
@@ -117,3 +118,11 @@ def test_coordinator_passes_config_entry_to_base():
     }
     coord = DaedalusCoordinator(MagicMock(), entry)
     assert coord.init_kwargs.get("config_entry") is entry
+
+
+@pytest.mark.parametrize(("serial", "masked"), [("PrivateSerial1234", "*************1234"), ("1234", "****")])
+def test_coordinator_log_name_masks_serial(serial, masked):
+    entry = MagicMock(data={CONF_SERIAL_NUMBER: serial})
+    coord = DaedalusCoordinator(MagicMock(), entry)
+
+    assert coord.init_kwargs["name"] == f"{DOMAIN}:{masked}"

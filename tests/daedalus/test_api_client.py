@@ -206,10 +206,10 @@ def test_connect_lan_separates_proven_rejection_from_malformed_reply(reply, expe
             session = MagicMock()
             session.ws_connect = AsyncMock(return_value=ws)
             with (
-                patch.object(api, "_get_session", return_value=session),
+                patch.object(api, "_get_lan_session", return_value=session),
                 pytest.raises(expected_error, match=expected_text),
             ):
-                await api.connect_lan(host="192.168.1.42", serial_number="SN1", jwt="eyJ.eyJ.x")
+                await api.connect_lan(host="192.168.1.42", fingerprint="ab" * 32, serial_number="SN1", jwt="eyJ.eyJ.x")
             ws.close.assert_awaited()
         finally:
             await api.close()
@@ -262,9 +262,11 @@ def test_connect_lan_transport_error_does_not_raise_auth_error() -> None:
 
             session = MagicMock()
             session.ws_connect = AsyncMock(return_value=ws)
-            with patch.object(api, "_get_session", return_value=session):
+            with patch.object(api, "_get_lan_session", return_value=session):
                 with pytest.raises(DaedalusConnectionError, match="transport failed"):
-                    await api.connect_lan(host="192.168.1.42", serial_number="SN1", jwt="eyJ.eyJ.x")
+                    await api.connect_lan(
+                        host="192.168.1.42", fingerprint="ab" * 32, serial_number="SN1", jwt="eyJ.eyJ.x"
+                    )
                 ws.close.assert_awaited()
         finally:
             await api.close()

@@ -14,7 +14,9 @@ frame on the LAN WebSocket (wss://<ip>/ws/lan2lan).
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 from typing import Any
 
 GIGYA_BASE_URL = "https://accounts.eu1.gigya.com"
@@ -45,6 +47,20 @@ class GigyaAuthError(RuntimeError):
     def __init__(self, message: str, *, error_code: int = 0) -> None:
         super().__init__(message)
         self.error_code = error_code
+
+
+def jwt_expiry(token: str) -> int | None:
+    """Read the expiry hint for refresh scheduling; services verify the token."""
+    parts = token.split(".")
+    if len(parts) != 3 or len(parts[1]) > 16_384:
+        return None
+    payload = parts[1]
+    try:
+        claims = json.loads(base64.b64decode(payload + "=" * (-len(payload) % 4), altchars=b"-_", validate=True))
+    except (ValueError, RecursionError):
+        return None
+    expiry = claims.get("exp") if isinstance(claims, dict) else None
+    return expiry if type(expiry) is int else None
 
 
 def build_login_params(

@@ -3,21 +3,50 @@
     "step": {
       "user": {
         "title": "De'Longhi My Coffee Lounge",
-        "description": "Entrez vos identifiants My Coffee Lounge et l'adresse LAN de votre Eletta Ultra (Daedalus).",
+        "description": "Connectez-vous au compte My Coffee Lounge utilisé pour associer ou partager votre machine.",
         "data": {
           "email": "Email",
           "password": "Mot de passe",
-          "host": "IP locale de la machine",
-          "serial_number": "Numéro de série",
-          "pool": "Région du compte (pool Gigya) — l'intégration sonde automatiquement toutes les régions, laisser EU sauf si vous savez",
-          "cloud_telemetry": "Télémétrie cloud en lecture seule (expérimental) : récupère aussi l'état courant depuis le cloud De'Longhi toutes les 2 minutes. N'envoie jamais de commande."
+          "pool": "Région du compte",
+          "cloud_telemetry": "Activer la télémétrie cloud en lecture seule"
         }
       },
       "reauth_confirm": {
         "title": "De'Longhi My Coffee Lounge — Réauthentification requise",
-        "description": "La session stockée pour {email} a été rejetée par Gigya. Saisissez à nouveau votre mot de passe pour la renouveler ; le reste de la configuration (IP machine, numéro de série, région) reste tel quel.",
+        "description": "Saisissez le mot de passe My Coffee Lounge de {email} pour renouveler la session.",
         "data": {
           "password": "Mot de passe"
+        }
+      },
+      "device": {
+        "title": "Sélectionner une machine à café",
+        "description": "Choisissez une machine de votre compte My Coffee Lounge.",
+        "data": {
+          "device": "Machine"
+        }
+      },
+      "manual": {
+        "title": "Saisir le numéro de série",
+        "description": "Utilisez le numéro de série figurant sur la machine ou dans My Coffee Lounge.",
+        "data": {
+          "serial_number": "Numéro de série"
+        }
+      },
+      "lan": {
+        "title": "Machine sur le réseau local",
+        "description": "Confirmez l’adresse IP locale de la machine {serial}. Si le champ est vide ou si l’adresse a changé, consultez la liste des appareils connectés à votre routeur.",
+        "data": {
+          "host": "Adresse IP locale",
+          "cloud_only": "Utiliser uniquement la télémétrie cloud"
+        }
+      },
+      "verify_lan": {
+        "title": "Vérifier le certificat de la machine",
+        "description": "L’appareil à l’adresse {host} a présenté cette empreinte SHA-256 :\n\n`{fingerprint}`\n\nComparez-la au certificat de la machine {serial} obtenu via une connexion de confiance, par exemple sur un réseau isolé. Confirmez uniquement si les deux empreintes correspondent.",
+        "data": {
+          "verified_fingerprint": "J’ai vérifié que les empreintes correspondent",
+          "change_address": "Saisir une autre adresse IP",
+          "cloud_only": "Utiliser uniquement la télémétrie cloud"
         }
       }
     },
@@ -25,11 +54,23 @@
       "invalid_auth": "Identifiants My Coffee Lounge invalides",
       "all_pools_unauthorized": "Connexion échouée sur toutes les régions (EU, EU_US, CH). Votre compte a peut-être été créé via la page d'inscription intégrée à l'app (OAuth2/OIDC), qui utilise un chemin d'authentification différent du login direct. Vérifiez votre mot de passe, puis ouvrez une issue sur le dépôt GitHub de l'intégration pour investigation.",
       "cannot_connect": "Impossible de joindre la machine sur le réseau local",
-      "unknown": "Erreur inattendue"
+      "unknown": "Erreur inattendue",
+      "cannot_login": "Impossible de joindre My Coffee Lounge. Réessayez.",
+      "discovery_unavailable": "Le répertoire My Coffee Lounge est indisponible. Vous pouvez saisir les informations de la machine manuellement.",
+      "invalid_device": "Sélectionnez une machine dans la liste.",
+      "invalid_serial": "Saisissez le numéro de série imprimé sur l’étiquette de la machine.",
+      "invalid_host": "Saisissez une adresse IPv4 privée ou IPv6 locale unique.",
+      "fingerprint_not_verified": "Vérifiez l’empreinte du certificat pour poursuivre la configuration de l’accès local.",
+      "certificate_changed": "Impossible de vérifier l’identité de la machine. Vérifiez l’adresse et comparez à nouveau le certificat.",
+      "lan_auth_rejected": "La machine a refusé la session du compte pour ce numéro de série. Vérifiez que l’adresse correspond à la machine sélectionnée.",
+      "cloud_only_unavailable": "Activez la télémétrie cloud pour continuer sans accès local."
     },
     "abort": {
       "already_configured": "Machine déjà configurée",
-      "reauth_successful": "Réauthentification réussie"
+      "reauth_successful": "Réauthentification réussie",
+      "no_devices": "Aucune machine n’a été trouvée dans ce compte My Coffee Lounge.",
+      "entry_missing": "Impossible de trouver l’entrée de l’intégration.",
+      "reconfigure_successful": "Connexion à la machine mise à jour."
     }
   },
   "entity": {
@@ -289,6 +330,20 @@
           "cloud_telemetry": "Télémétrie cloud en lecture seule : récupère l'état live du cloud De'Longhi toutes les 2 minutes. N'envoie jamais de commande. Modifier cette option recharge l'intégration."
         }
       }
+    },
+    "error": {
+      "lan_verification_required": "Vérifiez le certificat de la machine dans Reconfigurer avant de désactiver la télémétrie cloud."
+    }
+  },
+  "issues": {
+    "verify_lan": {
+      "title": "Vérifier le certificat de la machine {serial}",
+      "description": "Home Assistant n’a pas pu vérifier la connexion locale à cette machine. Ouvrez [De'Longhi Daedalus](/config/integrations/integration/delonghi_daedalus), sélectionnez **Reconfigurer** dans le menu de la machine, puis vérifiez l’empreinte de son certificat."
+    }
+  },
+  "device": {
+    "coffee_machine": {
+      "name": "Machine à café De'Longhi"
     }
   }
 }

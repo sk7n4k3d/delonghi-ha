@@ -459,3 +459,50 @@ def test_cloud_block_survives_a_missing_coordinator() -> None:
         ],
         "cloud_error": None,
     }
+
+
+def test_diagnostics_scrub_distinct_identifiers_and_secrets_in_free_text() -> None:
+    identifiers = {
+        "serial_number": "DEVICE12345",
+        "machine_name": "configured-thing-1234",
+        "host": "fe80::cafe",
+        "session_token": "stored-session-token-1234",
+        "lan_tls_fingerprint": "12" * 32,
+    }
+    resolved_thing = "account-directory-thing-5678"
+    private_in_error = "private identifier with spaces"
+    context = f"{' '.join(identifiers.values())} {resolved_thing}"
+    coord = _cloud_coordinator(
+        last_exception=ConnectionError(f"LAN WS closed for {context}"),
+        data={
+            "connected": True,
+            "cloud": {"machine_name": resolved_thing},
+            "cloud_error": f'MQTT session failed for {context}, "machineName":"{private_in_error}" HTTP 500',
+        },
+    )
+    entry = _make_entry(data={**_full_data(), **identifiers})
+    payload = asyncio.run(
+        diagnostics.async_get_device_diagnostics(_make_hass_with(entry.entry_id, coord), entry, MagicMock())
+    )
+    assert payload["cloud"]["cloud_error"]["category"] == "mqtt_connect"
+    assert payload["cloud"]["cloud_error"]["http_status"] == 500
+    assert payload["coordinator"]["last_exception"].startswith("ConnectionError: LAN WS closed")
+    for private in (*identifiers.values(), resolved_thing, private_in_error):
+        assert private not in json.dumps(payload)
+
+
+def test_lan_error_uses_free_text_redaction() -> None:
+    data = {
+        **_full_data(),
+        "machine_name": "private-thing-id",
+        "lan_tls_fingerprint": "a0" * 32,
+    }
+    context = " ".join(data[key] for key in ("host", "serial_number", "machine_name", "lan_tls_fingerprint"))
+    coord = _cloud_coordinator(data={"connected": False, "lan_error": f"LAN certificate changed for {context}"})
+    entry = _make_entry(data=data)
+    payload = asyncio.run(diagnostics.async_get_config_entry_diagnostics(_make_hass_with(entry.entry_id, coord), entry))
+    error = payload["coordinator"]["lan_error"]
+
+    assert error.startswith("LAN certificate changed")
+    for private in context.split():
+        assert private not in error

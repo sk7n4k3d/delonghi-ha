@@ -372,13 +372,44 @@ CLOUD_KEYS: tuple[CloudKey, ...] = _TABLE
 # Shadow keys that must NEVER become entities: the BLE pairing code is a
 # credential and MAC/SN are device identifiers — the raw fallback would
 # persist them in the HA recorder and in exported diagnostics.
-SENSITIVE_KEYS: frozenset[str] = frozenset({"blepasscode", "mac", "sn"})
+SENSITIVE_KEYS: frozenset[str] = frozenset(
+    {
+        "apikey",
+        "authtoken",
+        "blepasscode",
+        "clienttoken",
+        "deviceid",
+        "email",
+        "idtoken",
+        "jwt",
+        "lanipaddress",
+        "mac",
+        "macaddress",
+        "machinename",
+        "oauthtoken",
+        "password",
+        "secret",
+        "serial",
+        "serialno",
+        "serialnumber",
+        "sessionsecret",
+        "sessiontoken",
+        "sn",
+        "thingname",
+        "uid",
+    }
+)
 
 
 def normalize(name: object) -> str:
     """Last dot-segment of a flattened key, lowercase alphanumerics only."""
     last = str(name).rsplit(".", 1)[-1]
     return "".join(ch for ch in last.lower() if ch.isascii() and ch.isalnum())
+
+
+def is_lan_ip_key(flat_key: str) -> bool:
+    """Match the private LAN address in a shadow or its old registry key."""
+    return any(normalize(segment) == "lanipaddress" for segment in flat_key.split("."))
 
 
 def normalize_path(name: object) -> str:
@@ -416,6 +447,10 @@ CLOUD_SOURCES: tuple[str, ...] = ("status_flat", "capabilities_flat")
 _MAX_PER_SOURCE = 80
 
 
+def cloud_key_display(key: str) -> str:
+    return str(key).strip()[:64]
+
+
 def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tuple[str, str, CloudKey | None]]:
     """(source, raw key, meta) for every shadow key one platform should own.
 
@@ -425,15 +460,14 @@ def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tup
     fallback). Audit #18 (E1) guards live here: shadow keys are
     cloud-controlled — blank ones are dropped and the display length is
     capped so a hostile key cannot build a colliding or oversized entity id.
-    ``SENSITIVE_KEYS`` (BLE passcode, MAC, SN) are dropped entirely.
+    ``SENSITIVE_KEYS`` are dropped entirely.
     """
     plan: list[tuple[str, str, CloudKey | None]] = []
     for source in CLOUD_SOURCES:
         flat = cloud.get(source) or {}
         count = 0
         for key in flat:
-            display = str(key).strip()[:64]
-            if not display or normalize(key) in SENSITIVE_KEYS:
+            if not cloud_key_display(key) or any(normalize(part) in SENSITIVE_KEYS for part in key.split(".")):
                 continue
             meta = lookup_cloud_key(key)
             if bool(meta is not None and meta.binary) != want_binary:
@@ -443,6 +477,31 @@ def plan_cloud_entities(cloud: dict[str, Any], *, want_binary: bool) -> list[tup
                 break
             plan.append((source, key, meta))
     return plan
+
+
+class CloudEntityDiscovery:
+    """Track new shadow keys for one platform until the entry unloads."""
+
+    def __init__(self, *, want_binary: bool) -> None:
+        self._want_binary = want_binary
+        self._last_cloud: dict[str, Any] | None = None
+        self._added: dict[str, set[str]] = {source: set() for source in CLOUD_SOURCES}
+
+    def discover(self, cloud: dict[str, Any] | None) -> list[tuple[str, str, CloudKey | None]]:
+        # LAN refreshes reuse the cached dict. Either shadow can arrive later,
+        # and a later fetch can also report new fields in a previously seen shadow.
+        if cloud is None or cloud is self._last_cloud:
+            return []
+        self._last_cloud = cloud
+        new: list[tuple[str, str, CloudKey | None]] = []
+        for source, key, meta in plan_cloud_entities(cloud, want_binary=self._want_binary):
+            display = cloud_key_display(key)
+            added = self._added[source]
+            if display in added or len(added) >= _MAX_PER_SOURCE:
+                continue
+            added.add(display)
+            new.append((source, key, meta))
+        return new
 
 
 # "ano"/"ne" are Czech yes/no — mimasek71's fork surfaced those strings, and a

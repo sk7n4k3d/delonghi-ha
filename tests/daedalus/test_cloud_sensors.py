@@ -6,8 +6,11 @@ Uses the stubbed homeassistant bases from the root conftest — no HA runtime.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.helpers.entity import EntityCategory
 
@@ -15,18 +18,26 @@ from custom_components.delonghi_daedalus import binary_sensor as bs
 from custom_components.delonghi_daedalus import sensor as sp
 from custom_components.delonghi_daedalus.cloud_keys import lookup_cloud_key
 from custom_components.delonghi_daedalus.const import CONF_CLOUD_TELEMETRY, DOMAIN
+from custom_components.delonghi_daedalus.device import DaedalusDevice
 
 
 class _FakeCoordinator:
     serial_number = "SN-TEST"
 
-    def __init__(self, data: dict) -> None:
+    def __init__(self, data: dict, **entry_data: str) -> None:
+        self.entry = SimpleNamespace(data=entry_data)
         self.data = data
-        self.listeners = 0
+        self.device = DaedalusDevice(self)
+        self.listeners: list[Callable[[], None]] = []
 
-    def async_add_listener(self, _cb):
-        self.listeners += 1
-        return lambda: None
+    def async_add_listener(self, callback: Callable[[], None]) -> Callable[[], None]:
+        self.listeners.append(callback)
+        return lambda: self.listeners.remove(callback)
+
+    def update(self, data: dict) -> None:
+        self.data = data
+        for callback in list(self.listeners):
+            callback()
 
 
 def _cloud(**flats) -> dict:
@@ -44,7 +55,7 @@ def test_known_status_key_uses_translation() -> None:
     assert entity._attr_unique_id == "SN-TEST_cloud_OperatingState"
     assert entity.native_value == "Standby"
     assert getattr(entity, "_attr_entity_category", None) is None
-    assert entity.extra_state_attributes == {"shadow_key": "OperatingState", "machine_name": "thing-1"}
+    assert entity.extra_state_attributes == {"shadow_key": "OperatingState"}
 
 
 def test_unknown_key_keeps_raw_fallback() -> None:
@@ -79,6 +90,7 @@ def test_alarm_maps_to_problem_binary_sensor() -> None:
     assert entity._attr_device_class == BinarySensorDeviceClass.PROBLEM
     assert entity._attr_translation_key == "cloud_descale"
     assert entity._attr_unique_id == "SN-TEST_cloud_Descale"
+    assert entity.extra_state_attributes == {"shadow_key": "Descale"}
     assert getattr(entity, "_attr_entity_category", None) is None
 
 
@@ -121,7 +133,7 @@ def test_sensor_setup_skips_binary_keys() -> None:
     asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
     cloud_entities = [e for e in added if isinstance(e, sp.DaedalusCloudSensor)]
     assert {e._key for e in cloud_entities} == {"OperatingState", "opaque"}
-    assert coord.listeners == 0  # data already present → no listener
+    assert len(coord.listeners) == 1
 
 
 def test_binary_setup_adds_only_mapped_bools() -> None:
@@ -130,7 +142,7 @@ def test_binary_setup_adds_only_mapped_bools() -> None:
     asyncio.run(bs.async_setup_entry(_hass(coord), _entry(), added.extend))
     cloud_entities = [e for e in added if isinstance(e, bs.DaedalusCloudBinarySensor)]
     assert [e._key for e in cloud_entities] == ["Descale"]
-    assert coord.listeners == 0
+    assert len(coord.listeners) == 1
 
 
 def test_setup_without_cloud_flag() -> None:
@@ -138,12 +150,144 @@ def test_setup_without_cloud_flag() -> None:
     sensors: list = []
     asyncio.run(sp.async_setup_entry(_hass(coord), _entry(cloud_telemetry=False), sensors.extend))
     assert all(not isinstance(e, sp.DaedalusCloudSensor) for e in sensors)
-    assert coord.listeners == 0
+    assert not coord.listeners
 
 
 def test_sensor_setup_registers_listener_when_shadows_absent() -> None:
     coord = _FakeCoordinator({"connected": True})  # no cloud key yet
     added: list = []
     asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
-    assert coord.listeners == 1
+    assert len(coord.listeners) == 1
     assert not any(isinstance(e, sp.DaedalusCloudSensor) for e in added)
+
+
+def test_device_info_on_all_platforms_without_changing_existing_entity_registry_keys() -> None:
+    coord = _FakeCoordinator(
+        _cloud(
+            status_flat={"OperatingState": "Standby", "Descale": True, "opaque": 1, "peripherals.DripPresence": False},
+            capabilities_flat={"Languages": 27},
+        ),
+        model="ECAM63070",
+        machine_name="PRIVATE-THING",
+    )
+    added: list = []
+    for platform in (sp, bs):
+        asyncio.run(platform.async_setup_entry(_hass(coord), _entry(), added.extend))
+
+    # HA finds an existing registry entry by platform/domain/unique ID before
+    # attaching the device or applying defaults for any new registry entries.
+    entities = {entity._attr_unique_id.removeprefix("SN-TEST_"): entity for entity in added}
+    assert set(entities) == {
+        "connection_id",
+        "serial_number",
+        "lan_ip",
+        "connected",
+        "cloud_OperatingState",
+        "cloud_Descale",
+        "cloud_opaque",
+        "cloudcap_Languages",
+        "cloud_peripherals.DripPresence",
+    }
+    device = entities["connected"]._attr_device_info
+    assert all(entity._attr_device_info == device for entity in added)
+    assert device["model"] == "PrimaDonna Aromatic ECAM630.70"
+    assert device["manufacturer"] == "De'Longhi"
+    assert "PRIVATE-THING" not in str(device)
+    assert "SN-TEST" not in str(device)
+    assert "connections" not in device
+    assert all(domain == DOMAIN and len(identifier) == 64 for domain, identifier in device["identifiers"])
+    assert len(device["identifiers"]) == 1
+
+    legacy_device = bs.DaedalusConnectedSensor(_FakeCoordinator({}))._attr_device_info
+    assert device["identifiers"] == legacy_device["identifiers"]
+    assert legacy_device["translation_key"] == "coffee_machine"
+    another = _FakeCoordinator({})
+    another.serial_number = "SN-DIFFERENT"
+    another.device = DaedalusDevice(another)
+    assert bs.DaedalusConnectedSensor(another)._attr_device_info["identifiers"] != device["identifiers"]
+
+    assert {
+        key for key, entity in entities.items() if not getattr(entity, "_attr_entity_registry_enabled_default", True)
+    } == {
+        "connection_id",
+        "serial_number",
+        "lan_ip",
+        "cloud_opaque",
+        "cloudcap_Languages",
+    }
+    assert getattr(entities["cloud_peripherals.DripPresence"], "_attr_entity_category", None) is None
+    assert entities["cloud_opaque"]._attr_entity_category == EntityCategory.DIAGNOSTIC
+
+
+def test_cloud_availability_is_independent_of_the_lan_and_each_shadow() -> None:
+    coord = _FakeCoordinator(
+        {"connected": False, **_cloud(status_flat={"Descale": False}, capabilities_flat={"Languages": 27})}
+    )
+    lan = bs.DaedalusConnectedSensor(coord)
+    session_id = sp.DaedalusConnectionIdSensor(coord)
+    status = bs.DaedalusCloudBinarySensor(coord, "status_flat", "Descale", lookup_cloud_key("Descale"))
+    capabilities = sp.DaedalusCloudSensor(coord, "capabilities_flat", "Languages")
+    assert lan.available and not lan.is_on
+    assert not session_id.available
+    assert status.available and status.is_on is False
+    assert capabilities.available
+
+    coord.data = _cloud(status_flat={"Descale": False})
+    assert status.available
+    assert not capabilities.available
+
+    coord.data = {"connected": True, "connection_id": 0}
+    assert lan.available and lan.is_on
+    assert session_id.available and session_id.native_value == 0
+    assert not status.available
+
+
+@pytest.mark.parametrize("capabilities_at_setup", [False, True])
+def test_platforms_discover_staggered_shadows_and_late_keys(capabilities_at_setup: bool) -> None:
+    capabilities = {"Languages": 27, "Jug": True}
+    status = {"OperatingState": "Standby", "Descale": True}
+    first = _cloud(capabilities_flat=capabilities)
+    coord = _FakeCoordinator(first if capabilities_at_setup else {"connected": True})
+    entries = [_entry(), _entry()]
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), entries[0], added.extend))
+    asyncio.run(bs.async_setup_entry(_hass(coord), entries[1], added.extend))
+
+    def cloud_ids(entities):
+        return [
+            e._attr_unique_id for e in entities if isinstance(e, (sp.DaedalusCloudSensor, bs.DaedalusCloudBinarySensor))
+        ]
+
+    capabilities_ids = ["SN-TEST_cloudcap_Languages", "SN-TEST_cloudcap_Jug"]
+    assert cloud_ids(added) == (capabilities_ids if capabilities_at_setup else [])
+    assert len(coord.listeners) == 2
+
+    coord.update(first)
+    assert cloud_ids(added) == capabilities_ids
+    second = _cloud(status_flat=status)
+    coord.update(second)
+    coord.update(second)  # LAN refresh reusing the cloud snapshot
+    coord.update(_cloud(status_flat=dict(status)))  # separate fetch with the same keys
+    status_ids = ["SN-TEST_cloud_OperatingState", "SN-TEST_cloud_Descale"]
+    assert cloud_ids(added) == capabilities_ids + status_ids
+
+    # Both sources have supplied keys. A later snapshot can still introduce
+    # new fields in them, and previously seen keys retain their IDs.
+    latest_status = {**status, "CurrMode": 3, "alarms.Waste": True}
+    latest = _cloud(status_flat=latest_status, capabilities_flat=capabilities)
+    coord.update(latest)
+    late_ids = ["SN-TEST_cloud_CurrMode", "SN-TEST_cloud_alarms.Waste"]
+    assert cloud_ids(added) == capabilities_ids + status_ids + late_ids
+
+    for entry in entries:
+        entry.async_on_unload.call_args.args[0]()
+    assert not coord.listeners
+    coord.update(_cloud(status_flat={**latest_status, "opaque": 1}))
+    assert cloud_ids(added) == capabilities_ids + status_ids + late_ids
+
+    coord.update(latest)
+    reloaded: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), reloaded.extend))
+    asyncio.run(bs.async_setup_entry(_hass(coord), _entry(), reloaded.extend))
+    assert len(coord.listeners) == 2
+    assert sorted(cloud_ids(reloaded)) == sorted(cloud_ids(added))

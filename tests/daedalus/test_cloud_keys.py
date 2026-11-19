@@ -14,6 +14,7 @@ import pytest
 
 from custom_components.delonghi_daedalus.cloud_keys import (
     CLOUD_KEYS,
+    CloudEntityDiscovery,
     coerce_bool,
     lookup_cloud_key,
     normalize,
@@ -99,6 +100,24 @@ def test_plan_drops_blank_keys() -> None:
 def test_plan_caps_per_source() -> None:
     cloud = {"status_flat": {f"opaque{i}": i for i in range(200)}}
     assert len(plan_cloud_entities(cloud, want_binary=False)) <= 80
+
+
+def test_discovery_caps_accumulated_fields_per_source() -> None:
+    discovery = CloudEntityDiscovery(want_binary=False)
+    first = {"status_flat": {f"opaque{i}": i for i in range(79)}}
+    assert len(discovery.discover(first)) == 79
+    second = {"status_flat": {"OperatingState": "Standby", "CurrMode": 0}, "capabilities_flat": {"Languages": 27}}
+    assert [(source, key) for source, key, _ in discovery.discover(second)] == [
+        ("status_flat", "OperatingState"),
+        ("capabilities_flat", "Languages"),
+    ]
+
+
+def test_discovery_skips_keys_with_the_same_truncated_id() -> None:
+    discovery = CloudEntityDiscovery(want_binary=False)
+    prefix = "x" * 64
+    assert len(discovery.discover({"status_flat": {f"{prefix}.first": 1}})) == 1
+    assert discovery.discover({"status_flat": {f"{prefix}.second": 2}}) == []
 
 
 @pytest.mark.parametrize("lang", ["en", "fr"])
@@ -208,10 +227,18 @@ def test_path_alias_beats_segment_alias() -> None:
 
 
 def test_sensitive_keys_never_planned() -> None:
-    """BLE passcode / MAC / SN must not become entities in either platform."""
+    """Identifiers and credentials must not become cloud entities."""
     cloud = {
         "status_flat": {"BlePassCode": "123456", "MAC": "08:aa", "SN": "AC000", "Status": "Standby"},
-        "capabilities_flat": {"BlePassCode": "x", "Languages": 27},
+        "capabilities_flat": {
+            "BlePassCode": "x",
+            "network.MAC_address": "00:11:22:33:44:55",
+            "MachineName": "thing-id",
+            "network.LanIpAddress": "192.168.2.8",
+            "machine.SerialNumber": "machine-serial",
+            "auth.session_token.value": "session-token",
+            "Languages": 27,
+        },
     }
     planned = {k for s, k, _ in plan_cloud_entities(cloud, want_binary=False)}
     planned |= {k for s, k, _ in plan_cloud_entities(cloud, want_binary=True)}

@@ -1,0 +1,349 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "De'Longhi My Coffee Lounge",
+        "description": "Autentifică-te cu contul My Coffee Lounge pe care l-ai folosit pentru a asocia aparatul sau a partaja accesul la el.",
+        "data": {
+          "email": "Adresă de e-mail",
+          "password": "Parolă",
+          "pool": "Regiunea contului",
+          "cloud_telemetry": "Activează citirea datelor din cloud"
+        }
+      },
+      "reauth_confirm": {
+        "title": "De'Longhi My Coffee Lounge – Reautentificare necesară",
+        "description": "Introdu parola My Coffee Lounge pentru {email} ca să reînnoiești sesiunea contului.",
+        "data": {
+          "password": "Parolă"
+        }
+      },
+      "device": {
+        "title": "Selectează un aparat de cafea",
+        "description": "Alege un aparat din contul tău My Coffee Lounge.",
+        "data": {
+          "device": "Aparat"
+        }
+      },
+      "manual": {
+        "title": "Introdu numărul de serie al aparatului",
+        "description": "Folosește numărul de serie afișat pe aparat sau în My Coffee Lounge.",
+        "data": {
+          "serial_number": "Număr de serie"
+        }
+      },
+      "lan": {
+        "title": "Aparatul în rețeaua locală",
+        "description": "Confirmă adresa IP locală a aparatului cu numărul de serie {serial}. Dacă nu apare în câmp sau s-a schimbat, caut-o în lista dispozitivelor conectate din interfața routerului.",
+        "data": {
+          "host": "Adresă IP locală",
+          "cloud_only": "Folosește doar datele din cloud"
+        }
+      },
+      "verify_lan": {
+        "title": "Verifică certificatul aparatului",
+        "description": "Dispozitivul de la adresa {host} a prezentat următoarea amprentă SHA-256 pentru aparatul cu numărul de serie {serial}:\n\n`{fingerprint}`\n\nCompar-o cu amprenta certificatului aparatului pe care vrei să îl adaugi, obținută printr-o conexiune de încredere, de exemplu într-o rețea izolată. Confirmă numai dacă amprentele coincid.",
+        "data": {
+          "verified_fingerprint": "Am verificat că amprentele coincid",
+          "change_address": "Introdu o altă adresă IP",
+          "cloud_only": "Folosește doar datele din cloud"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Datele de autentificare My Coffee Lounge sunt incorecte",
+      "all_pools_unauthorized": "Autentificarea a eșuat în toate regiunile (EU, EU_US, CH). Verifică parola. Dacă problema persistă, deschide o sesizare în depozitul GitHub al integrării.",
+      "cannot_connect": "Aparatul nu poate fi accesat în rețeaua locală",
+      "unknown": "Eroare neașteptată",
+      "cannot_login": "Serviciul My Coffee Lounge nu poate fi accesat. Încearcă din nou.",
+      "discovery_unavailable": "Lista aparatelor My Coffee Lounge nu este disponibilă. Poți introduce manual datele aparatului.",
+      "invalid_device": "Selectează un aparat din listă.",
+      "invalid_serial": "Introdu numărul de serie al aparatului exact cum apare pe etichetă.",
+      "invalid_host": "Introdu o adresă IPv4 privată sau o adresă IPv6 locală unică (ULA).",
+      "fingerprint_not_verified": "Verifică amprenta certificatului pentru a continua configurarea accesului prin rețeaua locală.",
+      "certificate_changed": "Identitatea aparatului nu a putut fi verificată. Verifică adresa și compară din nou amprentele certificatelor.",
+      "lan_auth_rejected": "Aparatul a respins sesiunea contului pentru acest număr de serie. Verifică dacă adresa îi aparține aparatului selectat.",
+      "cloud_only_unavailable": "Activează telemetria cloud pentru a continua fără acces prin rețeaua locală."
+    },
+    "abort": {
+      "already_configured": "Aparatul este deja configurat",
+      "reauth_successful": "Reautentificare reușită",
+      "no_devices": "În acest cont My Coffee Lounge nu a fost găsit niciun aparat.",
+      "entry_missing": "Configurația integrării nu a fost găsită.",
+      "reconfigure_successful": "Conexiunea la aparat a fost actualizată."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Conexiune la rețeaua locală"
+      },
+      "cloud_dispensing_error": {
+        "name": "Eroare la preparare"
+      },
+      "cloud_broken_grinder": {
+        "name": "Râșniță defectă"
+      },
+      "cloud_bubble": {
+        "name": "Bulă de aer"
+      },
+      "cloud_no_coffee_beans": {
+        "name": "Lipsă boabe de cafea"
+      },
+      "cloud_brew_unit_cleaning": {
+        "name": "Curățare necesară a grupului de infuzare"
+      },
+      "cloud_cleaning": {
+        "name": "Curățare necesară"
+      },
+      "cloud_descale": {
+        "name": "Detartrare necesară"
+      },
+      "cloud_drain": {
+        "name": "Golire necesară"
+      },
+      "cloud_fan": {
+        "name": "Ventilator"
+      },
+      "cloud_fridge": {
+        "name": "Răcitor pentru lapte"
+      },
+      "cloud_ground_fine": {
+        "name": "Măcinare prea fină"
+      },
+      "cloud_heater_ntc": {
+        "name": "Defecțiune senzor NTC al încălzitorului"
+      },
+      "cloud_tank_level": {
+        "name": "Nivelul apei din rezervor"
+      },
+      "cloud_imbocco": {
+        "name": "Duză de distribuire înfundată"
+      },
+      "cloud_infuser": {
+        "name": "Grup de infuzare"
+      },
+      "cloud_motor_pos": {
+        "name": "Eroare de poziționare a motorului"
+      },
+      "cloud_general_fault": {
+        "name": "Defecțiune generală"
+      },
+      "cloud_tank_presence": {
+        "name": "Rezervorul de apă lipsește"
+      },
+      "cloud_ui_memory": {
+        "name": "Eroare de memorie a interfeței"
+      },
+      "cloud_water_filter": {
+        "name": "Înlocuire necesară a filtrului de apă"
+      },
+      "cloud_wifi_down": {
+        "name": "Conexiune Wi-Fi întreruptă"
+      },
+      "cloud_grounds_container": {
+        "name": "Recipientul pentru zaț este plin"
+      },
+      "cloud_grinder1_zsw": {
+        "name": "Contact râșniță 1"
+      },
+      "cloud_hot_jug": {
+        "name": "Carafă pentru lapte cald"
+      },
+      "cloud_jug": {
+        "name": "Carafă pentru lapte"
+      },
+      "cloud_motor_down_switch": {
+        "name": "Limitator inferior al grupului de infuzare"
+      },
+      "cloud_motor_up_switch": {
+        "name": "Limitator superior al grupului de infuzare"
+      },
+      "cloud_low_water": {
+        "name": "Nivel scăzut al apei"
+      },
+      "cloud_drip_tray_presence": {
+        "name": "Tavă de picurare montată"
+      },
+      "cloud_spout_presence": {
+        "name": "Duză de apă montată"
+      },
+      "cloud_switch": {
+        "name": "Comutator"
+      },
+      "cloud_clean_cold": {
+        "name": "Ciclu de curățare la rece"
+      },
+      "cloud_clean_hot": {
+        "name": "Ciclu de curățare la cald"
+      },
+      "cloud_idf_cold": {
+        "name": "Carafă pentru lapte rece (IDF)"
+      },
+      "cloud_idf_hot": {
+        "name": "Sistem pentru lapte cald (IDF)"
+      },
+      "cloud_steam_wand": {
+        "name": "Duză de abur"
+      },
+      "cloud_peripheral_tank_presence": {
+        "name": "Rezervorul de apă este montat"
+      },
+      "cloud_accessory_none": {
+        "name": "Niciun accesoriu"
+      },
+      "cloud_accessory_water": {
+        "name": "Accesoriu pentru apă"
+      }
+    },
+    "sensor": {
+      "connection_id": {
+        "name": "ID-ul conexiunii la rețeaua locală"
+      },
+      "serial_number": {
+        "name": "Număr de serie"
+      },
+      "lan_ip": {
+        "name": "Adresă IP în rețeaua locală"
+      },
+      "cloud_operating_state": {
+        "name": "Starea aparatului"
+      },
+      "cloud_current_mode": {
+        "name": "Modul curent (cod brut)"
+      },
+      "cloud_function_progress": {
+        "name": "Progresul funcției curente (cod brut)"
+      },
+      "cloud_dispensing_value": {
+        "name": "Valoare de distribuire (brută)"
+      },
+      "cloud_display_firmware": {
+        "name": "Firmware afișaj"
+      },
+      "cloud_mainboard_firmware": {
+        "name": "Firmware placă de bază"
+      },
+      "cloud_machine_model": {
+        "name": "Modelul aparatului"
+      },
+      "cloud_languages": {
+        "name": "Limbi"
+      },
+      "cloud_grind_levels": {
+        "name": "Trepte de măcinare"
+      },
+      "cloud_drink_groups": {
+        "name": "Grupuri de băuturi"
+      },
+      "cloud_custom_drinks": {
+        "name": "Număr maxim de băuturi personalizate"
+      },
+      "cloud_bean_adapt_type": {
+        "name": "Tip Bean Adapt"
+      },
+      "cloud_display_type": {
+        "name": "Tip de afișaj"
+      },
+      "cloud_grinder_type": {
+        "name": "Tip de râșniță"
+      },
+      "cloud_bean_hopper_type": {
+        "name": "Tip de recipient pentru boabe"
+      },
+      "cloud_graphics_version": {
+        "name": "Versiunea elementelor grafice"
+      },
+      "cloud_water_hardness_options": {
+        "name": "Opțiuni pentru duritatea apei"
+      },
+      "cloud_eco_mode_options": {
+        "name": "Opțiuni pentru modul eco"
+      },
+      "cloud_sound_options": {
+        "name": "Opțiuni de sunet"
+      },
+      "cloud_dictionaries": {
+        "name": "Dicționare"
+      },
+      "cloud_statistics_types": {
+        "name": "Tipuri de statistici"
+      },
+      "cloud_profile_colors": {
+        "name": "Culorile profilurilor"
+      },
+      "cloud_recipe_name_length": {
+        "name": "Lungimea numelui rețetei"
+      },
+      "cloud_user_profile_name_length": {
+        "name": "Lungimea numelui profilului de utilizator"
+      },
+      "cloud_bean_profile_name_length": {
+        "name": "Lungimea numelui profilului de boabe"
+      },
+      "cloud_supported_accessories": {
+        "name": "Accesorii compatibile"
+      },
+      "cloud_coffee_moments": {
+        "name": "Compatibilitate Coffee Moments"
+      },
+      "cloud_extra_shot": {
+        "name": "Compatibilitate Extra Shot"
+      },
+      "cloud_mug_to_go": {
+        "name": "Compatibilitate Mug To Go"
+      },
+      "cloud_water_drain_support": {
+        "name": "Compatibilitate cu golirea apei"
+      },
+      "cloud_step_description": {
+        "name": "Descrierea etapei"
+      },
+      "cloud_wifi_firmware": {
+        "name": "Firmware Wi-Fi"
+      },
+      "cloud_cloud_agent_version": {
+        "name": "Versiunea agentului cloud"
+      },
+      "cloud_machine_model_main": {
+        "name": "Modelul plăcii de bază"
+      },
+      "cloud_machine_user_profiles": {
+        "name": "Profiluri de utilizator"
+      },
+      "cloud_user_profile_icons": {
+        "name": "Pictogramele profilurilor de utilizator"
+      },
+      "cloud_coffee_temperatures": {
+        "name": "Temperaturile cafelei"
+      },
+      "cloud_auto_turn_off_options": {
+        "name": "Intervale pentru oprirea automată (min)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opțiuni De'Longhi Daedalus",
+        "data": {
+          "cloud_telemetry": "Citește din cloud starea aparatului la fiecare două minute. Modificarea opțiunii reîncarcă integrarea."
+        }
+      }
+    },
+    "error": {
+      "lan_verification_required": "Verifică certificatul aparatului din meniul Reconfigurare înainte să dezactivezi telemetria cloud."
+    }
+  },
+  "issues": {
+    "verify_lan": {
+      "title": "Verifică certificatul aparatului {serial}",
+      "description": "Home Assistant nu a putut verifica conexiunea locală la acest aparat. Deschide [De'Longhi Daedalus](/config/integrations/integration/delonghi_daedalus), alege **Reconfigurare** din meniul aparatului și verifică amprenta certificatului."
+    }
+  },
+  "device": {
+    "coffee_machine": {
+      "name": "Aparat de cafea De'Longhi"
+    }
+  }
+}

@@ -219,8 +219,9 @@ def test_auth_rejection_retries_lowercase_and_remembers() -> None:
     async def _run() -> None:
         session = MagicMock()
         session.ws_connect = AsyncMock(side_effect=[first, second])
-        api = DaedalusApi(session=session)
-        conn = await api.connect_lan(host=HOST, serial_number="SN1", jwt="jwt")
+        api = DaedalusApi()
+        api._get_lan_session = lambda: session
+        conn = await api.connect_lan(host=HOST, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         assert conn.auth_message == "auth"
         assert conn.connection_id == 9
         first.close.assert_awaited_once()  # rejected socket must not leak
@@ -250,9 +251,10 @@ def test_both_auth_spellings_rejected_escalates() -> None:
     async def _run() -> None:
         session = MagicMock()
         session.ws_connect = AsyncMock(side_effect=[first, second])
-        api = DaedalusApi(session=session)
+        api = DaedalusApi()
+        api._get_lan_session = lambda: session
         with pytest.raises(DaedalusAuthError, match="both"):
-            await api.connect_lan(host=HOST, serial_number="SN1", jwt="jwt")
+            await api.connect_lan(host=HOST, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt")
         first.close.assert_awaited_once()
         second.close.assert_awaited_once()
         await api.close()
@@ -267,8 +269,11 @@ def test_configured_lowercase_sends_lowercase_first() -> None:
     async def _run() -> None:
         session = MagicMock()
         session.ws_connect = AsyncMock(side_effect=[first])
-        api = DaedalusApi(session=session)
-        conn = await api.connect_lan(host=HOST, serial_number="SN1", jwt="jwt", auth_message="auth")
+        api = DaedalusApi()
+        api._get_lan_session = lambda: session
+        conn = await api.connect_lan(
+            host=HOST, fingerprint="ab" * 32, serial_number="SN1", jwt="jwt", auth_message="auth"
+        )
         frame = json.loads(first.send_str.await_args.args[0])
         assert frame["Message"] == "auth"
         assert conn.auth_message == "auth"
