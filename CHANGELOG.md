@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [0.5.0] — Unreleased
+
+### Breaking changes
+
+- Daedalus requires an approved TLS certificate for local access. Existing entries must open **Reconfigure** and approve the certificate on a trusted network. Cloud telemetry continues for entries with it enabled, including during reconfiguration. LAN-only entries need certificate approval to restore connectivity, or can enable cloud telemetry in the integration options and select **Use cloud telemetry only** in **Reconfigure**. Reconfiguration keeps the paired machine's serial number and existing entity IDs.
+- Previously registered cloud entities for private fields are removed, including the obsolete raw cloud LAN address sensor. Point any automations or dashboards that used that sensor to the dedicated **LAN IP address** diagnostic sensor.
+- Cloud entities no longer expose the My Coffee Lounge machine name in their attributes. The entity registry keeps cloud entities when telemetry is disabled or a field is temporarily absent, preserving entity IDs and user settings when the data returns.
+
 ## [1.9.4] — 2026-11-19
 
 ### Fixed

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
-
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_AROMATIC_WARMUP_PENDING, CONF_SERIAL_NUMBER, CONF_SESSION_TOKEN, DOMAIN, MANUFACTURER
+from .const import CONF_AROMATIC_WARMUP_PENDING, CONF_SERIAL_NUMBER, CONF_SESSION_TOKEN, DOMAIN
+from .coordinator import DaedalusCoordinator
+from .entity import DaedalusEntity
 from .warmup_action import ATTR_CONFIG_ENTRY_ID, SERVICE_WARM_UP, has_unique_warmup_serial, warmup_enabled
 
 
@@ -26,23 +25,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         and serial.strip()
         and has_unique_warmup_serial(hass, serial)
     ):
-        async_add_entities([DaedalusWarmupButton(entry, serial)])
+        coordinator: DaedalusCoordinator = hass.data[DOMAIN][entry.entry_id]
+        async_add_entities([DaedalusWarmupButton(coordinator, entry)])
 
 
-class DaedalusWarmupButton(ButtonEntity):
+class DaedalusWarmupButton(DaedalusEntity, ButtonEntity):
     """Route a physical machine's button through the existing admin service."""
 
     _attr_has_entity_name = True
     _attr_translation_key = SERVICE_WARM_UP
 
-    def __init__(self, entry: ConfigEntry, serial: str) -> None:
+    def __init__(self, coordinator: DaedalusCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, key=SERVICE_WARM_UP)
         self._entry = entry
-        self._attr_unique_id = f"{serial}_{SERVICE_WARM_UP}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, sha256(f"{DOMAIN}:{serial}".encode()).hexdigest())},
-            manufacturer=MANUFACTURER,
-            translation_key="coffee_machine",
-        )
 
     @property
     def available(self) -> bool:

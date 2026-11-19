@@ -19,6 +19,7 @@ _HA_MODULES = [
     "homeassistant.helpers",
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.device_registry",
+    "homeassistant.helpers.entity_registry",
     "homeassistant.helpers.update_coordinator",
     "homeassistant.helpers.storage",
     "homeassistant.helpers.service",
@@ -46,6 +47,8 @@ for mod_name in _HA_MODULES:
 
 # Diagnostics needs the real redacter, not a MagicMock that returns another MagicMock.
 sys.modules["homeassistant.components.diagnostics"].async_redact_data = _real_redact
+sys.modules["homeassistant.helpers.device_registry"].DeviceInfo = dict
+sys.modules["homeassistant.core"].callback = lambda func: func
 sys.modules["homeassistant.const"].MAX_LENGTH_STATE_STATE = 255
 
 

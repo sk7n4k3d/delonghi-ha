@@ -11,13 +11,14 @@ Brewing commands are intentionally out of scope until we capture the exact
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import hashlib
+import re
 import ssl
 from typing import Any
 
 import aiohttp
 
-from .const import GIGYA_API_KEY_PROD, GIGYA_BASE_URL
+from .const import GIGYA_API_KEY_PROD, GIGYA_BASE_URL, LAN_WS_PORT
 from .gigya_auth import (
     GigyaAuthError,
     apikey_fingerprint,
@@ -26,7 +27,10 @@ from .gigya_auth import (
     build_login_params,
     build_login_params_legacy,
     build_login_query,
+    check_gigya_error,
     is_credential_error,
+    is_session_error,
+    is_transient_error,
     parse_jwt_response,
     parse_login_response,
 )
@@ -68,11 +72,43 @@ class DaedalusError(RuntimeError):
 
 
 class DaedalusAuthError(DaedalusError):
-    """Credentials refused or JWT unobtainable."""
+    """Credentials explicitly refused by Gigya or the machine."""
+
+    def __init__(self, message: str, *, login_error_code: int | None = None) -> None:
+        super().__init__(message)
+        self.login_error_code = login_error_code
 
 
 class DaedalusConnectionError(DaedalusError):
-    """Transport / network-level failure against Gigya or the LAN WS."""
+    """Request or service failure against Gigya or the LAN WebSocket."""
+
+
+class DaedalusLanIdentityError(DaedalusConnectionError):
+    """The LAN machine identity could not be confirmed."""
+
+
+class DaedalusLanSerialMismatchError(DaedalusLanIdentityError):
+    """The pinned endpoint reported a different machine serial number."""
+
+
+def normalize_fingerprint(fingerprint: str | None) -> str:
+    """Validate and normalize a SHA-256 certificate fingerprint."""
+    normalized = fingerprint.strip().replace(":", "").lower() if isinstance(fingerprint, str) else ""
+    if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+        raise DaedalusLanIdentityError(
+            "LAN certificate is unverified. Open Reconfigure to verify the machine certificate."
+        )
+    return normalized
+
+
+def _no_redirects_trace() -> aiohttp.TraceConfig:
+    async def reject_redirect(_session, _context, params) -> None:
+        params.response.close()
+        raise aiohttp.ClientConnectionError("Unexpected redirect from De'Longhi endpoint")
+
+    trace = aiohttp.TraceConfig()
+    trace.on_request_redirect.append(reject_redirect)
+    return trace
 
 
 class DaedalusApi:
@@ -91,9 +127,13 @@ class DaedalusApi:
     ) -> None:
         self._gigya_base_url = gigya_base_url.rstrip("/")
         self._session = session
+        self._lan_session: aiohttp.ClientSession | None = None
         self._owns_session = session is None
 
     async def close(self) -> None:
+        if self._lan_session is not None:
+            await self._lan_session.close()
+            self._lan_session = None
         if self._session is not None and self._owns_session:
             await self._session.close()
             self._session = None
@@ -109,14 +149,17 @@ class DaedalusApi:
 
         `api_key` must match the Gigya Pool the account was created under
         (EU / EU_US / CH — see const.GIGYA_API_KEYS). Using the wrong key
-        yields errorCode 400093 ("Invalid parameter value: apiKey"), which
-        the UI translates as 'invalid credentials' and is misleading.
+        yields errorCode 400093 ("Invalid parameter value: apiKey").
         Returns (sessionToken, sessionSecret, jwt). The sessionToken (plus
         its secret) is what we'll pass to getJWT later to rotate the JWT
         without asking the user again.
         """
         session_token, session_secret = await self._gigya_login(email, password, api_key)
-        jwt = await self._gigya_get_jwt(session_token, api_key, session_secret=session_secret)
+        try:
+            jwt = await self._gigya_get_jwt(session_token, api_key, session_secret=session_secret)
+        except DaedalusAuthError as exc:
+            # The login succeeded, but Gigya rejected its new session.
+            raise DaedalusConnectionError(str(exc)) from None
         return session_token, session_secret, jwt
 
     async def refresh_jwt(
@@ -147,11 +190,12 @@ class DaedalusApi:
             )
             return parse_login_response(payload)
         except GigyaAuthError as exc:
+            message = _augment_400093(sanitize_text(exc), api_key)
+            if is_transient_error(exc):
+                raise DaedalusConnectionError(message) from None
             if is_credential_error(exc):
-                raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
-            _LOGGER.debug("Daedalus: app-aligned login rejected (%s), retrying legacy format", sanitize_text(str(exc)))
-        except aiohttp.ClientError as exc:  # pragma: no cover — transport kept uniform
-            raise DaedalusConnectionError(sanitize_text(f"Gigya request to /accounts.login failed: {exc}")) from exc
+                raise DaedalusAuthError(message, login_error_code=exc.error_code) from None
+            _LOGGER.debug("Daedalus: app-aligned login rejected (%s), retrying legacy format", message)
         try:
             payload = await self._post_gigya(
                 "/accounts.login",
@@ -159,10 +203,10 @@ class DaedalusApi:
             )
             return parse_login_response(payload)
         except GigyaAuthError as exc:
-            # Gigya error text is server-controlled and can echo the loginID
-            # (audit 2026-11-05): scrub before it propagates into logs,
-            # error strings and last_exception.
-            raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
+            message = _augment_400093(sanitize_text(exc), api_key)
+            if is_credential_error(exc):
+                raise DaedalusAuthError(message, login_error_code=exc.error_code) from None
+            raise DaedalusConnectionError(message) from None
 
     async def _gigya_get_jwt(
         self,
@@ -179,11 +223,12 @@ class DaedalusApi:
                 payload = await self._post_gigya("/accounts.getJWT", body, query=query, headers=headers)
                 return parse_jwt_response(payload)
             except GigyaAuthError as exc:
-                if is_credential_error(exc):
-                    raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
-                _LOGGER.debug(
-                    "Daedalus: app-aligned getJWT rejected (%s), retrying legacy format", sanitize_text(str(exc))
-                )
+                message = _augment_400093(sanitize_text(exc), api_key)
+                if is_transient_error(exc):
+                    raise DaedalusConnectionError(message) from None
+                if is_session_error(exc):
+                    raise DaedalusAuthError(message) from None
+                _LOGGER.debug("Daedalus: app-aligned getJWT rejected (%s), retrying legacy format", message)
         try:
             payload = await self._post_gigya(
                 "/accounts.getJWT",
@@ -191,7 +236,10 @@ class DaedalusApi:
             )
             return parse_jwt_response(payload)
         except GigyaAuthError as exc:
-            raise DaedalusAuthError(_augment_400093(sanitize_text(str(exc)), api_key)) from exc
+            message = _augment_400093(sanitize_text(exc), api_key)
+            if is_session_error(exc):
+                raise DaedalusAuthError(message) from None
+            raise DaedalusConnectionError(message) from None
 
     async def _post_gigya(
         self,
@@ -204,31 +252,29 @@ class DaedalusApi:
         session = self._get_session()
         url = f"{self._gigya_base_url}{path}"
         try:
-            async with session.post(url, data=data, params=query, headers=headers, timeout=_REQUEST_TIMEOUT) as resp:
+            async with session.post(
+                url, data=data, params=query, headers=headers, timeout=_REQUEST_TIMEOUT, allow_redirects=False
+            ) as resp:
+                if 300 <= resp.status < 400:
+                    raise DaedalusConnectionError(f"Gigya request to {path} returned an unexpected redirect")
+                if resp.status in {408, 429} or resp.status >= 500:
+                    raise DaedalusConnectionError(f"Gigya request to {path} failed: HTTP {resp.status}")
+                payload = await resp.json(content_type=None)
+                if not isinstance(payload, dict):
+                    raise DaedalusConnectionError(f"Gigya request to {path} returned an invalid response")
                 if resp.status >= 400:
-                    # Gigya normally answers 200 + errorCode, but a proxy or
-                    # a stricter screen-set can answer 4xx/5xx with the same
-                    # JSON body. Parse it anyway: the errorCode is what lets
-                    # is_credential_error() short-circuit — degrading a 403
-                    # refusal into a generic connection error would let the
-                    # legacy fallback replay the password (review #18, F2).
-                    body: Any = None
-                    with contextlib.suppress(Exception):
-                        body = await resp.json(content_type=None)
-                    if isinstance(body, dict) and body.get("errorCode"):
-                        raise GigyaAuthError(
-                            f"Gigya error {body['errorCode']} (HTTP {resp.status}): "
-                            f"{body.get('errorMessage') or body.get('errorDetails') or 'unknown'}",
-                            error_code=int(body["errorCode"]),
-                        )
-                    raise DaedalusConnectionError(sanitize_text(f"Gigya request to {path} failed: HTTP {resp.status}"))
-                return await resp.json(content_type=None)
-        except aiohttp.ClientError as exc:
-            raise DaedalusConnectionError(sanitize_text(f"Gigya request to {path} failed: {exc}")) from exc
+                    # Some Gigya deployments send a 4xx with the application
+                    # code. Preserve the code so a credential refusal stops
+                    # both format fallback and pool probing.
+                    check_gigya_error(payload)
+                    raise DaedalusConnectionError(f"Gigya request to {path} failed: HTTP {resp.status}")
+                return payload
+        except (aiohttp.ClientError, TimeoutError, ValueError, RecursionError) as exc:
+            raise DaedalusConnectionError(f"Gigya request to {path} failed: {type(exc).__name__}") from None
 
     def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(trace_configs=[_no_redirects_trace()])
             self._owns_session = True
         return self._session
 
@@ -238,6 +284,34 @@ class DaedalusApi:
         return self._get_session()
 
     # ------------------------------------------------------------------ LAN --
+    def _get_lan_session(self) -> aiohttp.ClientSession:
+        if self._lan_session is None:
+            self._lan_session = aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(force_close=True),
+                timeout=_REQUEST_TIMEOUT,
+                trace_configs=[_no_redirects_trace()],
+            )
+        return self._lan_session
+
+    async def probe_lan_fingerprint(self, *, host: str) -> str:
+        """Observe the TLS leaf certificate without sending any application data."""
+        register_lan_host(host)
+        try:
+            validate_lan_host(host)
+            context = await _get_trust_all_ssl_context()
+            async with asyncio.timeout(10):
+                _, writer = await asyncio.open_connection(host, LAN_WS_PORT, ssl=context)
+                try:
+                    ssl_object = writer.get_extra_info("ssl_object")
+                    certificate = ssl_object.getpeercert(binary_form=True) if ssl_object is not None else None
+                    if not certificate:
+                        raise DaedalusConnectionError("Machine TLS endpoint did not present a certificate")
+                    return hashlib.sha256(certificate).hexdigest()
+                finally:
+                    writer.close()
+        except (LanProtocolError, OSError) as exc:
+            raise DaedalusConnectionError(sanitize_text(f"LAN TLS probe failed: {exc}", host=host)) from None
+
     async def connect_lan(
         self,
         *,
@@ -245,6 +319,7 @@ class DaedalusApi:
         serial_number: str,
         jwt: str,
         auth_message: str = "AUTH",
+        fingerprint: str | None = None,
     ) -> DaedalusLanConnection:
         """Open a LAN WS, perform AUTH, return a live connection handle.
 
@@ -262,6 +337,7 @@ class DaedalusApi:
         # sanitize_text scrub it even without the value in hand: aiohttp's
         # own exception texts (chained via `from exc`, rendered in tracebacks
         # and last_exception) repeat it — audit 2026-11-05 (F1/F2).
+        pin = aiohttp.Fingerprint(bytes.fromhex(normalize_fingerprint(fingerprint)))
         register_lan_host(host)
         try:
             validate_lan_host(host)
@@ -272,7 +348,7 @@ class DaedalusApi:
             raise DaedalusConnectionError(sanitize_text(str(exc), host=host)) from exc
         try:
             return await self._open_authed_ws(
-                host=host, serial_number=serial_number, jwt=jwt, auth_message=auth_message
+                host=host, serial_number=serial_number, jwt=jwt, auth_message=auth_message, pin=pin
             )
         except LanAuthRejectedError as first_exc:
             if auth_message == "auth":
@@ -284,7 +360,9 @@ class DaedalusApi:
                 auth_message,
             )
             try:
-                return await self._open_authed_ws(host=host, serial_number=serial_number, jwt=jwt, auth_message="auth")
+                return await self._open_authed_ws(
+                    host=host, serial_number=serial_number, jwt=jwt, auth_message="auth", pin=pin
+                )
             except LanAuthRejectedError as second_exc:
                 raise DaedalusAuthError(
                     sanitize_text(
@@ -301,6 +379,7 @@ class DaedalusApi:
         serial_number: str,
         jwt: str,
         auth_message: str,
+        pin: aiohttp.Fingerprint,
     ) -> DaedalusLanConnection:
         """One WS connect + AUTH attempt.
 
@@ -310,11 +389,15 @@ class DaedalusApi:
         failure path — no socket leak per cycle (audit 2026-11-05).
         """
         url = build_lan_ws_url(host)
-        ssl_ctx = await _get_trust_all_ssl_context()
-        session = self._get_session()
+        session = self._get_lan_session()
         try:
-            ws = await session.ws_connect(url, ssl=ssl_ctx, heartbeat=20)
-        except aiohttp.ClientError as exc:
+            async with asyncio.timeout(15):
+                ws = await session.ws_connect(url, ssl=pin, heartbeat=20)
+        except aiohttp.ServerFingerprintMismatch:
+            raise DaedalusLanIdentityError(
+                "LAN certificate changed. Verify the machine identity and update the certificate in Reconfigure."
+            ) from None
+        except (aiohttp.ClientError, OSError) as exc:
             # Both `{url}` and the aiohttp text carry the host — scrub here so
             # the message is clean in EVERY channel, including the raw
             # traceback HA prints for unexpected errors (no sanitizer runs
@@ -336,6 +419,13 @@ class DaedalusApi:
                     sanitize_text(f"LAN AUTH: unexpected WS frame type {raw.type!r}", host=host)
                 )
             response = parse_message(raw.data)
+            # Some machines omit the echo. When present, it must match the
+            # serial selected in setup before a rejection can trigger a retry.
+            echoed_serial = response.get("SerialNo", serial_number)
+            if not isinstance(echoed_serial, str) or echoed_serial.casefold() != serial_number.casefold():
+                message = "LAN endpoint reported a different machine serial number. Check the LAN address."
+                _LOGGER.error(message)
+                raise DaedalusLanSerialMismatchError(message)
             connection_id = parse_auth_response(response)
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             # TimeoutError (ws.receive timing out on a machine that accepts
@@ -362,6 +452,9 @@ class DaedalusApi:
             # cannot act on (audit 2026-11-05).
             await ws.close()
             raise DaedalusConnectionError(sanitize_text(f"LAN AUTH got a malformed reply: {exc}", host=host)) from exc
+        except (DaedalusLanIdentityError, asyncio.CancelledError):
+            await ws.close()
+            raise
 
         return DaedalusLanConnection(ws=ws, connection_id=connection_id, auth_message=auth_message)
 
@@ -424,7 +517,7 @@ class DaedalusLanConnection:
             raise DaedalusConnectionError(f"LAN send failed: {exc}") from exc
         return request_id
 
-    async def receive(self, *, timeout: float = 10.0) -> dict[str, Any]:
+    async def receive(self, *, timeout: float | None = 10.0) -> dict[str, Any]:
         """Read the next JSON frame from the machine."""
         try:
             raw = await self._ws.receive(timeout=timeout)
@@ -435,7 +528,7 @@ class DaedalusLanConnection:
             # The handle itself stays open: a slow machine is transient, the
             # coordinator's closed-check owns the lifecycle.
             raise DaedalusConnectionError(f"LAN receive failed: {exc}") from exc
-        if raw.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
+        if raw.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
             raise DaedalusConnectionError("LAN WS closed by machine")
         if raw.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
             raise DaedalusConnectionError(f"unexpected WS frame type {raw.type!r}")
@@ -449,21 +542,10 @@ _SSL_CTX: ssl.SSLContext | None = None
 
 
 def _build_trust_all_ssl_context() -> ssl.SSLContext:
-    """Build a trust-all TLS context for the self-signed machine cert.
+    """Build a context used only to observe the self-signed certificate.
 
-    The De'Longhi Daedalus firmware presents a self-signed certificate on
-    port 443 and the official app's WebSocket client is configured with a
-    trust-all X509TrustManager + ALLOW_ALL hostname verifier. We mirror
-    that — there is no CA to pin against. Authentication happens in-band
-    via the JWT passed in the AUTH frame.
-
-    Deliberately NOT ``ssl.create_default_context()``: that call runs
-    ``load_default_certs()``, a synchronous walk of the system CA store that
-    HA flags as a blocking call when it happens on the event loop (issue #18
-    retest). With ``verify_mode=CERT_NONE`` the CA store is never consulted,
-    so loading it buys nothing here. The TLS 1.2 floor matches what
-    ``create_default_context`` set by default, so the wire behaviour is
-    unchanged.
+    The probe performs only a direct TLS handshake. The authenticated
+    WebSocket uses a pinned certificate through aiohttp.Fingerprint.
     """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2

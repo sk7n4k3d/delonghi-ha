@@ -14,7 +14,17 @@ from __future__ import annotations
 
 from .const import DOMAIN
 
-__all__ = ["DOMAIN", "async_setup", "async_setup_entry", "async_unload_entry"]
+__all__ = ["DOMAIN", "async_setup", "async_setup_entry", "async_unload_entry", "async_remove_entry"]
+
+
+def _validate_config(config: dict) -> dict:
+    """Validate YAML through Home Assistant when it loads the integration."""
+    from homeassistant.helpers import config_validation as cv
+
+    return cv.config_entry_only_config_schema(DOMAIN)(config)
+
+
+CONFIG_SCHEMA = _validate_config
 
 
 async def async_setup(hass, config):
@@ -34,3 +44,9 @@ async def async_unload_entry(hass, entry):  # pragma: no cover - thin wrapper
     from .entry import async_unload_entry as _impl
 
     return await _impl(hass, entry)
+
+
+async def async_remove_entry(hass, entry):
+    from .lan_repairs import async_clear_lan_issue
+
+    async_clear_lan_issue(hass, entry.entry_id)

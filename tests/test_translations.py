@@ -3,6 +3,7 @@
 import json
 import re
 from pathlib import Path
+from string import Formatter
 
 import pytest
 
@@ -10,18 +11,37 @@ COMPONENT_DIR = Path(__file__).resolve().parent.parent / "custom_components" / "
 TRANSLATIONS_DIR = COMPONENT_DIR / "translations"
 TRANSLATION_FILES = sorted(TRANSLATIONS_DIR.glob("*.json"))
 STRINGS_JSON = COMPONENT_DIR / "strings.json"
+DAEDALUS_DIR = COMPONENT_DIR.with_name("delonghi_daedalus")
 
 
-def _flat_keys(data, prefix=""):
-    """Flatten a nested dict into a set of dotted leaf keys."""
-    keys = set()
+def _flat_values(data, prefix=""):
+    """Flatten a nested dict into dotted leaf keys and their values."""
+    values = {}
     for k, v in data.items():
         key = f"{prefix}.{k}" if prefix else k
         if isinstance(v, dict):
-            keys |= _flat_keys(v, key)
+            values.update(_flat_values(v, key))
         else:
-            keys.add(key)
-    return keys
+            values[key] = v
+    return values
+
+
+def _flat_keys(data):
+    return set(_flat_values(data))
+
+
+@pytest.mark.parametrize(
+    "file", ["strings.json", "translations/en.json", "translations/fr.json", "translations/ro.json"]
+)
+def test_daedalus_translation_keys_and_placeholders(file):
+    reference = _flat_values(json.loads((DAEDALUS_DIR / "strings.json").read_text(encoding="utf-8")))
+    translated = _flat_values(json.loads((DAEDALUS_DIR / file).read_text(encoding="utf-8")))
+    assert {"options.error.lan_verification_required", "options.error.warmup_storage_error"} <= translated.keys()
+    assert translated.keys() == reference.keys()
+    for key, text in reference.items():
+        expected = {field for _, field, _, _ in Formatter().parse(text) if field is not None}
+        actual = {field for _, field, _, _ in Formatter().parse(translated[key]) if field is not None}
+        assert actual == expected, f"{file}: placeholders differ for {key}"
 
 
 @pytest.mark.parametrize("path", TRANSLATION_FILES, ids=lambda p: p.name)

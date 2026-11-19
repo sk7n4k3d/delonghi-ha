@@ -22,6 +22,7 @@ from custom_components.delonghi_daedalus.const import (
     GIGYA_POOL_CH,
     GIGYA_POOL_EU,
 )
+from custom_components.delonghi_daedalus.device import DaedalusDevice
 from custom_components.delonghi_daedalus.warmup import WarmupClient, WarmupError
 
 _SERIAL = "fixture-serial"
@@ -577,9 +578,9 @@ def _button(service):
     from custom_components.delonghi_daedalus import button
 
     entry = service.entry
-    service.hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
-        entry=entry, serial_number=entry.data.get(CONF_SERIAL_NUMBER)
-    )
+    coordinator = SimpleNamespace(entry=entry, serial_number=entry.data.get(CONF_SERIAL_NUMBER), data={})
+    coordinator.device = DaedalusDevice(coordinator)
+    service.hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     add = Mock()
     asyncio.run(button.async_setup_entry(service.hass, entry, add))
     return add.call_args.args[0][0] if add.called else None
