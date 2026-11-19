@@ -78,7 +78,11 @@ class DaedalusConnectionError(DaedalusError):
 
 
 class DaedalusLanIdentityError(DaedalusConnectionError):
-    """LAN certificate is missing or differs from the approved pin."""
+    """The LAN machine identity could not be confirmed."""
+
+
+class DaedalusLanSerialMismatchError(DaedalusLanIdentityError):
+    """The pinned endpoint reported a different machine serial number."""
 
 
 def normalize_fingerprint(fingerprint: str | None) -> str:
@@ -408,9 +412,13 @@ class DaedalusApi:
                 )
             response = parse_message(raw.data)
             connection_id = parse_auth_response(response)
+            # Some machines omit the echo. When present, it must match the
+            # serial selected in setup, even if the certificate is pinned.
             echoed_serial = response.get("SerialNo", serial_number)
             if not isinstance(echoed_serial, str) or echoed_serial.casefold() != serial_number.casefold():
-                raise DaedalusLanIdentityError("LAN endpoint reported a different machine serial number")
+                message = "LAN endpoint reported a different machine serial number. Check the LAN address."
+                _LOGGER.error(message)
+                raise DaedalusLanSerialMismatchError(message)
         except (aiohttp.ClientError, TimeoutError, OSError) as exc:
             # TimeoutError (ws.receive timing out on a machine that accepts
             # TCP but never answers the AUTH frame) and bare OSError (reset,

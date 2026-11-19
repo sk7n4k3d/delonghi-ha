@@ -14,6 +14,7 @@ from custom_components.delonghi_daedalus.api import (
     DaedalusAuthError,
     DaedalusConnectionError,
     DaedalusLanIdentityError,
+    DaedalusLanSerialMismatchError,
 )
 from custom_components.delonghi_daedalus.cloud import CloudTelemetryError, DirectoryMachine
 from custom_components.delonghi_daedalus.config_flow import (
@@ -250,6 +251,38 @@ def test_reconfigure_requires_confirmation_for_missing_or_replaced_pin(setup_flo
         flow.hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
 
     asyncio.run(run())
+
+
+def test_reconfigure_serial_mismatch_rejects_candidate_without_writing(setup_flow):
+    flow, api, directory, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin=_PIN)
+    original_data = entry.data.copy()
+    api.probe_lan_fingerprint.return_value = _NEW_PIN
+    api.connect_lan.side_effect = DaedalusLanSerialMismatchError("different machine")
+    api.refresh_jwt = AsyncMock()
+
+    async def run():
+        await flow.async_step_reconfigure()
+        result = await flow.async_step_lan({CONF_HOST: "192.168.1.81"})
+        assert result["step_id"] == "verify_lan"
+        api.connect_lan.assert_not_awaited()
+        result = await flow.async_step_verify_lan({"verified_fingerprint": True})
+        assert result["step_id"] == "lan"
+        assert result["errors"]["base"] == "serial_mismatch"
+
+    asyncio.run(run())
+    api.connect_lan.assert_awaited_once_with(
+        host="192.168.1.81",
+        serial_number=original_data[CONF_SERIAL_NUMBER],
+        jwt=original_data[CONF_JWT],
+        auth_message="AUTH",
+        fingerprint=_NEW_PIN,
+    )
+    api.refresh_jwt.assert_not_awaited()
+    directory.assert_not_awaited()
+    flow.hass.config_entries.async_update_entry.assert_not_called()
+    flow.hass.config_entries.async_reload.assert_not_awaited()
+    assert entry.data == original_data
 
 
 @pytest.mark.parametrize(

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 _VERSION = re.compile(r"[vV]?\d{1,4}(?:\.\d{1,4}){1,3}(?:[-+][a-zA-Z0-9.-]{1,20})?", re.ASCII)
 _AROMATIC_MODEL = "PrimaDonna Aromatic ECAM630.70"
+_DEFAULT_NAME = f"{MANUFACTURER} Coffee Machine"
 
 
 class DaedalusDevice:
@@ -82,8 +83,7 @@ class DaedalusDevice:
     def info(self) -> DeviceInfo:
         self._refresh_metadata()
         fields = self._metadata.copy()
-        if "name" not in fields:
-            fields["translation_key"] = "coffee_machine"
+        fields["name"] = fields.get("name") or _DEFAULT_NAME
         return DeviceInfo(identifiers=self._identifiers, manufacturer=MANUFACTURER, **fields)
 
     @callback

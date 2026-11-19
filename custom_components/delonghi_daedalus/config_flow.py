@@ -19,6 +19,7 @@ from .api import (
     DaedalusAuthError,
     DaedalusConnectionError,
     DaedalusLanIdentityError,
+    DaedalusLanSerialMismatchError,
 )
 from .cloud import CloudTelemetryError, DirectoryMachine, fetch_reported_lan_ip, list_machines
 from .const import (
@@ -309,7 +310,7 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_verify_lan()
 
     async def async_step_verify_lan(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Require independent comparison before sending a token to a new certificate."""
+        """Require approval before trusting a new certificate and sending a token."""
         if self._observed_fingerprint is None:
             return await self.async_step_lan()
         if user_input and user_input.get(_CONF_CLOUD_ONLY) and self._data.get(CONF_CLOUD_TELEMETRY):
@@ -378,6 +379,8 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._observed_fingerprint is not None:
             try:
                 changes.update(await self._validate_lan(data, self._observed_fingerprint))
+            except DaedalusLanSerialMismatchError:
+                return self._lan_form(errors={"base": "serial_mismatch"})
             except DaedalusLanIdentityError:
                 return self._lan_form(errors={"base": "certificate_changed"})
             except DaedalusConnectionError:

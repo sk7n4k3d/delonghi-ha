@@ -41,10 +41,10 @@
         }
       },
       "verify_lan": {
-        "title": "Verifică certificatul aparatului",
-        "description": "Dispozitivul de la adresa {host} a prezentat următoarea amprentă SHA-256 pentru aparatul cu numărul de serie {serial}:\n\n`{fingerprint}`\n\nCompar-o cu amprenta certificatului aparatului pe care vrei să îl adaugi, obținută printr-o conexiune de încredere, de exemplu într-o rețea izolată. Confirmă numai dacă amprentele coincid.",
+        "title": "Aprobă certificatul local",
+        "description": "Dispozitivul de la adresa {host} a prezentat următoarea amprentă SHA-256:\n\n`{fingerprint}`\n\nVerifică dacă adresa îi aparține aparatului cu numărul de serie {serial}. La prima aprobare te bazezi pe încrederea în rețeaua locală. Compararea amprentei de pe alt dispozitiv din aceeași rețea îți arată doar dacă amprentele coincid. Aprobă certificatul doar într-o rețea de încredere. În caz contrar, activează și folosește doar telemetria din cloud.",
         "data": {
-          "verified_fingerprint": "Am verificat că amprentele coincid",
+          "verified_fingerprint": "Am încredere în această rețea și aprob certificatul",
           "change_address": "Introdu o altă adresă IP",
           "cloud_only": "Folosește doar datele din cloud"
         }
@@ -60,10 +60,11 @@
       "invalid_device": "Selectează un aparat din listă.",
       "invalid_serial": "Introdu numărul de serie al aparatului exact cum apare pe etichetă.",
       "invalid_host": "Introdu o adresă IPv4 privată sau o adresă IPv6 locală unică (ULA).",
-      "fingerprint_not_verified": "Verifică amprenta certificatului pentru a continua configurarea accesului prin rețeaua locală.",
-      "certificate_changed": "Identitatea aparatului nu a putut fi verificată. Verifică adresa și compară din nou amprentele certificatelor.",
+      "fingerprint_not_verified": "Aprobă certificatul pentru a continua configurarea accesului local.",
+      "certificate_changed": "Certificatul s-a schimbat în timpul configurării. Verifică adresa și examinează din nou certificatul.",
       "lan_auth_rejected": "Aparatul a respins sesiunea contului pentru acest număr de serie. Verifică dacă adresa îi aparține aparatului selectat.",
-      "cloud_only_unavailable": "Activează telemetria cloud pentru a continua fără acces prin rețeaua locală."
+      "cloud_only_unavailable": "Activează telemetria cloud pentru a continua fără acces prin rețeaua locală.",
+      "serial_mismatch": "Dispozitivul a raportat un alt număr de serie. Introdu adresa aparatului selectat."
     },
     "abort": {
       "already_configured": "Aparatul este deja configurat",
@@ -337,13 +338,8 @@
   },
   "issues": {
     "verify_lan": {
-      "title": "Verifică certificatul aparatului {serial}",
-      "description": "Home Assistant nu a putut verifica conexiunea locală la acest aparat. Deschide [De'Longhi Daedalus](/config/integrations/integration/delonghi_daedalus), alege **Reconfigurare** din meniul aparatului și verifică amprenta certificatului."
-    }
-  },
-  "device": {
-    "coffee_machine": {
-      "name": "Aparat de cafea De'Longhi"
+      "title": "Verifică accesul local la aparatul cu numărul de serie {serial}",
+      "description": "Home Assistant nu a putut confirma identitatea aparatului în rețeaua locală. Deschide [De'Longhi Daedalus](/config/integrations/integration/delonghi_daedalus), selectează **Reconfigurează** din meniul aparatului și verifică adresa și certificatul."
     }
   }
 }

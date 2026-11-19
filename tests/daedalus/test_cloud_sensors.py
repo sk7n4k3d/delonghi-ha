@@ -200,7 +200,7 @@ def test_device_info_on_all_platforms_without_changing_existing_entity_registry_
 
     legacy_device = bs.DaedalusConnectedSensor(_FakeCoordinator({}))._attr_device_info
     assert device["identifiers"] == legacy_device["identifiers"]
-    assert legacy_device["translation_key"] == "coffee_machine"
+    assert legacy_device["name"] == "De'Longhi Coffee Machine"
     another = _FakeCoordinator({})
     another.serial_number = "SN-DIFFERENT"
     another.device = DaedalusDevice(another)

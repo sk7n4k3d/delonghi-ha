@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
+import logging
 import ssl
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
 from aiohttp import web
 from cryptography import x509
@@ -55,7 +60,8 @@ async def _serve(handler, context):
     return runner, runner.addresses[0][1]
 
 
-def test_preflight_is_credential_free_and_connect_checks_pin_before_http(certificate, monkeypatch):
+@pytest.mark.parametrize("echo", [{}, {"SerialNo": "sn1"}])
+def test_preflight_is_credential_free_and_connect_checks_pin_before_http(certificate, monkeypatch, echo):
     context, expected_pin = certificate
 
     async def run():
@@ -65,7 +71,7 @@ def test_preflight_is_credential_free_and_connect_checks_pin_before_http(certifi
             ws = web.WebSocketResponse()
             await ws.prepare(request)
             requests.append(await ws.receive_json())
-            await ws.send_json({"Response": "OK", "ConnectionId": 7, "SerialNo": "SN1"})
+            await ws.send_json({"Response": "OK", "ConnectionId": 7, **echo})
             await ws.receive()
             return ws
 
@@ -91,6 +97,36 @@ def test_preflight_is_credential_free_and_connect_checks_pin_before_http(certifi
             await runner.cleanup()
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("echo", ["other-private-serial", None])
+def test_serial_mismatch_closes_pinned_connection_without_retry(monkeypatch, caplog, echo):
+    host = "192.168.1.42"
+    expected_serial = "paired-private-serial"
+    token = "synthetic-private-token"
+    ws = MagicMock(send_str=AsyncMock(), close=AsyncMock())
+    ws.receive = AsyncMock(
+        return_value=SimpleNamespace(
+            type=aiohttp.WSMsgType.TEXT,
+            data=json.dumps({"Response": "OK", "ConnectionId": 7, "SerialNo": echo}),
+        )
+    )
+    session = MagicMock(ws_connect=AsyncMock(return_value=ws))
+    client = api.DaedalusApi()
+    monkeypatch.setattr(client, "_get_lan_session", lambda: session)
+
+    with caplog.at_level(logging.ERROR, logger=api.__name__), pytest.raises(api.DaedalusLanSerialMismatchError) as exc:
+        asyncio.run(client.connect_lan(host=host, serial_number=expected_serial, jwt=token, fingerprint="ab" * 32))
+
+    session.ws_connect.assert_awaited_once()
+    assert session.ws_connect.call_args.kwargs["ssl"].fingerprint == bytes.fromhex("ab" * 32)
+    ws.send_str.assert_awaited_once()
+    ws.close.assert_awaited_once()
+    assert str(exc.value) in caplog.text
+    assert "different machine serial number" in str(exc.value)
+    for private in (host, expected_serial, token, "other-private-serial"):
+        assert private not in str(exc.value)
+        assert private not in caplog.text
 
 
 @pytest.mark.parametrize("location", ["https://203.0.113.1/ws/lan2lan", "https://169.254.169.254/ws/lan2lan"])

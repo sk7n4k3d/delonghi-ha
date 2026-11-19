@@ -41,10 +41,10 @@
         }
       },
       "verify_lan": {
-        "title": "Verify the machine certificate",
-        "description": "The device at {host} presented this SHA-256 fingerprint:\n\n`{fingerprint}`\n\nCompare it with the certificate for machine {serial} obtained over a trusted connection, such as on an isolated network. Confirm only if the fingerprints match.",
+        "title": "Approve the local certificate",
+        "description": "The device at {host} presented this SHA-256 fingerprint:\n\n`{fingerprint}`\n\nCheck that this address belongs to machine {serial}. First-use approval relies on your local network. A fingerprint seen from another device on the same network is only a consistency check. Approve only on a network you trust. Otherwise, enable cloud telemetry and use cloud telemetry only.",
         "data": {
-          "verified_fingerprint": "I verified that the fingerprints match",
+          "verified_fingerprint": "I trust this network and approve this certificate",
           "change_address": "Enter a different IP address",
           "cloud_only": "Use cloud telemetry only"
         }
@@ -60,10 +60,11 @@
       "invalid_device": "Select a machine from the list.",
       "invalid_serial": "Enter the machine's serial number as printed on the label.",
       "invalid_host": "Enter a private IPv4 or unique-local IPv6 address.",
-      "fingerprint_not_verified": "Verify the certificate fingerprint to continue with LAN access.",
-      "certificate_changed": "The machine identity could not be verified. Check the address and compare the certificate again.",
+      "fingerprint_not_verified": "Approve the certificate to continue with local access.",
+      "certificate_changed": "The certificate changed during setup. Check the address and review the certificate again.",
       "lan_auth_rejected": "The machine rejected the account session for this serial number. Check that the address belongs to the selected machine.",
-      "cloud_only_unavailable": "Cloud telemetry must be enabled to continue without LAN access."
+      "cloud_only_unavailable": "Cloud telemetry must be enabled to continue without LAN access.",
+      "serial_mismatch": "The device reported a different serial number. Enter the address of the selected machine."
     },
     "abort": {
       "already_configured": "This machine is already configured",
@@ -337,13 +338,8 @@
   },
   "issues": {
     "verify_lan": {
-      "title": "Verify the certificate for machine {serial}",
-      "description": "Home Assistant could not verify the local connection to this machine. Open [De'Longhi Daedalus](/config/integrations/integration/delonghi_daedalus), select **Reconfigure** from the machine entry menu, and verify its certificate fingerprint."
-    }
-  },
-  "device": {
-    "coffee_machine": {
-      "name": "De'Longhi Coffee Machine"
+      "title": "Check local access for machine {serial}",
+      "description": "Home Assistant could not confirm the local connection to this machine. Open [De'Longhi Daedalus](/config/integrations/integration/delonghi_daedalus), select **Reconfigure** from the machine entry menu, and check the address and certificate."
     }
   }
 }

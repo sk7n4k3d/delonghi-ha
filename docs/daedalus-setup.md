@@ -7,10 +7,10 @@ Install **De’Longhi My Coffee Lounge** from the [distribution repository](http
 
 Restart Home Assistant and open **Settings → Devices & services → Add integration**.
 
-1. Sign in to the account used in My Coffee Lounge. Enable cloud telemetry to show the operating state, alarms and device capabilities reported by the machine.
+1. Sign in to the account used in My Coffee Lounge. Enable cloud telemetry to show the operating state, alarms and device capabilities reported by the machine, or to continue without local access.
 2. Select the machine that belongs in Home Assistant. The picker includes machines the account can access. If the directory is temporarily unavailable, the setup flow offers manual entry.
-3. Review the suggested LAN address. Before approving local access, compare the displayed SHA-256 certificate fingerprint with the appliance certificate viewed independently from a trusted device on your home network. Use the address shown in the appliance settings or your router. In a desktop browser, open the appliance's HTTPS address and inspect the certificate details. You can inspect its certificate even if the browser warns that it is self-signed.
-4. If the machine is away from the home network or you cannot verify its fingerprint, select **Use cloud telemetry only**. Open **Reconfigure** later to add local access.
+3. Confirm the suggested LAN address using the appliance settings or your router's list of connected devices. Home Assistant learns the SHA-256 fingerprint from the certificate presented at that LAN address. First-use approval relies on the local network. You can compare the fingerprint with the certificate details in a desktop browser on the same network as a consistency check.
+4. Approve the certificate only on a network you trust. On approval, Home Assistant pins the certificate and checks it before sending an account token to the LAN address. If you are unsure about the network or address, select **Use cloud telemetry only**. Open **Reconfigure** later to add local access.
 
 Each machine has its own device page. Assign it to an area to keep the operating state, alarms and diagnostics together. Enable additional diagnostic entities on the device page when you need them.
 
@@ -18,7 +18,7 @@ Each machine has its own device page. Assign it to an area to keep the operating
 
 Home Assistant keeps entity IDs, user names, and enabled or disabled choices for retained entities. The upgrade removes the obsolete raw cloud LAN address sensor. The dedicated **LAN IP address** sensor remains in **Diagnostic** with its existing settings. Update any automations or dashboards that reference the obsolete cloud sensor to use the dedicated sensor.
 
-Existing LAN configurations require one certificate comparison after upgrade. Open the integration entry’s menu and select **Reconfigure**. The same menu lets you change the LAN address without deleting the entry. Cloud telemetry can continue during certificate verification. If a previously verified certificate changes, investigate the change before accepting its replacement.
+Existing LAN configurations require certificate approval after upgrade. Open the integration entry’s menu and select **Reconfigure**. The same menu lets you change the LAN address without deleting the entry. Cloud telemetry can continue while local access is pending. If a previously approved certificate changes, investigate the change before accepting its replacement.
 
 ### Interpreting availability
 
