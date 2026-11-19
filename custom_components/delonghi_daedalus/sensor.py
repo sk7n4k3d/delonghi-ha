@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MAX_LENGTH_STATE_STATE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -115,8 +117,9 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
     the v1.8.0 raw ``Cloud <key>`` fallback. Values are raw until each code
     is mapped for real — a bool becomes a "true"/"false" string because
     native_value only accepts str/num (mapped bools render as binary_sensors
-    instead). The shadow key is exposed as an attribute so dashboards stay
-    stable even if the raw value shape changes later.
+    instead). Long language lists use a count as the state and keep the list
+    as an attribute. The shadow key is exposed as an attribute so dashboards
+    stay stable even if the raw value shape changes later.
     """
 
     _attr_has_entity_name = True
@@ -134,6 +137,7 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
         display = cloud_key_display(key)
         if meta is None:
             meta = lookup_cloud_key(key)
+        self._is_languages = meta is not None and meta.key == "languages"
         # capabilities_flat keys keep a distinct unique_id namespace so a same
         # named status/capability key can never collide.
         prefix = "cloud" if source == "status_flat" else "cloudcap"
@@ -145,12 +149,27 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
         if source == "capabilities_flat" or (meta is not None and meta.kind == KIND_CAPABILITY):
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
+    def _language_list(self, value: str) -> list[str] | None:
+        """Decode the known Languages field that flatten_shadow stores as JSON."""
+        if not self._is_languages:
+            return None
+        try:
+            languages = json.loads(value)
+        except (ValueError, RecursionError):
+            return None
+        if isinstance(languages, list) and all(isinstance(language, str) for language in languages):
+            return languages
+        return None
+
     @property
     def native_value(self) -> str | int | float | None:
         cloud = (self.coordinator.data or {}).get("cloud") or {}
         value: Any = cloud.get(self._source, {}).get(self._key)
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value, str) and len(value) > MAX_LENGTH_STATE_STATE:
+            languages = self._language_list(value)
+            return len(languages) if languages is not None else None
         if isinstance(value, (int, float, str)):
             return value
         return None
@@ -158,4 +177,12 @@ class DaedalusCloudSensor(CoordinatorEntity[DaedalusCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         cloud = (self.coordinator.data or {}).get("cloud") or {}
-        return {"shadow_key": self._key, "machine_name": cloud.get("machine_name")}
+        attrs = {"shadow_key": self._key, "machine_name": cloud.get("machine_name")}
+        value = cloud.get(self._source, {}).get(self._key)
+        if isinstance(value, str) and len(value) > MAX_LENGTH_STATE_STATE:
+            languages = self._language_list(value)
+            if languages is not None:
+                attrs["languages"] = languages
+            else:
+                attrs["value_length"] = len(value)
+        return attrs

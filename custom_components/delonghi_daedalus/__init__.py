@@ -14,7 +14,14 @@ from __future__ import annotations
 
 from .const import DOMAIN
 
-__all__ = ["DOMAIN", "async_setup_entry", "async_unload_entry"]
+__all__ = ["DOMAIN", "async_setup", "async_setup_entry", "async_unload_entry"]
+
+
+async def async_setup(hass, config):
+    from .warmup_action import register_warmup_action
+
+    register_warmup_action(hass)
+    return True
 
 
 async def async_setup_entry(hass, entry):  # pragma: no cover - thin wrapper

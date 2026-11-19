@@ -1,0 +1,11 @@
+warm_up:
+  name: Warm up
+  description: Request power on for one opted-in EU PrimaDonna Aromatic ECAM630.70 with UI and mainboard 1.2.0 and Wi-Fi 2.5.3. Manual calls require administrator access. Startup may dispense hot rinse water.
+  fields:
+    config_entry_id:
+      name: Coffee machine
+      description: Select the configuration entry for the owned machine.
+      required: true
+      selector:
+        config_entry:
+          integration: delonghi_daedalus
