@@ -6,8 +6,10 @@ Uses the stubbed homeassistant bases from the root conftest — no HA runtime.
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import MagicMock
 
+import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.helpers.entity import EntityCategory
 
@@ -67,6 +69,50 @@ def test_capability_diagnostic_own_namespace() -> None:
     assert entity._attr_unique_id == "SN-TEST_cloudcap_Languages"
     assert entity._attr_entity_category == EntityCategory.DIAGNOSTIC
     assert entity.native_value == 27
+
+
+def test_oversized_languages_uses_count_and_list_attribute() -> None:
+    languages = [f"LANGUAGE_{index:02}" for index in range(27)]
+    value = json.dumps(languages)
+    coord = _FakeCoordinator(_cloud(capabilities_flat={"Languages": value}))
+    entity = sp.DaedalusCloudSensor(coord, "capabilities_flat", "Languages")
+    assert entity.native_value == len(languages)
+    assert entity.extra_state_attributes == {
+        "shadow_key": "Languages",
+        "machine_name": "thing-1",
+        "languages": languages,
+    }
+
+    compact_value = json.dumps(languages[:2])
+    coord.data = _cloud(capabilities_flat={"Languages": compact_value})
+    assert entity.native_value == compact_value
+    assert "languages" not in entity.extra_state_attributes
+
+
+@pytest.mark.parametrize("key", ["opaque", "Languages"])
+def test_state_length_boundary_preserves_short_string_and_omits_oversized_raw_value(key: str) -> None:
+    value = "x" * 255
+    coord = _FakeCoordinator(_cloud(capabilities_flat={key: value}))
+    entity = sp.DaedalusCloudSensor(coord, "capabilities_flat", key)
+    assert entity.native_value == value
+    assert entity.extra_state_attributes == {"shadow_key": key, "machine_name": "thing-1"}
+
+    coord.data = _cloud(capabilities_flat={key: value + "x"})
+    assert entity.native_value is None
+    assert entity.extra_state_attributes == {"shadow_key": key, "machine_name": "thing-1", "value_length": 256}
+
+
+@pytest.mark.parametrize("key, payload", [("opaque", ["x" * 256]), ("Languages", [{"token": "x" * 256}])])
+def test_oversized_json_does_not_expose_unknown_or_structured_values(key: str, payload: list) -> None:
+    value = json.dumps(payload)
+    coord = _FakeCoordinator(_cloud(capabilities_flat={key: value}))
+    entity = sp.DaedalusCloudSensor(coord, "capabilities_flat", key)
+    assert entity.native_value is None
+    assert entity.extra_state_attributes == {
+        "shadow_key": key,
+        "machine_name": "thing-1",
+        "value_length": len(value),
+    }
 
 
 # ---------------------------------------------------------- binary_sensor --
