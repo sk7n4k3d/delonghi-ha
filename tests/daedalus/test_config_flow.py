@@ -585,6 +585,7 @@ def _make_entry(telemetry: bool) -> MagicMock:
 def _make_options_flow(entry: MagicMock) -> DaedalusOptionsFlow:
     flow = DaedalusOptionsFlow(entry)
     flow.hass = MagicMock()
+    flow.hass.data = {}
     flow.hass.config_entries.async_reload = AsyncMock()
     return flow
 
