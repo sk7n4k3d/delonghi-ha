@@ -725,9 +725,7 @@ class TestCoordinatorStopLan:
 class _MockRequest:
     """Minimal stand-in for aiohttp.web.Request."""
 
-    def __init__(
-        self, body: dict | None = None, remote: str = "192.168.1.42", method: str = "POST"
-    ) -> None:
+    def __init__(self, body: dict | None = None, remote: str = "192.168.1.42", method: str = "POST") -> None:
         self._body = body or {}
         self.remote = remote
         self.method = method

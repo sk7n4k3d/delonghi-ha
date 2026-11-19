@@ -1041,8 +1041,7 @@ class DeLonghiApi:
         self._ping_supported = False
         self._ping_retry_after = time.monotonic() + 3600
         _LOGGER.info(
-            "ping_connected: neither app_device_connected nor device_connected "
-            "exists on this model; retrying in 1 h"
+            "ping_connected: neither app_device_connected nor device_connected exists on this model; retrying in 1 h"
         )
         return False
 
