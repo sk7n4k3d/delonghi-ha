@@ -330,7 +330,8 @@
   },
   "options": {
     "error": {
-      "lan_verification_required": "Vérifiez le certificat de la machine dans Reconfigurer avant de désactiver la télémétrie cloud."
+      "lan_verification_required": "Vérifiez le certificat de la machine dans Reconfigurer avant de désactiver la télémétrie cloud.",
+      "warmup_storage_error": "Impossible d’enregistrer l’option de préchauffage. Vérifiez le stockage de Home Assistant et réessayez."
     },
     "step": {
       "init": {

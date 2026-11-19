@@ -330,7 +330,8 @@
   },
   "options": {
     "error": {
-      "lan_verification_required": "Verify the machine certificate in Reconfigure before disabling cloud telemetry."
+      "lan_verification_required": "Verify the machine certificate in Reconfigure before disabling cloud telemetry.",
+      "warmup_storage_error": "Could not save the warm-up option. Check Home Assistant storage and try again."
     },
     "step": {
       "init": {
