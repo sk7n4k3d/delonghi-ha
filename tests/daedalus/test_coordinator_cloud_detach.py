@@ -16,7 +16,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from custom_components.delonghi_daedalus.api import DaedalusAuthError, DaedalusConnectionError, DaedalusLanIdentityError
+from custom_components.delonghi_daedalus.api import (
+    DaedalusAuthError,
+    DaedalusConnectionError,
+    DaedalusLanIdentityError,
+    DaedalusLanSerialMismatchError,
+)
 from custom_components.delonghi_daedalus.cloud import CloudState, CloudTelemetryError
 from custom_components.delonghi_daedalus.const import (
     CLOUD_POLL_SECONDS,
@@ -304,6 +309,50 @@ def test_missing_expected_lan_identity_raises_repair_then_success_clears_it():
             await coord._stop_lan_listener()
 
     asyncio.run(_go())
+
+
+def test_serial_mismatch_blocks_lan_polls_for_the_same_identity():
+    async def run():
+        coord = _make_coordinator()
+        coord._lan = None
+        coord.entry.data[CONF_LAN_TLS_FINGERPRINT] = "ab" * 32
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        connection = MagicMock(
+            closed=False, connection_id=7, auth_message="AUTH", receive=AsyncMock(), close=AsyncMock()
+        )
+        coord._api.connect_lan = AsyncMock(side_effect=[DaedalusLanSerialMismatchError("serial mismatch"), connection])
+        coord._api.refresh_jwt = AsyncMock()
+        coordinator_module = "custom_components.delonghi_daedalus.coordinator"
+        with (
+            patch(f"{coordinator_module}.async_raise_lan_issue") as raise_issue,
+            patch(f"{coordinator_module}.async_clear_lan_issue") as clear_issue,
+            patch(_PATCH, return_value=_CLOUD_STATE),
+        ):
+            coord.data = await coord._async_update_data()
+            assert coord.data["lan_error"] == "serial mismatch"
+            await coord._cloud_task
+
+            coord.entry.data[CONF_JWT] = "new-jwt"
+            snapshot = await coord._async_update_data()
+            assert not snapshot["connected"]
+            assert snapshot["lan_error"] == "serial mismatch"
+            assert "cloud" in snapshot
+            coord._api.connect_lan.assert_awaited_once()
+            coord._api.refresh_jwt.assert_not_awaited()
+            coord.hass.config_entries.async_update_entry.assert_not_called()
+            coord.entry.async_start_reauth.assert_not_called()
+            raise_issue.assert_called_once_with(coord.hass, coord.entry.entry_id)
+            clear_issue.assert_not_called()
+
+            coord.entry.data[CONF_LAN_TLS_FINGERPRINT] = "fe" * 32
+            snapshot = await coord._async_update_data()
+            assert snapshot["connected"]
+            assert "lan_error" not in snapshot
+            assert coord._api.connect_lan.await_args.kwargs["fingerprint"] == "fe" * 32
+            clear_issue.assert_called_once_with(coord.hass, coord.entry.entry_id)
+            await coord._stop_lan_listener()
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("rotation_succeeds", [True, False])

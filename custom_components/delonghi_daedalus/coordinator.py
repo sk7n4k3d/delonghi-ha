@@ -19,6 +19,7 @@ from .api import (
     DaedalusConnectionError,
     DaedalusLanConnection,
     DaedalusLanIdentityError,
+    DaedalusLanSerialMismatchError,
 )
 from .cloud import CloudTelemetryError, fetch_cloud_state, flatten_shadow
 from .const import (
@@ -76,6 +77,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lan_retry_delay = DEFAULT_UPDATE_INTERVAL_SECONDS
         self._lan_retry_for: tuple[str | None, ...] | None = None
         self._reauth_requested_for: tuple[str | None, ...] | None = None
+        self._lan_serial_mismatch: tuple[str | None, str | None, str] | None = None
         self._lock = asyncio.Lock()
         self._jwt_lock = asyncio.Lock()
         self._refresh_auth_failed_for: tuple[str | None, ...] | None = None
@@ -106,6 +108,10 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             host = self.entry.data.get(CONF_HOST)
             if self._lan is not None and self._lan.closed:
                 await self._stop_lan_listener()
+            lan_identity = (host, self.entry.data.get(CONF_LAN_TLS_FINGERPRINT), self.serial_number)
+            if self._lan_serial_mismatch == lan_identity:
+                return self._snapshot()
+            self._lan_serial_mismatch = None
             credentials = self._credentials()
             if self._lan_retry_for is not None and self._lan_retry_for != credentials:
                 self._reset_lan_backoff()
@@ -121,6 +127,8 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._defer_lan_retry()
                     self._request_reauth()
                 except DaedalusLanIdentityError as exc:
+                    if isinstance(exc, DaedalusLanSerialMismatchError):
+                        self._lan_serial_mismatch = lan_identity
                     self._lan_error = sanitize_text(exc, host=host)
                     async_raise_lan_issue(self.hass, self.entry.entry_id)
                 except (DaedalusAuthError, DaedalusConnectionError) as exc:
