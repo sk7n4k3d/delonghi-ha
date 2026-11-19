@@ -142,7 +142,7 @@ def test_lan_recovers_after_transient_gigya_failure(cloud_enabled):
         coord._api.connect_lan.side_effect = [DaedalusAuthError("expired"), DaedalusAuthError("expired"), connection]
         coord._api.refresh_jwt.side_effect = [DaedalusConnectionError("Gigya error 6005: Rate limited"), "fresh-jwt"]
         with patch("custom_components.delonghi_daedalus.coordinator.time") as clock:
-            clock.monotonic.return_value = 100
+            clock.monotonic.return_value = 100.9
             data = await coord._async_update_data()
             assert not data["connected"]
             assert "6005" in data["lan_error"]
@@ -150,7 +150,7 @@ def test_lan_recovers_after_transient_gigya_failure(cloud_enabled):
             coord._api.connect_lan.assert_awaited_once()
             coord._api.refresh_jwt.assert_awaited_once()
 
-            clock.monotonic.return_value = 130
+            clock.monotonic.return_value = 130.2
             data = await coord._async_update_data()
             assert data["connected"]
             assert "lan_error" not in data

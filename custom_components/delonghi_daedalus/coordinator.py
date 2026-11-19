@@ -151,7 +151,9 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A connection attempt can rotate the JWT before failing. Back off
         # for the new JWT as well until the next attempt or credential update.
         self._lan_retry_for = self._credentials()
-        self._lan_retry_at = time.monotonic() + self._lan_retry_delay
+        # Match Home Assistant's whole-second polling base so rounding the
+        # next poll down cannot defer a retry for another full poll interval.
+        self._lan_retry_at = int(time.monotonic()) + self._lan_retry_delay
         self._lan_retry_delay = min(self._lan_retry_delay * 2, _LAN_MAX_RETRY_SECONDS)
 
     def _reset_lan_backoff(self) -> None:
