@@ -282,11 +282,15 @@
     }
   },
   "options": {
+    "error": {
+      "warmup_storage_error": "Impossible d’enregistrer l’option de préchauffage. Vérifiez le stockage de Home Assistant et réessayez."
+    },
     "step": {
       "init": {
         "title": "Options De'Longhi Daedalus",
         "data": {
-          "cloud_telemetry": "Télémétrie cloud en lecture seule : récupère l'état live du cloud De'Longhi toutes les 2 minutes. N'envoie jamais de commande. Modifier cette option recharge l'intégration."
+          "cloud_telemetry": "Télémétrie cloud en lecture seule : récupère l'état live du cloud De'Longhi toutes les 2 minutes. N'envoie jamais de commande. Modifier cette option recharge l'intégration.",
+          "aromatic_warmup": "Activer le préchauffage pour la PrimaDonna Aromatic ECAM630.70 (UE) avec les micrologiciels de l’afficheur et de la carte mère 1.2.0 et du Wi-Fi 2.5.3. Au démarrage, la machine peut évacuer de l’eau chaude de rinçage."
         }
       }
     }

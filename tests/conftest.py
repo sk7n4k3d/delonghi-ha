@@ -20,6 +20,7 @@ _HA_MODULES = [
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.update_coordinator",
     "homeassistant.helpers.storage",
+    "homeassistant.helpers.service",
     "homeassistant.helpers.event",
     "homeassistant.components",
     "homeassistant.components.sensor",
