@@ -17,6 +17,16 @@ from .const import DOMAIN
 __all__ = ["DOMAIN", "async_setup", "async_setup_entry", "async_unload_entry", "async_remove_entry"]
 
 
+def _validate_config(config: dict) -> dict:
+    """Validate YAML through Home Assistant when it loads the integration."""
+    from homeassistant.helpers import config_validation as cv
+
+    return cv.config_entry_only_config_schema(DOMAIN)(config)
+
+
+CONFIG_SCHEMA = _validate_config
+
+
 async def async_setup(hass, config):
     from .warmup_action import register_warmup_action
 
