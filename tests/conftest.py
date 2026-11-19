@@ -44,6 +44,7 @@ for mod_name in _HA_MODULES:
 
 # Diagnostics needs the real redacter, not a MagicMock that returns another MagicMock.
 sys.modules["homeassistant.components.diagnostics"].async_redact_data = _real_redact
+sys.modules["homeassistant.const"].MAX_LENGTH_STATE_STATE = 255
 
 
 class _MockStore:
