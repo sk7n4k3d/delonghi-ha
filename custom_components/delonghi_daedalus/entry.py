@@ -13,7 +13,7 @@ from .redact import get_logger
 
 _LOGGER = get_logger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.BUTTON]
 
 # Canonical Gigya apiKey lengths extracted from the My Coffee Lounge APK
 # manifest (v1.2.2). A truncated value reproduces Gigya errorCode 400093 —

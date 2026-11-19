@@ -321,6 +321,11 @@
       "cloud_auto_turn_off_options": {
         "name": "Intervale pentru oprirea automată (min)"
       }
+    },
+    "button": {
+      "warm_up": {
+        "name": "Preîncălzire"
+      }
     }
   },
   "options": {
@@ -328,12 +333,14 @@
       "init": {
         "title": "Opțiuni De'Longhi Daedalus",
         "data": {
-          "cloud_telemetry": "Citește din cloud starea aparatului la fiecare două minute. Modificarea opțiunii reîncarcă integrarea."
+          "cloud_telemetry": "Citește din cloud starea aparatului la fiecare două minute. Modificarea opțiunii reîncarcă integrarea.",
+          "aromatic_warmup": "Permite preîncălzirea pentru PrimaDonna Aromatic ECAM630.70 (UE) cu firmware 1.2.0 pentru interfață și placa de bază și 2.5.3 pentru Wi-Fi. La pornire, aparatul poate evacua apă fierbinte de clătire."
         }
       }
     },
     "error": {
-      "lan_verification_required": "Verifică certificatul aparatului din meniul Reconfigurare înainte să dezactivezi telemetria cloud."
+      "lan_verification_required": "Verifică certificatul aparatului din meniul Reconfigurare înainte să dezactivezi telemetria cloud.",
+      "warmup_storage_error": "Opțiunea de preîncălzire nu a putut fi salvată. Verifică spațiul de stocare din Home Assistant și încearcă din nou."
     }
   },
   "issues": {

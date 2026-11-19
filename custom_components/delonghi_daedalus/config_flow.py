@@ -23,6 +23,8 @@ from .api import (
 )
 from .cloud import CloudTelemetryError, DirectoryMachine, fetch_reported_lan_ip, list_machines
 from .const import (
+    CONF_AROMATIC_WARMUP,
+    CONF_AROMATIC_WARMUP_PENDING,
     CONF_CLOUD_TELEMETRY,
     CONF_EMAIL,
     CONF_HOST,
@@ -44,6 +46,8 @@ from .lan_protocol import LanProtocolError, validate_lan_host
 from .lan_repairs import async_clear_lan_issue
 from .redact import get_logger, sanitize_text
 from .redact import mask_email as _mask_email
+from .warmup import WarmupError
+from .warmup_state import entry_lock, save_pending
 
 _LOGGER = get_logger(__name__)
 
@@ -131,25 +135,46 @@ class DaedalusOptionsFlow(config_entries.OptionsFlow):
         self._entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        data = self._entry.data
-        telemetry = bool(data.get(CONF_CLOUD_TELEMETRY))
         errors: dict[str, str] = {}
         if user_input is not None:
-            enabled = bool(user_input.get(CONF_CLOUD_TELEMETRY, telemetry))
-            if telemetry and not enabled and not data.get(CONF_LAN_TLS_FINGERPRINT):
-                errors[CONF_CLOUD_TELEMETRY] = "lan_verification_required"
-            else:
-                if enabled != telemetry:
-                    self.hass.config_entries.async_update_entry(
-                        self._entry, data={**data, CONF_CLOUD_TELEMETRY: enabled}
-                    )
+            async with entry_lock(self.hass, self._entry.entry_id):
+                data = self._entry.data
+                telemetry = bool(data.get(CONF_CLOUD_TELEMETRY))
+                warmup = bool(data.get(CONF_AROMATIC_WARMUP))
+                enabled = bool(user_input.get(CONF_CLOUD_TELEMETRY, telemetry))
+                new_warmup = bool(user_input.get(CONF_AROMATIC_WARMUP, warmup))
+                warmup_changed = data.get(CONF_POOL) == GIGYA_POOL_EU and new_warmup != warmup
+                if telemetry and not enabled and not data.get(CONF_LAN_TLS_FINGERPRINT):
+                    errors[CONF_CLOUD_TELEMETRY] = "lan_verification_required"
+                if not errors and warmup_changed and new_warmup:
+                    try:
+                        await save_pending(self.hass, self._entry.entry_id, False)
+                    except WarmupError:
+                        errors["base"] = "warmup_storage_error"
+                if not errors:
+                    # Include any session credentials rotated during the storage write.
+                    data = self._entry.data
+                    new_data = {**data}
+                    if enabled != telemetry:
+                        new_data[CONF_CLOUD_TELEMETRY] = enabled
+                    if warmup_changed and data.get(CONF_POOL) == GIGYA_POOL_EU:
+                        new_data[CONF_AROMATIC_WARMUP] = new_warmup
+                        if new_warmup:
+                            new_data.pop(CONF_AROMATIC_WARMUP_PENDING, None)
+                    if new_data != data:
+                        self.hass.config_entries.async_update_entry(self._entry, data=new_data)
+            if not errors:
+                if enabled != telemetry or warmup_changed:
                     await self.hass.config_entries.async_reload(self._entry.entry_id)
                 return self.async_create_entry(title="", data={})
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema({vol.Optional(CONF_CLOUD_TELEMETRY, default=telemetry): bool}),
-            errors=errors,
-        )
+
+        data = self._entry.data
+        telemetry = bool(data.get(CONF_CLOUD_TELEMETRY))
+        warmup = bool(data.get(CONF_AROMATIC_WARMUP))
+        settings = {vol.Optional(CONF_CLOUD_TELEMETRY, default=telemetry): bool}
+        if data.get(CONF_POOL) == GIGYA_POOL_EU:
+            settings[vol.Optional(CONF_AROMATIC_WARMUP, default=warmup)] = bool
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(settings), errors=errors)
 
 
 class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -397,17 +422,18 @@ class DaedalusConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 changes[CONF_MODEL] = machine.model
             if machine is not None and machine.thing_name:
                 changes[CONF_MACHINE_NAME] = machine.thing_name
-        if not self._host and not entry.data.get(CONF_CLOUD_TELEMETRY):
-            self._data[CONF_CLOUD_TELEMETRY] = False
-            self._host = entry.data.get(CONF_HOST, "")
-            return self._lan_form(errors={"base": "cloud_only_unavailable"})
-        if entry.data.get(CONF_JWT) != data.get(CONF_JWT):
-            changes.pop(CONF_JWT, None)
-        updated = {**entry.data, **changes}
-        title = entry.title
-        if title in (f"My Coffee Lounge ({serial})", "My Coffee Lounge"):
-            title = self._machine_title(updated.get(CONF_MODEL))
-        self.hass.config_entries.async_update_entry(entry, title=title, data=updated)
+        async with entry_lock(self.hass, entry.entry_id):
+            if not self._host and not entry.data.get(CONF_CLOUD_TELEMETRY):
+                self._data[CONF_CLOUD_TELEMETRY] = False
+                self._host = entry.data.get(CONF_HOST, "")
+                return self._lan_form(errors={"base": "cloud_only_unavailable"})
+            if entry.data.get(CONF_JWT) != data.get(CONF_JWT):
+                changes.pop(CONF_JWT, None)
+            updated = {**entry.data, **changes}
+            title = entry.title
+            if title in (f"My Coffee Lounge ({serial})", "My Coffee Lounge"):
+                title = self._machine_title(updated.get(CONF_MODEL))
+            self.hass.config_entries.async_update_entry(entry, title=title, data=updated)
         async_clear_lan_issue(self.hass, entry.entry_id)
         await self.hass.config_entries.async_reload(entry.entry_id)
         return self.async_abort(reason="reconfigure_successful")

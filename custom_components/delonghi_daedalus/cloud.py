@@ -25,10 +25,8 @@ EXPERIMENTAL and opt-in (``CONF_CLOUD_TELEMETRY``): the wire details were
 described from a single contributor's Eletta Ultra (My Coffee Lounge
 1.5.0, EU pool). Cloud failures are reported separately from the LAN path.
 
-The MQTT codec below is a deliberately minimal subset (CONNECT / SUBSCRIBE
-/ PUBLISH QoS0 / CONNACK / SUBACK) speaking both MQTT 3.1.1 and MQTT 5 —
-the only MQTT 5 addition is the empty Properties section the newer level
-requires. Enough for a shadow read, nothing else.
+The MQTT codec supports the control packets used by the telemetry reader
+and the MQTT 5 publish properties used by the separate warm-up action.
 """
 
 from __future__ import annotations
@@ -65,8 +63,8 @@ _PUBLISH = 3
 _SUBSCRIBE = 8
 _SUBACK = 9
 
-# MQTT 5 inserts a Properties section where 3.1.1 has nothing; this client
-# never sets a property, so every one of them is the single zero byte.
+# MQTT 5 inserts a Properties section where 3.1.1 has nothing. The empty
+# section is encoded as a single zero byte.
 _MQTT5_NO_PROPERTIES = b"\x00"
 
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
@@ -357,13 +355,29 @@ def mqtt_subscribe_packet(packet_id: int, topics: list[str], qos: int = 0, *, pr
     return bytes([_SUBSCRIBE << 4 | 0x02]) + _encode_remaining_length(len(body)) + body
 
 
-def mqtt_publish_packet(topic: str, payload: str, *, protocol_version: int = 4) -> bytes:
-    """QoS-0 PUBLISH (no packet identifier in any level; MQTT 5 adds empty properties)."""
+def mqtt_publish_packet(
+    topic: str,
+    payload: str,
+    *,
+    protocol_version: int = 4,
+    packet_id: int | None = None,
+    expiry_seconds: int | None = None,
+) -> bytes:
+    """Non-retained PUBLISH, using QoS 1 when a packet identifier is supplied."""
+    if expiry_seconds is not None and protocol_version < 5:
+        raise ValueError("MQTT PUBLISH expiry requires MQTT 5")
     body = _encode_mqtt_string(topic)
+    if packet_id is not None:
+        if not 1 <= packet_id <= 65535:
+            raise ValueError("invalid MQTT packet identifier")
+        body += packet_id.to_bytes(2, "big")
     if protocol_version >= 5:
-        body += _MQTT5_NO_PROPERTIES
+        # Five property bytes: the Message Expiry Interval identifier followed
+        # by the four-byte unsigned interval in seconds.
+        body += _MQTT5_NO_PROPERTIES if expiry_seconds is None else b"\x05\x02" + expiry_seconds.to_bytes(4, "big")
     body += payload.encode("utf-8")
-    return bytes([_PUBLISH << 4]) + _encode_remaining_length(len(body)) + body
+    flags = 0x02 if packet_id is not None else 0
+    return bytes([_PUBLISH << 4 | flags]) + _encode_remaining_length(len(body)) + body
 
 
 def _skip_properties(payload: bytes, pos: int) -> int:

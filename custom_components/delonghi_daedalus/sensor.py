@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MAX_LENGTH_STATE_STATE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -96,7 +99,8 @@ class DaedalusCloudSensor(DaedalusCloudEntity, SensorEntity):
     the v1.8.0 raw ``Cloud <key>`` fallback. Values are raw until each code
     is mapped for real — a bool becomes a "true"/"false" string because
     native_value only accepts str/num (mapped bools render as binary_sensors
-    instead). The shadow key is exposed as an attribute so dashboards
+    instead). Long language lists use a count as the state and keep the list
+    as an attribute. The shadow key is exposed as an attribute so dashboards
     stay stable even if the raw value shape changes later.
     """
 
@@ -110,6 +114,7 @@ class DaedalusCloudSensor(DaedalusCloudEntity, SensorEntity):
         super().__init__(coordinator, source, key)
         if meta is None:
             meta = lookup_cloud_key(key)
+        self._is_languages = meta is not None and meta.key == "languages"
         if meta is not None:
             self._attr_translation_key = f"cloud_{meta.key}"
         else:
@@ -119,11 +124,38 @@ class DaedalusCloudSensor(DaedalusCloudEntity, SensorEntity):
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
             self._attr_entity_registry_enabled_default = False
 
+    def _language_list(self, value: str) -> list[str] | None:
+        """Decode the known Languages field that flatten_shadow stores as JSON."""
+        if not self._is_languages:
+            return None
+        try:
+            languages = json.loads(value)
+        except (ValueError, RecursionError):
+            return None
+        if isinstance(languages, list) and all(isinstance(language, str) for language in languages):
+            return languages
+        return None
+
     @property
     def native_value(self) -> str | int | float | None:
         value = self._cloud_value
         if isinstance(value, bool):
             return "true" if value else "false"
+        if isinstance(value, str) and len(value) > MAX_LENGTH_STATE_STATE:
+            languages = self._language_list(value)
+            return len(languages) if languages is not None else None
         if isinstance(value, (int, float, str)):
             return value
         return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        attrs = super().extra_state_attributes
+        value = self._cloud_value
+        if isinstance(value, str) and len(value) > MAX_LENGTH_STATE_STATE:
+            languages = self._language_list(value)
+            if languages is not None:
+                attrs["languages"] = languages
+            else:
+                attrs["value_length"] = len(value)
+        return attrs

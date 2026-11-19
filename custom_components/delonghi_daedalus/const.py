@@ -68,6 +68,8 @@ CONF_SESSION_SECRET: Final = "session_secret"  # noqa: S105
 CONF_LAN_AUTH_MESSAGE: Final = "lan_auth_message"
 # Opt-in read-only cloud telemetry (AWS IoT shadow over MQTT/WSS).
 CONF_CLOUD_TELEMETRY: Final = "cloud_telemetry"
+CONF_AROMATIC_WARMUP: Final = "aromatic_warmup"
+CONF_AROMATIC_WARMUP_PENDING: Final = "aromatic_warmup_pending"
 
 DEFAULT_UPDATE_INTERVAL_SECONDS: Final = 30
 # Cloud shadows change slowly and every fetch is a full MQTT session;

@@ -321,19 +321,25 @@
       "cloud_auto_turn_off_options": {
         "name": "Auto turn-off times (min)"
       }
+    },
+    "button": {
+      "warm_up": {
+        "name": "Warm up"
+      }
     }
   },
   "options": {
+    "error": {
+      "lan_verification_required": "Verify the machine certificate in Reconfigure before disabling cloud telemetry."
+    },
     "step": {
       "init": {
         "title": "De'Longhi Daedalus options",
         "data": {
-          "cloud_telemetry": "Read-only cloud telemetry: pull live state from the De'Longhi cloud every 2 minutes. Never sends commands. Changing this reloads the integration."
+          "cloud_telemetry": "Read-only cloud telemetry: pull live state from the De'Longhi cloud every 2 minutes. Never sends commands. Changing this reloads the integration.",
+          "aromatic_warmup": "Enable Warm up for the EU PrimaDonna Aromatic ECAM630.70 with UI and mainboard 1.2.0 and Wi-Fi 2.5.3. Startup may dispense hot rinse water."
         }
       }
-    },
-    "error": {
-      "lan_verification_required": "Verify the machine certificate in Reconfigure before disabling cloud telemetry."
     }
   },
   "issues": {

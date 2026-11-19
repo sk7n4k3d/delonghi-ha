@@ -22,6 +22,7 @@ from custom_components.delonghi_daedalus.config_flow import (
     _probe_pools,
 )
 from custom_components.delonghi_daedalus.const import (
+    CONF_AROMATIC_WARMUP,
     CONF_CLOUD_TELEMETRY,
     CONF_EMAIL,
     CONF_HOST,
@@ -283,6 +284,41 @@ def test_reconfigure_serial_mismatch_rejects_candidate_without_writing(setup_flo
     flow.hass.config_entries.async_update_entry.assert_not_called()
     flow.hass.config_entries.async_reload.assert_not_awaited()
     assert entry.data == original_data
+
+
+def test_warmup_option_and_cloud_only_reconfigure_preserve_a_transport(setup_flow, monkeypatch):
+    flow, _, _, _ = setup_flow
+    entry = _reconfigure_entry(flow, pin=_PIN)
+    entry.data.update({CONF_CLOUD_TELEMETRY: True, CONF_POOL: GIGYA_POOL_EU})
+    flow.hass.config_entries.async_update_entry.side_effect = lambda entry, *, data, **_: setattr(entry, "data", data)
+    options = config_flow.DaedalusOptionsFlow(entry)
+    options.hass = flow.hass
+
+    async def run():
+        saving = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def save_pending(*_args):
+            saving.set()
+            await finish.wait()
+
+        monkeypatch.setattr(config_flow, "save_pending", save_pending)
+        await flow.async_step_reconfigure()
+        disable_cloud = asyncio.create_task(
+            options.async_step_init({CONF_CLOUD_TELEMETRY: False, CONF_AROMATIC_WARMUP: True})
+        )
+        await saving.wait()
+        cloud_only = asyncio.create_task(flow.async_step_lan({"cloud_only": True}))
+        await asyncio.sleep(0)
+        assert not cloud_only.done()
+        finish.set()
+        assert (await disable_cloud)["type"] == "create_entry"
+        assert (await cloud_only)["errors"]["base"] == "cloud_only_unavailable"
+
+    asyncio.run(run())
+    assert entry.data[CONF_CLOUD_TELEMETRY] is False
+    assert entry.data[CONF_AROMATIC_WARMUP] is True
+    assert entry.data[CONF_LAN_TLS_FINGERPRINT] == _PIN
 
 
 @pytest.mark.parametrize(
@@ -643,6 +679,7 @@ def _make_entry(telemetry: bool) -> MagicMock:
 def _make_options_flow(entry: MagicMock) -> DaedalusOptionsFlow:
     flow = DaedalusOptionsFlow(entry)
     flow.hass = MagicMock()
+    flow.hass.data = {}
     flow.hass.config_entries.async_reload = AsyncMock()
     return flow
 

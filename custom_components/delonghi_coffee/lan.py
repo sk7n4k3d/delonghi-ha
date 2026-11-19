@@ -580,8 +580,7 @@ class DeLonghiLanServer:
             )
             if exchange.get("sec"):
                 _LAN_LOGGER.warning(
-                    "handshake: peer=%s requests secure setup (sec=%r) — "
-                    "unsupported by this integration",
+                    "handshake: peer=%s requests secure setup (sec=%r) — unsupported by this integration",
                     peer,
                     exchange.get("sec"),
                 )
@@ -857,9 +856,7 @@ async def register_with_device(
             ) as resp,
         ):
             text = (await resp.text())[:200]
-            _LAN_LOGGER.debug(
-                "local_reg %s %s -> HTTP %s body=%r", method.upper(), url, resp.status, text
-            )
+            _LAN_LOGGER.debug("local_reg %s %s -> HTTP %s body=%r", method.upper(), url, resp.status, text)
             if resp.status >= 400:
                 raise LanError(f"local_reg HTTP {resp.status}: {text!r}")
     except LanError:
