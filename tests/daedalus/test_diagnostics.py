@@ -393,6 +393,30 @@ def test_cloud_connected_and_last_message_when_shadows_arrive() -> None:
     assert cloud["cloud_connected"] is True
     assert cloud["last_cloud_message"] == "2026-11-18T02:15:33+00:00"
     assert cloud["cloud_error"] is None
+    assert cloud["cloud_status_error"] is None
+
+
+def test_cloud_status_error_is_scrubbed_even_on_partial_success() -> None:
+    cloud = _cloud_payload(
+        _cloud_coordinator(
+            data={"cloud": {"capabilities_flat": {"version": "1.2.0"}, "status_error": _RAW_CLOUD_ERROR}}
+        )
+    )
+    assert cloud["cloud_connected"] is True
+    assert cloud["cloud_error"] is None
+    assert "MQTT WS connect failed" in cloud["cloud_status_error"]["message"]
+    blob = json.dumps(cloud)
+    for secret in _SECRETS:
+        assert secret not in blob
+
+
+def test_cloud_status_unavailable_has_a_diagnostic_category() -> None:
+    reason = "Device directory reports the machine offline"
+    cloud = _cloud_payload(
+        _cloud_coordinator(data={"cloud": {"capabilities_flat": {"version": "1.2.0"}, "status_error": reason}})
+    )
+    assert cloud["cloud_status_error"]["category"] == "status_unavailable"
+    assert cloud["cloud_status_error"]["message"] == reason
 
 
 def test_cloud_connected_false_when_an_error_is_pending() -> None:
@@ -458,6 +482,7 @@ def test_cloud_block_survives_a_missing_coordinator() -> None:
             "$aws/things/********7890/shadow/name/MachineCapabilities/get/rejected",
         ],
         "cloud_error": None,
+        "cloud_status_error": None,
     }
 
 

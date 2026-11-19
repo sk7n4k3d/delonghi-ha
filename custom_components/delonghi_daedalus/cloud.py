@@ -23,8 +23,7 @@ and are kept as fallbacks only.
 
 EXPERIMENTAL and opt-in (``CONF_CLOUD_TELEMETRY``): the wire details were
 described from a single contributor's Eletta Ultra (My Coffee Lounge
-1.5.0, EU pool). Every failure here degrades to a ``cloud_error`` string
-in the coordinator data — the LAN path is never affected.
+1.5.0, EU pool). Cloud failures are reported separately from the LAN path.
 
 The MQTT codec below is a deliberately minimal subset (CONNECT / SUBSCRIBE
 / PUBLISH QoS0 / CONNACK / SUBACK) speaking both MQTT 3.1.1 and MQTT 5 —
@@ -51,6 +50,7 @@ from .const import (
     AWS_REST_BASE_URL_LEGACY_PROD,
     AWS_REST_BASE_URL_PROD,
     AWS_REST_SOURCE_HEADER,
+    CLOUD_POLL_SECONDS,
 )
 from .lan_protocol import LanProtocolError, validate_lan_host
 from .redact import get_logger, mask_serial, sanitize_text
@@ -78,6 +78,15 @@ class CloudTelemetryError(RuntimeError):
 
 class CloudMachineNotFound(CloudTelemetryError):
     """The directory did not confirm one machine for this serial."""
+
+
+@dataclass(frozen=True)
+class CloudState:
+    """Shadows returned for this fetch and a reason for withholding status."""
+
+    shadows: dict[str, dict[str, Any]]
+    machine_name: str
+    status_error: str | None = None
 
 
 # --------------------------------------------------------------------- REST --
@@ -186,6 +195,14 @@ def extract_machine_name(payload: Any, serial: str) -> str:
     return name
 
 
+def _directory_presence(device: dict[str, Any]) -> str | None:
+    """Normalize presence, treating a malformed field as unknown."""
+    presence = device.get("status")
+    if presence is None:
+        return None
+    return presence.strip().upper() if isinstance(presence, str) else ""
+
+
 def _extract_machine_record(payload: Any, serial: str) -> tuple[dict[str, Any], str]:
     target = serial.strip().lower()
     match = None
@@ -203,7 +220,8 @@ def _extract_machine_record(payload: Any, serial: str) -> tuple[dict[str, Any], 
                 if isinstance(value, str) and value:
                     if match is not None and match[1] != value:
                         raise CloudMachineNotFound(f"serial {mask_serial(serial)} is ambiguous in /devices response")
-                    match = match or (device, value)
+                    if match is None or _directory_presence(device) == "OFFLINE":
+                        match = (device, value)
                     break
     if match is None:
         raise CloudMachineNotFound(f"serial {mask_serial(serial)} not found in /devices response")
@@ -868,13 +886,10 @@ async def fetch_cloud_state(
     jwt: str,
     machine_name: str | None,
     check_device_status: bool = False,
-) -> tuple[dict[str, dict[str, Any]], str]:
-    """Read shadows, requiring current evidence before returning machine status.
-
-    Returns (shadow documents by name, machine_name actually used).
-    Raises CloudTelemetryError on any failure.
-    """
+) -> CloudState:
+    """Read shadows and determine whether to publish the last reported status."""
     thing = machine_name
+    directory_matched = False
     presence = None
     if check_device_status or not thing:
         try:
@@ -886,19 +901,34 @@ async def fetch_cloud_state(
                 raise
         else:
             thing = name
-            presence = device.get("status")
+            directory_matched = True
+            presence = _directory_presence(device)
     if not _THING_NAME_RE.fullmatch(str(thing)):
         # Never echo the rejected value: it is the hostile input itself.
         raise CloudTelemetryError(f"cloud thing name rejected by shape check ({len(str(thing))} chars)")
     client = ShadowClient(session, thing_name=thing, jwt=jwt)
     docs = await client.fetch()
-    if (
-        check_device_status
-        and presence != "ONLINE"
-        and (presence == "OFFLINE" or not _recent_reported_status(docs.get("MachineStatus")))
-    ):
-        docs.pop("MachineStatus", None)
-    return docs, thing
+    status_error = None
+    if check_device_status:
+        if presence == "OFFLINE":
+            status_error = "Device directory reports the machine offline"
+        elif "MachineStatus" not in docs:
+            status_error = "MachineStatus shadow was not returned"
+        # A matching directory record with no presence field is normal. Its
+        # shadow is the last reported state, which can stay unchanged for hours.
+        # With only a stored thing name, require a recent Status report. An
+        # old capabilities shadow can still be read after a machine disconnects.
+        elif not (directory_matched and presence in (None, "ONLINE")) and not _recent_reported_status(
+            docs["MachineStatus"]
+        ):
+            status_error = (
+                "Device directory returned unknown presence and MachineStatus has no recent Status timestamp"
+                if directory_matched
+                else "Device directory lookup failed and MachineStatus has no recent Status timestamp"
+            )
+    if status_error is not None:
+        docs = {name: doc for name, doc in docs.items() if name != "MachineStatus"}
+    return CloudState(docs, thing, status_error)
 
 
 async def fetch_reported_lan_ip(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> str | None:
@@ -921,10 +951,11 @@ async def fetch_reported_lan_ip(session: aiohttp.ClientSession, *, thing_name: s
 
 
 def _recent_reported_status(document: Any) -> bool:
-    """Check when the device reported Status, using the per-field AWS timestamp."""
+    """Allow one polling interval of age or clock skew on the Status change."""
     for key in ("metadata", "reported", "Status", "timestamp"):
         if not isinstance(document, dict):
             return False
         document = document.get(key)
-    now = int(time.time())
-    return type(document) is int and now - 30 <= document <= now
+    now = time.time()
+    # The bounded comparison also excludes NaN and infinities.
+    return type(document) in (int, float) and now - CLOUD_POLL_SECONDS <= document <= now + CLOUD_POLL_SECONDS

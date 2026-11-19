@@ -120,6 +120,7 @@ _CLOUD_ERROR_CATEGORIES: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     ("parse", re.compile(r"(?i)unparsable|not json|neither a list|malformed|truncated|buffer overflow")),
+    ("status_unavailable", re.compile(r"^Device directory (reports|returned|lookup failed)|^MachineStatus shadow")),
     ("device_lookup", re.compile(r"(?i)/devices|no rest device directory|thing name rejected")),
     ("timeout", re.compile(r"(?i)timed out|timeout")),
     ("unexpected", re.compile(r"(?i)^unexpected cloud error")),
@@ -245,6 +246,9 @@ def _cloud_diagnostics(
         "last_cloud_message": _to_iso(cloud.get("fetched_at")),
         "cloud_topics_subscribed": _cloud_topics(entry_data, cloud),
         "cloud_error": error,
+        "cloud_status_error": _sanitize_cloud_error(
+            cloud.get("status_error"), host=entry_data.get(CONF_HOST), private_values=private_values
+        ),
     }
 
 

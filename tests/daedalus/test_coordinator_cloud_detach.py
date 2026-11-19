@@ -17,7 +17,7 @@ import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from custom_components.delonghi_daedalus.api import DaedalusAuthError, DaedalusConnectionError, DaedalusLanIdentityError
-from custom_components.delonghi_daedalus.cloud import CloudTelemetryError
+from custom_components.delonghi_daedalus.cloud import CloudState, CloudTelemetryError
 from custom_components.delonghi_daedalus.const import (
     CLOUD_POLL_SECONDS,
     CONF_CLOUD_TELEMETRY,
@@ -60,12 +60,13 @@ def _make_coordinator() -> DaedalusCoordinator:
 
 
 _DOCS = {"MachineStatus": {"state": {"reported": {"a": 1}}}, "MachineCapabilities": {}}
+_CLOUD_STATE = CloudState(_DOCS, "thing-1")
 
 
 def _slow_fetch(delay: float):
     async def _fetch(*_args, **_kwargs):
         await asyncio.sleep(delay)
-        return _DOCS, "thing-1"
+        return _CLOUD_STATE
 
     return _fetch
 
@@ -101,7 +102,7 @@ def test_one_cloud_hop_at_a_time():
         async def _fetch(*_args, **_kwargs):
             calls["n"] += 1
             await asyncio.sleep(5.0)
-            return _DOCS, "thing-1"
+            return _CLOUD_STATE
 
         with patch(_PATCH, side_effect=_fetch):
             await coord._async_update_data()
@@ -136,7 +137,7 @@ def test_failed_fetch_records_error_without_refresh_storm():
 
     async def _go():
         coord = _make_coordinator()
-        with patch(_PATCH, side_effect=[(_DOCS, "thing-1"), CloudTelemetryError("broker black-holed")]) as fetch:
+        with patch(_PATCH, side_effect=[_CLOUD_STATE, CloudTelemetryError("broker black-holed")]) as fetch:
             await coord._async_update_data()
             await asyncio.wait_for(coord._cloud_task, timeout=5)
             assert coord.data["cloud"]["status_flat"] == {"a": 1}
@@ -183,7 +184,7 @@ def test_cloud_hop_timeout_sets_descriptive_error():
 
         async def _hang(*_args, **_kwargs):
             await asyncio.sleep(30)
-            return _DOCS, "thing-1"
+            return _CLOUD_STATE
 
         with (
             patch(_PATCH, side_effect=_hang),
@@ -206,7 +207,7 @@ def test_cloud_is_available_during_missing_wifi_or_lan_failure(host):
         coord._lan = None
         coord._api.connect_lan = AsyncMock(side_effect=DaedalusConnectionError("LAN unavailable"))
 
-        with patch(_PATCH, return_value=(_DOCS, "thing-1")):
+        with patch(_PATCH, return_value=_CLOUD_STATE):
             coord.data = await coord._async_update_data()
             await coord._cloud_task
 
@@ -218,15 +219,17 @@ def test_cloud_is_available_during_missing_wifi_or_lan_failure(host):
     asyncio.run(_go())
 
 
-def test_partial_shadow_replaces_the_missing_slice():
+@pytest.mark.parametrize("status_error", [None, "Device directory reports the machine offline"])
+def test_partial_shadow_replaces_the_missing_slice(status_error):
     async def _go():
         coord = _make_coordinator()
         docs = {**_DOCS, "MachineCapabilities": {"state": {"reported": {"firmware": "1.2.0"}}}}
         partial = {
-            "MachineStatus": {"state": {"desired": {"Status": "Idle"}}},
             "MachineCapabilities": {"state": {"reported": {"firmware": "1.3.0"}}},
         }
-        with patch(_PATCH, side_effect=[(docs, "thing-1"), (partial, "thing-1")]):
+        if status_error is None:
+            partial["MachineStatus"] = {"state": {"desired": {"Status": "Idle"}}}
+        with patch(_PATCH, side_effect=[CloudState(docs, "thing-1"), CloudState(partial, "thing-1", status_error)]):
             await coord._async_update_data()
             await coord._cloud_task
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
@@ -235,7 +238,23 @@ def test_partial_shadow_replaces_the_missing_slice():
 
         assert "status_flat" not in coord.data["cloud"]
         assert coord.data["cloud"]["capabilities_flat"] == {"firmware": "1.3.0"}
+        assert coord.data["cloud"]["status_error"] == (
+            status_error or "MachineStatus shadow has no usable reported data"
+        )
+        assert "cloud_error" not in coord.data
         assert coord.data["connected"]
+
+    asyncio.run(_go())
+
+
+def test_cloud_failure_preserves_status_error_when_no_capabilities_are_available():
+    async def _go():
+        coord = _make_coordinator()
+        status_error = "Device directory reports the machine offline"
+        with patch(_PATCH, return_value=CloudState({}, "thing-1", status_error)):
+            await coord._async_cloud_fetch()
+        assert coord.data["cloud_error"] == status_error
+        assert "cloud" not in coord.data
 
     asyncio.run(_go())
 
@@ -246,7 +265,7 @@ def test_cloud_works_when_local_reauth_is_needed():
         coord._lan = None
         coord._ensure_connected = AsyncMock(side_effect=ConfigEntryAuthFailed("LAN rejected credentials"))
 
-        with patch(_PATCH, return_value=(_DOCS, "thing-1")):
+        with patch(_PATCH, return_value=_CLOUD_STATE):
             coord.data = await coord._async_update_data()
             await coord._cloud_task
             await coord._async_update_data()
@@ -307,7 +326,7 @@ def test_cloud_can_renew_an_expired_jwt_independently(rotation_succeeds):
             entry.data = data
 
         coord.hass.config_entries.async_update_entry.side_effect = update_entry
-        with patch(_PATCH, return_value=(_DOCS, "thing-1")) as fetch:
+        with patch(_PATCH, return_value=_CLOUD_STATE) as fetch:
             coord.data = await coord._async_update_data()
             await coord._cloud_task
 
@@ -340,7 +359,7 @@ def test_cloud_waits_for_new_credentials_after_permanent_denial(session_token):
             entry.data = data
 
         coord.hass.config_entries.async_update_entry.side_effect = update_entry
-        with patch(_PATCH, return_value=(_DOCS, "thing-1")) as fetch:
+        with patch(_PATCH, return_value=_CLOUD_STATE) as fetch:
             coord.data = await coord._async_update_data()
             failed_task = coord._cloud_task
             await failed_task
@@ -372,7 +391,7 @@ def test_cloud_expiry_preserves_healthy_lan():
     async def _go():
         coord = _make_coordinator()
         with (
-            patch(_PATCH, return_value=(_DOCS, "thing-1")),
+            patch(_PATCH, return_value=_CLOUD_STATE),
             patch("custom_components.delonghi_daedalus.coordinator._CLOUD_MAX_AGE", 0.02),
         ):
             await coord._async_update_data()

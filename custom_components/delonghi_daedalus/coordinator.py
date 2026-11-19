@@ -296,16 +296,17 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 expires_at = jwt_expiry(jwt)
                 if expires_at is not None and expires_at <= time.time():
                     jwt = await self._rotate_jwt(jwt)
-                docs, thing = await fetch_cloud_state(
+                cloud_state = await fetch_cloud_state(
                     self._api.http_session,
                     serial=self.serial_number,
                     jwt=jwt,
                     machine_name=stored_name if stored_name and stored_name != self.serial_number else None,
                     check_device_status=True,
                 )
+            thing = cloud_state.machine_name
             cloud_data = {"machine_name": thing, "fetched_at": time.time()}
             for name, key in (("MachineStatus", "status_flat"), ("MachineCapabilities", "capabilities_flat")):
-                document = docs.get(name)
+                document = cloud_state.shadows.get(name)
                 state = document.get("state") if isinstance(document, dict) else None
                 if isinstance(state, dict) and isinstance(state.get("reported"), dict):
                     try:
@@ -315,8 +316,12 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     else:
                         if flat:
                             cloud_data[key] = flat
-            if "status_flat" not in cloud_data and "capabilities_flat" not in cloud_data:
-                raise CloudTelemetryError("No usable cloud status or capabilities shadow")
+            if "status_flat" not in cloud_data:
+                status_error = cloud_state.status_error or "MachineStatus shadow has no usable reported data"
+                if "capabilities_flat" not in cloud_data:
+                    raise CloudTelemetryError(status_error)
+                cloud_data["status_error"] = status_error
+                _LOGGER.debug("Daedalus cloud status unavailable: %s", status_error)
         except ConfigEntryAuthFailed as exc:
             self._cloud_auth_failed_for = credentials
             self._request_reauth()
