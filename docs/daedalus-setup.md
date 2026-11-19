@@ -22,6 +22,10 @@ Existing LAN configurations require certificate approval after upgrade. Open the
 
 ### Interpreting availability
 
-The connectivity entity describes the authenticated local connection. Cloud telemetry uses the owner account and polls the reported state independently. The machine can remain connected to the cloud when Home Assistant loses its LAN route. A cloud outage can make status and alarm entities unavailable while local connectivity remains available. An unavailable operating state should be handled explicitly in automations.
+The connectivity entity describes the authenticated local connection. Cloud telemetry uses the owner account and polls the reported state independently. The machine can remain connected to the cloud when Home Assistant loses its LAN route. A cloud outage can make status and alarm entities unavailable while local connectivity remains available.
+
+When the device directory confirms the machine and omits its presence, Home Assistant shows the last reported cloud state. That state can stay the same across many polls while the machine is idle. Establish current connectivity and readiness separately before controlling the machine. When the directory reports the machine offline, Home Assistant withholds cloud status. If the directory is unavailable, Home Assistant uses the cloud status only when the timestamp for the `Status` field in `MachineStatus` is within 120 seconds of its clock in either direction.
+
+Capabilities can still appear when cloud status is unavailable. Download the integration’s diagnostics and check `cloud_status_error` for the reason. If neither status nor capabilities are available, check `cloud_error`. Handle an unavailable operating state explicitly in automations.
 
 Read-only monitoring has been exercised on the PrimaDonna Aromatic ECAM63070. The precise set of entities depends on the fields reported by each machine. For support, download the integration’s diagnostics from Home Assistant. Keep account details, certificate fingerprints and appliance labels out of public issue attachments.
