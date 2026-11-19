@@ -147,6 +147,12 @@ PROFILE_TRACK_GRACE_SECONDS: Final = 90.0
 # session for long (issue #23 candidate root cause).
 LAN_SESSION_STALE_SECONDS: Final = 120.0
 
+# How often the LAN session job nudges the module: PUT keep-alive while a
+# session is alive, POST re-open while it is not. The official Coffee Link
+# app re-PUTs every ~10 s; 20-25 s held a live session 15 min in field
+# tests (lodzen/cremalink#4). Issue #50.
+LAN_KEEPALIVE_SECONDS: Final = 20
+
 # 401-triggered re-authentication dedup window (F-API-04). Several threads
 # can hit 401 on the same stale token at nearly the same time; without a
 # lock + dedup window, each one would call authenticate() concurrently —

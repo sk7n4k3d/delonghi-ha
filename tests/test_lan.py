@@ -515,7 +515,9 @@ class TestCoordinatorLanStartup:
             mock_server_cls.assert_called_once()
             mock_server.start.assert_awaited_once()
             assert coord._lan_server is mock_server
-            assert coord._lan_active is True
+            # Issue #50: a bare 2xx on local_reg must NOT mark LAN active —
+            # only a real key exchange does. The mock server has no session.
+            assert coord._lan_active is False
             assert coord._lan_start_attempted is True
 
     def test_lan_does_not_start_when_disabled(self) -> None:
@@ -723,9 +725,12 @@ class TestCoordinatorStopLan:
 class _MockRequest:
     """Minimal stand-in for aiohttp.web.Request."""
 
-    def __init__(self, body: dict | None = None, remote: str = "192.168.1.42") -> None:
+    def __init__(
+        self, body: dict | None = None, remote: str = "192.168.1.42", method: str = "POST"
+    ) -> None:
         self._body = body or {}
         self.remote = remote
+        self.method = method
 
     async def json(self):
         return self._body
@@ -1020,10 +1025,14 @@ def test_handshake_rejects_rollback_after_accept() -> None:
 
 
 @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
-def test_handshake_strips_base64_padding_from_random_1() -> None:
-    """A peer that leaves `=` padding in random_1 must still derive the same
-    session as one that strips it — otherwise handshake crypto silently
-    disagrees and every subsequent message fails to decrypt.
+def test_handshake_passes_random_1_verbatim() -> None:
+    """random_1 must be used EXACTLY as the device sent it (issue #50 audit).
+
+    The reference servers (cremalink, ECAMpy) never strip base64 padding on
+    the inbound value: the device derives its session material from the
+    string it sent, so canonicalizing on our side desyncs the KDF whenever
+    the firmware keeps the padding. Verbatim pass-through is the compatible
+    behaviour for both padded and unpadded senders.
     """
     import time as _time
 
@@ -1048,22 +1057,20 @@ def test_handshake_strips_base64_padding_from_random_1() -> None:
         resp = await server._handle_handshake(_MockRequest(body))
         assert resp.status == 202
 
-        # Server's stored session must have been derived from the canonical
-        # (stripped) form. Rederive with "AAAABBBB" and confirm match.
-        # (We can only peek at fingerprints, but equality of derived keys
-        # implies the server canonicalized consistently.)
+        # Server's stored session must have been derived from the VERBATIM
+        # value ("AAAABBBB=="), not a stripped form.
         payload = json.loads(resp.body.decode("utf-8"))
         random_2_from_resp = payload["random_2"]
         time_2 = payload["time_2"]
-        canonical = derive_session(
+        verbatim = derive_session(
             "0123456789abcdef0123456789abcdef",
-            "AAAABBBB",
+            "AAAABBBB==",
             random_2_from_resp,
             now,
             time_2,
         )
         assert server._session is not None
-        assert server._session.app_crypto_key == canonical.app_crypto_key
+        assert server._session.app_crypto_key == verbatim.app_crypto_key
 
     asyncio.run(run())
 

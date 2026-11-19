@@ -263,22 +263,28 @@ class TestPingConnected:
         assert result is True
         assert api._ping_supported is True
 
-    def test_ping_both_404_disables(self):
-        """Both formats 404 → disables future pings."""
+    def test_ping_all_404_backs_off_for_an_hour(self):
+        """All three property attempts 404 → time-boxed backoff, not a
+        permanent lock-out (issue #50: the Soul only answers to
+        `device_connected`, which the old code never even tried)."""
         api = self._make_api()
         api._session.post.side_effect = [
-            _mock_response(404),  # with app_id
-            _mock_response(404),  # without app_id
+            _mock_response(404),  # app_device_connected with app_id
+            _mock_response(404),  # app_device_connected bare
+            _mock_response(404),  # device_connected (Soul path)
         ]
 
         result = api.ping_connected("DSN")
         assert result is False
         assert api._ping_supported is False
+        # Backoff is time-boxed (~1 h), not terminal.
+        assert api._ping_retry_after > time.monotonic() + 3500
 
-    def test_ping_skipped_when_disabled(self):
-        """Ping skipped when previously disabled."""
+    def test_ping_skipped_during_backoff(self):
+        """Ping skipped while the backoff window is still open."""
         api = self._make_api()
         api._ping_supported = False
+        api._ping_retry_after = time.monotonic() + 3600
 
         result = api.ping_connected("DSN")
         assert result is False

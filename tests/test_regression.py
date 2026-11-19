@@ -246,10 +246,19 @@ class TestIssue3jostrasser:
 class TestPingConnectedCaching:
     """Ping behavior: cache when not supported."""
 
-    def test_ping_skipped_when_not_supported(self):
-        """After 404 on both formats, future pings are skipped."""
+    def test_ping_skipped_during_backoff_window(self):
+        """After a full 404 round, pings back off — but only for an hour.
+
+        Issue #50: the old behaviour locked `_ping_supported = False`
+        forever, which permanently deafened PrimaDonna Soul machines that
+        only expose `device_connected` (a property the old code never
+        tried). The lock-out must be time-boxed, not terminal.
+        """
+        import time as _time
+
         api = DeLonghiApi.__new__(DeLonghiApi)
         api._ping_supported = False
+        api._ping_retry_after = _time.monotonic() + 3600
         api._session = MagicMock()
         api._ayla_ads = "https://ads.test.com"
         api._ayla_token = "fake"
@@ -264,3 +273,31 @@ class TestPingConnectedCaching:
         result = api.ping_connected("DSN")
         assert result is False
         api._session.post.assert_not_called()
+
+    def test_ping_retries_after_backoff_window(self):
+        """Once the backoff expires, the Soul `device_connected` path is tried."""
+        api = DeLonghiApi.__new__(DeLonghiApi)
+        api._ping_supported = False
+        api._ping_retry_after = 0.0  # window elapsed
+        api._session = MagicMock()
+        api._ayla_ads = "https://ads.test.com"
+        api._ayla_token = "fake"
+        api._token_expires = 9999999999
+        api._ayla_refresh = None
+        api._ayla_app_id = "test"
+        api._ayla_app_secret = "test"
+        api._ayla_user = "https://user.test.com"
+        api._email = "test@test.com"
+        api._password = "pass"
+        api._rate_tracker = MagicMock()
+        # app_device_connected 404s both ways, device_connected accepts.
+        r404 = MagicMock(status_code=404)
+        r201 = MagicMock(status_code=201)
+        api._session.post.side_effect = [r404, r404, r201]
+        assert api.ping_connected("DSN") is True
+        assert api._ping_supported is True
+        # The third attempt targeted the Soul property with a bare timestamp.
+        third_call = api._session.post.call_args_list[2]
+        assert "device_connected" in third_call.args[0]
+        value = third_call.kwargs["json"]["datapoint"]["value"]
+        assert value.isdigit()

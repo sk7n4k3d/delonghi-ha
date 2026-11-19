@@ -287,6 +287,11 @@ class DeLonghiApi:
 
         # Cache whether ping_connected is supported (None = unknown, False = not supported)
         self._ping_supported: bool | None = None
+        # When all app-session property names 404ed, we stop hammering but
+        # retry later — property templates can be absent at boot, and a
+        # permanent lock-out hid the working `device_connected` path on
+        # PrimaDonna Soul for the whole lifetime of the config entry (#50).
+        self._ping_retry_after: float = 0.0
 
         # Guard flag used by the _retry decorator to prevent recursive
         # re-authentication when the auth endpoint itself returns 401.
@@ -987,51 +992,70 @@ class DeLonghiApi:
         )
 
     def ping_connected(self, dsn: str) -> bool:
-        """Send app_device_connected ping to force machine to push data updates.
+        """Announce an app session so the machine pushes fresh data.
 
-        Tries with app_id (newer models) then without (legacy models).
-        Skips entirely if previous attempts showed the property doesn't exist.
+        Two property families exist in the wild:
+
+        - ``app_device_connected`` (Eletta & co): base64 of a big-endian
+          unix timestamp, with or without the app signature appended.
+        - ``device_connected`` (PrimaDonna Soul / millcore, doc
+          ecam-lan-protocol §7.5): a **bare unix timestamp string**, no
+          base64, no signature.
+
+        A full 404 round disables further attempts for one hour instead of
+        forever: property templates can be missing right after boot, and
+        the old permanent lock-out is what made Soul machines deaf to
+        commands (issue #50).
         """
-        if self._ping_supported is False:
-            _LOGGER.debug("ping_connected: skipped (not supported on this model)")
+        if self._ping_supported is False and time.monotonic() < self._ping_retry_after:
+            _LOGGER.debug("ping_connected: skipped (no property accepted yet)")
             return False
 
         ts = struct.pack(">I", int(time.time()))
         headers = self._headers()
 
-        formats = ["with_app_id", "without_app_id"]
-        for i, b64 in enumerate(
-            (
-                base64.b64encode(ts + APP_SIGNATURE).decode(),
-                base64.b64encode(ts).decode(),
-            )
-        ):
-            _LOGGER.debug("ping_connected: trying %s format", formats[i])
+        attempts = [
+            ("app_device_connected/app_id", base64.b64encode(ts + APP_SIGNATURE).decode()),
+            ("app_device_connected/bare", base64.b64encode(ts).decode()),
+            ("device_connected/soul", str(int(time.time()))),
+        ]
+        for label, value in attempts:
+            prop = label.split("/")[0]
+            _LOGGER.debug("ping_connected: trying %s", label)
             resp = self._session.post(
-                f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/app_device_connected/datapoints.json",
-                json={"datapoint": {"value": b64}},
+                f"{self._ayla_ads}/apiv1/dsns/{dsn}/properties/{prop}/datapoints.json",
+                json={"datapoint": {"value": value}},
                 headers=headers,
                 timeout=REQUEST_TIMEOUT,
             )
             if resp.status_code == 201:
                 self._ping_supported = True
-                _LOGGER.debug("ping_connected: success (%s)", formats[i])
+                _LOGGER.debug("ping_connected: success (%s)", label)
                 return True
             if resp.status_code == 404:
-                _LOGGER.debug("ping_connected: %s returned 404, trying next", formats[i])
+                _LOGGER.debug("ping_connected: %s returned 404, trying next", label)
                 continue
             raise DeLonghiApiError(f"Ping failed: HTTP {resp.status_code}")
 
-        # Both formats returned 404 — property doesn't exist on this model
+        # No property family accepted a datapoint — back off, retry in 1 h.
         self._ping_supported = False
-        _LOGGER.info("ping_connected: not supported on this model, disabling future pings")
+        self._ping_retry_after = time.monotonic() + 3600
+        _LOGGER.info(
+            "ping_connected: neither app_device_connected nor device_connected "
+            "exists on this model; retrying in 1 h"
+        )
         return False
 
-    # Pre-built monitor command: 0x84 with params 0F 03 02 + CRC
+    # Pre-built monitor commands. 0x84 = "refresh app id" (accepted by many
+    # models); the opcode that actually forces a fresh monitor publish on
+    # the data_request/millcore family is 0x75 (doc §7.3, measured 1-2 s).
     _MONITOR_CMD = bytes.fromhex("0d07840f03025640")
+    _MONITOR_CMD_MILLCORE = bytes.fromhex("0d05750fda25")
 
     def request_monitor(self, dsn: str) -> bool:
-        """Send monitor command (0x84) to force machine to push fresh data."""
+        """Force the machine to publish a fresh monitor frame."""
+        if self._cmd_property == "data_request":
+            return self.send_command(dsn, self._MONITOR_CMD_MILLCORE)
         return self.send_command(dsn, self._MONITOR_CMD)
 
     def brew(self, dsn: str, recipe_ecam: bytes) -> bool:

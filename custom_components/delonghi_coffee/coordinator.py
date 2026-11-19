@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import time
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from time import monotonic
 from typing import Any
 
@@ -13,6 +14,7 @@ import requests
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError, DeLonghiUnsupportedError
@@ -22,6 +24,7 @@ from .const import (
     CONTENTSTACK_RETRY_MAX,
     DOMAIN,
     FULL_REFRESH_INTERVAL,
+    LAN_KEEPALIVE_SECONDS,
     LAN_SESSION_STALE_SECONDS,
     MONITOR_STALE_TIMEOUT,
     MQTT_KEEPALIVE_INTERVAL,
@@ -143,6 +146,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lan_server: DeLonghiLanServer | None = None
         self._lan_active: bool = False
         self._lan_start_attempted: bool = False
+        # LAN session state machine (issue #50): periodic keep-alive/re-open
+        # job, when the last POST was accepted, and a one-shot warning flag.
+        self._lan_session_unsub: Callable[[], None] | None = None
+        self._lan_open_pending_since: float = 0.0
+        self._lan_no_handshake_warned: bool = False
         self._lan_properties: dict[str, Any] = {}
         # Fast-poll window: when a brew button is pressed the cloud Ayla
         # 60s polling rate misses the transient Brewing / Pre-brewing /
@@ -767,22 +775,104 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LAN_LOGGER.exception("LAN server start failed, falling back to cloud")
             return
 
-        # Tell the device to push to our server
+        # Open the LAN session: POST (never PUT) triggers the module's key
+        # exchange; a periodic job then keep-alives (PUT) or re-opens (POST)
+        # as the session lives or dies (issue #50).
+        self._lan_open_pending_since = time.monotonic()
+        await self._lan_open_session()
+        hass = getattr(self, "hass", None)
+        if hass is not None and self._lan_session_unsub is None:
+            self._lan_session_unsub = async_track_time_interval(
+                hass, self._lan_session_tick, timedelta(seconds=LAN_KEEPALIVE_SECONDS)
+            )
+
+    async def _lan_open_session(self) -> None:
+        """POST local_reg to open (or reopen) the module's LAN session."""
+        server = self._lan_server
+        lan = self._lan_config or {}
+        lan_ip = lan.get("lan_ip")
+        if server is None or not lan_ip:
+            return
         try:
             import aiohttp
 
             await register_with_device(
                 aiohttp.ClientSession,
                 device_ip=lan_ip,
-                advertised_ip=local_ip,
+                advertised_ip=server.advertised_ip,
                 advertised_port=server.port,
+                method="POST",
+                dsn=self.dsn,
+                notify=server.has_pending,
             )
-            self._lan_active = True
-            _LAN_LOGGER.info("Registered with device %s — LAN observe mode active", lan_ip)
+            self._lan_open_pending_since = time.monotonic()
+            _LAN_LOGGER.info(
+                "LAN registration POST accepted by %s — waiting for key exchange", lan_ip
+            )
         except LanError:
-            _LAN_LOGGER.exception("LAN registration failed, server running but device won't push to us")
-        except Exception:  # noqa: BLE001
-            _LAN_LOGGER.exception("Unexpected error during LAN registration")
+            self._lan_open_pending_since = time.monotonic()
+            _LAN_LOGGER.warning("LAN registration POST failed, will retry on next tick")
+        except Exception as err:  # noqa: BLE001
+            self._lan_open_pending_since = time.monotonic()
+            _LAN_LOGGER.warning("Unexpected error during LAN registration: %s", err)
+
+    async def _lan_session_tick(self, _now: datetime) -> None:
+        """Keep-alive / re-open loop — the module expects a nudge every ~20 s.
+
+        State machine (mirrors the official app and cremalink's nudger):
+          no session            -> POST (open; retried every tick until handshake)
+          live session          -> PUT  (keep-alive, notify=pending commands)
+          stale session (>120s) -> reset + POST on next tick — never PUT
+                                   after dropping our keys (hollow session)
+        """
+        server = self._lan_server
+        lan = self._lan_config or {}
+        lan_ip = lan.get("lan_ip")
+        if server is None or not lan_ip:
+            return
+        try:
+            import aiohttp
+
+            if server.session is None:
+                await self._lan_open_session()
+            elif not server.is_session_alive(LAN_SESSION_STALE_SECONDS):
+                _LAN_LOGGER.warning(
+                    "LAN session stale (device silent for >%.0fs) — dropping keys, "
+                    "re-opening with POST on next tick",
+                    LAN_SESSION_STALE_SECONDS,
+                )
+                server.reset_session()
+                self._lan_active = False
+                await self._lan_open_session()
+            else:
+                await register_with_device(
+                    aiohttp.ClientSession,
+                    device_ip=lan_ip,
+                    advertised_ip=server.advertised_ip,
+                    advertised_port=server.port,
+                    method="PUT",
+                    notify=server.has_pending,
+                )
+        except Exception as err:  # noqa: BLE001 — the tick must never die
+            _LAN_LOGGER.debug("LAN session tick failed: %s", err)
+        # lan_active reflects reality: a real handshake, never a bare 2xx.
+        self._lan_active = server.session is not None and server.is_session_alive(
+            LAN_SESSION_STALE_SECONDS
+        )
+        if server.session is not None:
+            self._lan_no_handshake_warned = False
+        if (
+            server.session is None
+            and self._lan_open_pending_since
+            and time.monotonic() - self._lan_open_pending_since > 30
+            and not self._lan_no_handshake_warned
+        ):
+            self._lan_no_handshake_warned = True
+            _LAN_LOGGER.warning(
+                "No key exchange received 30 s after local_reg POST — "
+                "check that no other LAN client (cremalink, Coffee Link app) "
+                "holds the module's single registration slot"
+            )
 
     async def _on_lan_property(self, data: dict[str, Any]) -> None:
         """Callback invoked when the machine pushes a decrypted datapoint.
@@ -963,6 +1053,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_stop_lan(self) -> None:
         """Cleanly stop the LAN server (called from async_unload_entry)."""
+        if self._lan_session_unsub is not None:
+            self._lan_session_unsub()
+            self._lan_session_unsub = None
         if self._lan_server is not None:
             try:
                 await self._lan_server.stop()
@@ -970,7 +1063,8 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LAN_LOGGER.exception("Error stopping LAN server")
             self._lan_server = None
             self._lan_active = False
-            _LAN_LOGGER.info("LAN server stopped")
+            # lan.py already logs "LAN server stopped" — the duplicate here
+            # made testers hunt for a phantom port war (issue #50 audit).
 
     async def _load_contentstack(self) -> None:
         """Load drink catalog and bean adapt from ContentStack CMS (once).

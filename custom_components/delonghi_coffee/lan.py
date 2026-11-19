@@ -16,9 +16,12 @@ verified against a live machine by @miditkl and @duckwc):
     1. Integration fetches lan_enabled + lan_ip + lan_key from the Ayla
        cloud (already implemented in api.get_lan_config).
     2. Integration starts an embedded aiohttp server (default port 10280).
-    3. Integration issues ``PUT http://<lan_ip>/local_reg.json`` announcing
-       its own IP, port, and /local_lan notification path. This is what
-       tells the machine to start pushing to us instead of Ayla.
+    3. Integration issues ``POST http://<lan_ip>/local_reg.json?dsn=<DSN>``
+       announcing its own IP, port, and /local_lan notification path.
+       POST OPENS a session (always triggers the key exchange); ``PUT`` is
+       keep-alive only and never re-keys a live module (issue #50). The
+       module keeps a single registration slot and expects a keep-alive
+       every ~20 s while the session should stay up.
     4. Machine POSTs to ``/local_lan/key_exchange.json`` with
        ``{"key_exchange": {"random_1": <str>, "time_1": <int>}}``.
     5. Server responds HTTP **202 Accepted** with
@@ -60,9 +63,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 try:  # aiohttp ships with Home Assistant; unit tests may run without it.
-    from aiohttp import web
+    from aiohttp import ClientTimeout, web
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
+    ClientTimeout = None  # type: ignore[assignment]
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -446,6 +450,28 @@ class DeLonghiLanServer:
         return peer.split("%", 1)[0] in self._trusted_peers
 
     @property
+    def advertised_ip(self) -> str:
+        """The IP we announced to the module (where it dials back to)."""
+        return self._config.advertised_ip
+
+    def reset_session(self) -> None:
+        """Drop the current session so the next registration is a fresh POST.
+
+        The millcore module keeps its side of a session until IT decides to
+        drop it; if we drop ours without re-opening via POST, the module
+        keep-alives against keys we no longer hold — the "hollow session"
+        documented in issue #50. Callers must follow up with a POST.
+        """
+        self._session = None
+        self._seq = 0
+        self._last_activity = 0.0
+
+    @property
+    def has_pending(self) -> bool:
+        """True while commands are queued — drives the local_reg notify flag."""
+        return not self._pending.empty()
+
+    @property
     def session(self) -> LanSession | None:
         return self._session
 
@@ -477,12 +503,18 @@ class DeLonghiLanServer:
         """Bind and start the embedded server."""
         self._app = web.Application()
         self._app.router.add_post(LAN_HANDSHAKE_PATH, self._handle_handshake)
-        self._app.router.add_get(LAN_COMMAND_PATH, self._handle_command_poll)
-        self._app.router.add_post(LAN_COMMAND_PATH, self._handle_command_poll)
-        self._app.router.add_post(LAN_PROPERTY_PATH, self._handle_property_push)
+        # Any method on commands.json (lodzen does the same): a firmware
+        # polling with an unexpected verb used to hit a silent 405.
+        self._app.router.add_route("*", LAN_COMMAND_PATH, self._handle_command_poll)
+        self._app.router.add_route("*", LAN_PROPERTY_PATH, self._handle_property_push)
         self._app.router.add_get(LAN_STATUS_PATH, self._handle_status)
 
-        self._runner = web.AppRunner(self._app)
+        # Route aiohttp's access log INTO our component logger: testers
+        # send logs filtered to custom_components.delonghi_coffee, and the
+        # default `aiohttp.access` logger gets dropped with everything else
+        # — which made "the machine never connects back" undecidable (issue
+        # #50). This captures every inbound request, including 404/405.
+        self._runner = web.AppRunner(self._app, access_log=_LAN_LOGGER, logger=_LOGGER)
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, self._config.bind_host, self._config.port)
         await self._site.start()
@@ -528,11 +560,31 @@ class DeLonghiLanServer:
         try:
             body = await request.json()
             exchange = body["key_exchange"]
-            # Normalize: cremalink strips base64 `=` padding on the wire, but
-            # a non-conforming peer might leave it in. Canonicalize so both
-            # sides derive the same session material regardless.
-            random_1 = str(exchange["random_1"]).rstrip("=")
+            # Pass random_1 through VERBATIM: the reference implementations
+            # (cremalink, ECAMpy) never strip base64 padding on the inbound
+            # value, and the device derives its session material from
+            # exactly what it sent. Canonicalizing here desyncs the KDF if
+            # the firmware ever leaves padding in (issue #50 audit).
+            random_1 = str(exchange["random_1"])
             time_1 = int(exchange["time_1"])
+            # Fields the Soul sends and we do not use (doc ecam-lan-protocol
+            # §3): log them instead of dropping them silently — `sec`
+            # non-empty would mean an unsupported secure-setup handshake.
+            _LAN_LOGGER.debug(
+                "handshake: fields from %s: proto=%s ver=%s key_id=%s sec=%r",
+                peer,
+                exchange.get("proto"),
+                exchange.get("ver"),
+                exchange.get("key_id"),
+                exchange.get("sec"),
+            )
+            if exchange.get("sec"):
+                _LAN_LOGGER.warning(
+                    "handshake: peer=%s requests secure setup (sec=%r) — "
+                    "unsupported by this integration",
+                    peer,
+                    exchange.get("sec"),
+                )
         except (KeyError, ValueError, TypeError) as err:
             _LAN_LOGGER.warning("handshake: malformed request from %s: %s", peer, err)
             return web.json_response({"error": "bad_request"}, status=400)
@@ -587,7 +639,10 @@ class DeLonghiLanServer:
 
         # cremalink uses 12 bytes of urandom → base64 without padding.
         random_2 = base64.b64encode(os.urandom(12)).decode("utf-8").rstrip("=")
-        time_2 = now
+        # Milliseconds, matching both reference servers (cremalink state.py,
+        # ECAMpy constants). The device re-derives with whatever we return,
+        # so this is alignment not a fix — see issue #50 audit.
+        time_2 = int(time.time() * 1000)
         try:
             session = derive_session(self._config.lan_key, random_1, random_2, time_1, time_2)
         except LanCryptoError as err:
@@ -618,6 +673,11 @@ class DeLonghiLanServer:
         would desync with the device's dev_iv.
         """
         peer = request.remote or "unknown"
+        # Log BEFORE any state check: a machine polling with no live
+        # session must still leave a trace, otherwise "never connects back"
+        # can never be distinguished from "connects back, we ignore it"
+        # (issue #50).
+        _LAN_LOGGER.debug("command_poll: %s from %s", request.method, peer)
         if not self._is_peer_allowed(peer):
             _LAN_LOGGER.debug("command_poll: reject peer=%s (not in allowlist)", peer)
             return web.json_response({"error": "forbidden"}, status=403)
@@ -663,6 +723,7 @@ class DeLonghiLanServer:
         live telemetry — the cure is worse than the disease.
         """
         peer = request.remote or "unknown"
+        _LAN_LOGGER.debug("property_push: %s from %s", request.method, peer)
         if not self._is_peer_allowed(peer):
             _LAN_LOGGER.debug("property_push: reject peer=%s (not in allowlist)", peer)
             return web.json_response({"error": "forbidden"}, status=403)
@@ -742,10 +803,26 @@ async def register_with_device(
     advertised_ip: str,
     advertised_port: int,
     *,
+    method: str = "POST",
+    dsn: str | None = None,
+    notify: bool = False,
     scheme: str = "http",
     timeout: float = 5.0,
 ) -> None:
-    """``PUT /local_reg.json`` so the device pushes updates to our server.
+    """``POST/PUT /local_reg.json`` so the device pushes updates to our server.
+
+    The HTTP method is load-bearing on the DL-millcore firmware (issue #50,
+    measured against the decompiled Coffee Link ``AylaLanModule``):
+
+    - **POST opens a session** and always triggers a key exchange; the app
+      appends ``?dsn=<DSN>`` when opening.
+    - **PUT is keep-alive only** — on a live module it never re-keys, so
+      PUTing after we dropped our own keys produces a "hollow session":
+      the device keeps old keys we can no longer derive.
+
+    Therefore: call with ``method="POST"`` (and ``dsn``) to open or reopen,
+    ``method="PUT"`` only as periodic keep-alive while a session is alive.
+    ``notify`` mirrors the official app: 1 only while commands are pending.
 
     ``session_factory`` is typically ``aiohttp.ClientSession`` — pass it as
     a callable so callers can inject mocks in tests. Raises :class:`LanError`
@@ -755,25 +832,41 @@ async def register_with_device(
         raise RuntimeError("aiohttp is required for register_with_device")
 
     url = f"{scheme}://{device_ip}{LAN_REG_PATH}"
+    if method.upper() == "POST" and dsn:
+        url = f"{url}?dsn={dsn}"
     body = {
         "local_reg": {
             "ip": advertised_ip,
-            "notify": 1,
+            "notify": 1 if notify else 0,
             "port": advertised_port,
             "uri": "/local_lan",
         }
     }
+    # Compact separators, byte-identical to the httpx/cremalink body: a
+    # 2020 firmware JSON parser should not have to deal with pretty spacing.
+    payload = json.dumps(body, separators=(",", ":"))
     try:
         async with (
             session_factory() as client,
-            client.put(url, json=body, timeout=timeout) as resp,
+            client.request(
+                method.upper(),
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=ClientTimeout(total=timeout),
+            ) as resp,
         ):
+            text = (await resp.text())[:200]
+            _LAN_LOGGER.debug(
+                "local_reg %s %s -> HTTP %s body=%r", method.upper(), url, resp.status, text
+            )
             if resp.status >= 400:
-                raise LanError(f"local_reg HTTP {resp.status}")
+                raise LanError(f"local_reg HTTP {resp.status}: {text!r}")
     except LanError:
         raise
     except Exception as err:  # noqa: BLE001
-        raise LanError(f"local_reg failed: {err}") from err
+        # str(TimeoutError()) is empty — always include the type name.
+        raise LanError(f"local_reg failed: {type(err).__name__}: {err}") from err
 
 
 # ─────────────────────────────────────────────────────────────────────────

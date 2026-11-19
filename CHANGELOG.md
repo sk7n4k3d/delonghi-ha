@@ -5,6 +5,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.4] — 2026-11-19
+
+### Fixed
+- **LAN : la session rouvre enfin après un reload (cause racine #50).** Sur le
+  firmware PrimaDonna Soul (DL-millcore), la méthode HTTP du `local_reg.json`
+  est déterminante, vérifiée contre l'app Coffee Link décompilée : `POST`
+  ouvre la session et déclenche l'échange de clés, `PUT` ne fait que
+  keep-aliver une session existante. L'intégration n'envoyait qu'un seul `PUT`
+  par démarrage : après chaque reload, « session creuse » — la machine gardait
+  des clés devenues inutilisables de notre côté, plus jamais de handshake.
+  Nouveau cycle de vie : `POST ?dsn=` initial, keep-alive `PUT` toutes 20 s,
+  re-`POST` dès qu'une session devient stale, et `lan_active` ne passe à vrai
+  qu'après un vrai handshake (le log « Registered — observe mode active »
+  mentait et a orienté tout le debug à l'envers).
+- **Cloud : le moniteur fantôme et les commandes gobées sur Soul.** Le
+  `request_monitor` envoyait l'opcode `0x84` (« refresh app id ») ; c'est
+  `0x75` qui force une publication fraîche sur millcore (doc protocole §7.3).
+  L'annonce de session app sur Soul est un timestamp brut dans
+  `device_connected` — l'intégration ne testait que `app_device_connected`
+  (chemin Eletta, 404 sur Soul) et se désactivait **définitivement** au first
+  404 ; les deux propriétés sont maintenant essayées, et l'échec backouffe
+  1 h au lieu de verrouiller à vie.
+- **Alignements handshake** (référence cremalink/ECAMpy) : `random_1` passé
+  verbatim (plus de strip du padding `=`), `time_2` en millisecondes, champs
+  `proto`/`ver`/`key_id`/`sec` journalisés (warning si secure-setup demandé).
+
+### Added
+- **Journal LAN complet** : access log aiohttp redirigé vers le logger du
+  composant (les logs filtrés des testeurs ne jetaient plus les requêtes
+  entrantes), chaque requête machine tracée avant toute vérification de
+  session (une machine qui pollait sans session était invisible), corps et
+  statut de chaque `local_reg` journalisés, route `commands.json` ouverte à
+  tous les verbes (plus de 405 muets), et warning 30 s après un POST sans
+  key exchange (piste slot de registration volé).
+
 ## [1.9.3] — 2026-11-18
 
 ### Changed
