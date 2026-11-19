@@ -11,7 +11,7 @@
 
 Home Assistant custom integration for De'Longhi connected coffee machines (Eletta Explore, Dinamica Plus, Rivelia, etc.) via the De'Longhi Coffee Link cloud API.
 
-> 🆕 **For modern Eletta Ultra / My Coffee Lounge machines** (Daedalus stack), see the companion repo
+> 🆕 **For Eletta Ultra and PrimaDonna Aromatic machines using My Coffee Lounge** (Daedalus stack), see the companion repo
 > [`sk7n4k3d/delonghi-daedalus-ha`](https://github.com/sk7n4k3d/delonghi-daedalus-ha) — different cloud
 > stack (Gigya + AWS IoT instead of Ayla), shipped as a separate HACS repository because the two
 > stacks share nothing at the wire-protocol level. Source code lives in this monorepo under
@@ -22,6 +22,10 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > credits: @mimasek71 (issue #18). Example Lovelace card:
 > [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
 > [Set up My Coffee Lounge and upgrade an existing LAN connection](docs/daedalus-setup.md).
+>
+> PrimaDonna Aromatic **ECAM63070** monitoring was verified with Daedalus v0.4.7 on Home Assistant
+> Core 2026.11.1 using an EU owner account. The LAN connection, standby state and firmware
+> sensors worked with display/main board 1.2.0 and Wi-Fi module 2.5.3.
 >
 > The optional **Warm up** action supports the EU PrimaDonna Aromatic ECAM630.70 with UI and mainboard
 > firmware 1.2.0 and Wi-Fi firmware 2.5.3. An attended test confirmed startup, initial heating and
