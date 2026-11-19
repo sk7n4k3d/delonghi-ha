@@ -197,6 +197,7 @@ def service(monkeypatch):
         },
     )
     config_entries = Mock()
+    config_entries.async_reload = AsyncMock()
     config_entries.async_get_entry.side_effect = lambda entry_id: entry if entry_id == entry.entry_id else None
     config_entries.async_entries.return_value = [entry]
     config_entries.async_update_entry.side_effect = lambda target, data: setattr(target, "data", data)
@@ -404,6 +405,7 @@ def test_reset_requires_a_deliberate_opt_out_and_reenable(service):
     assert not _has_pending(service)
     assert service.disk[other_key]["pending"] is True
     assert entry.data[CONF_AROMATIC_WARMUP] is True
+    assert service.hass.config_entries.async_reload.await_count == 2
 
 
 @pytest.mark.parametrize("changed", [None, "FWUIVersion", "FWMainboardVersion", "FWWiFiVersion"])
@@ -555,3 +557,102 @@ def test_failed_reset_keeps_warmup_disabled(service):
     assert result["errors"]["base"] == "warmup_storage_error"
     assert entry.data[CONF_AROMATIC_WARMUP] is False
     assert _has_pending(service)
+
+
+def _button(service):
+    from custom_components.delonghi_daedalus import button
+
+    entry = service.entry
+    service.hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
+        entry=entry, serial_number=entry.data.get(CONF_SERIAL_NUMBER)
+    )
+    add = Mock()
+    asyncio.run(button.async_setup_entry(service.hass, entry, add))
+    return add.call_args.args[0][0] if add.called else None
+
+
+def test_button_tracks_opt_in_on_reload_and_uses_machine_device(service):
+    from hashlib import sha256
+
+    from custom_components.delonghi_daedalus.config_flow import DaedalusOptionsFlow
+
+    entry = service.entry
+    entry.data[CONF_AROMATIC_WARMUP] = False
+    assert _button(service) is None
+
+    flow = DaedalusOptionsFlow(entry)
+    flow.hass = service.hass
+    asyncio.run(flow.async_step_init({CONF_AROMATIC_WARMUP: True}))
+    service.hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
+    button = _button(service)
+    assert button.available
+    assert button._attr_unique_id == f"{_SERIAL}_warm_up"
+    assert button._attr_device_info["identifiers"] == {(DOMAIN, sha256(f"{DOMAIN}:{_SERIAL}".encode()).hexdigest())}
+
+    asyncio.run(flow.async_step_init({CONF_AROMATIC_WARMUP: False}))
+    assert service.hass.config_entries.async_reload.await_count == 2
+    assert not button.available
+    assert _button(service) is None
+    service.client.warm_up.assert_not_awaited()
+
+
+@pytest.mark.parametrize("excluded", ["duplicate", "disabled", "no_session", "non_eu"])
+def test_button_requires_one_enabled_eu_target(service, excluded):
+    if excluded == "duplicate":
+        duplicate = SimpleNamespace(data={CONF_SERIAL_NUMBER: _SERIAL.lower()})
+        service.hass.config_entries.async_entries.return_value = [service.entry, duplicate]
+    elif excluded == "disabled":
+        service.entry.disabled_by = "user"
+    elif excluded == "no_session":
+        service.entry.data.pop(CONF_SESSION_TOKEN)
+    elif excluded == "non_eu":
+        service.entry.data[CONF_POOL] = "CH"
+    assert _button(service) is None
+    service.client.warm_up.assert_not_awaited()
+
+
+def test_button_delegates_with_same_context_and_admin_gate_without_second_send(service):
+    button = _button(service)
+    button.hass = service.hass
+    button.enabled = True
+
+    async def forward(domain, action, data, *, blocking, context):
+        assert (domain, action) == (DOMAIN, "warm_up")
+        assert blocking and context is button._context
+        assert data == {"config_entry_id": service.entry.entry_id}
+        await service.handler(SimpleNamespace(data=data, context=context))
+
+    async def deliver(*, before_send):
+        await before_send()
+
+    button.hass.services.async_call = AsyncMock(side_effect=forward)
+    service.client.warm_up.side_effect = deliver
+
+    button._context = SimpleNamespace(user_id="nonadmin")
+    with pytest.raises(PermissionError, match="admin"):
+        asyncio.run(button.async_press())
+    service.client.warm_up.assert_not_awaited()
+
+    button._context = SimpleNamespace(user_id="admin")
+    asyncio.run(button.async_press())
+    service.client.verify_firmware.assert_awaited_once()
+    service.resolve.assert_awaited_once()
+    service.client.warm_up.assert_awaited_once()
+
+    with pytest.raises(warmup_action.HomeAssistantError, match="just sent"):
+        asyncio.run(button.async_press())
+    service.client.warm_up.assert_awaited_once()
+    assert button.hass.services.async_call.await_count == 3
+
+
+@pytest.mark.parametrize("context_present", [False, True])
+def test_button_does_not_delegate_without_context_or_when_entity_disabled(service, context_present):
+    button = _button(service)
+    button.hass = service.hass
+    button.hass.services.async_call = AsyncMock()
+    button.enabled = not context_present
+    button._context = SimpleNamespace(user_id="admin") if context_present else None
+    with pytest.raises(warmup_action.HomeAssistantError, match="unavailable"):
+        asyncio.run(button.async_press())
+    button.hass.services.async_call.assert_not_awaited()
+    service.client.warm_up.assert_not_awaited()

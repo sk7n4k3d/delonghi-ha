@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.service import async_register_admin_service
@@ -24,7 +24,26 @@ from .const import (
 from .warmup import COMMAND_EXPIRY_SECONDS, WarmupClient, WarmupError, resolve_owned_aromatic
 from .warmup_state import entry_lock, is_pending, save_pending
 
-_ENTRY_ID = "config_entry_id"
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
+SERVICE_WARM_UP = "warm_up"
+
+
+def warmup_enabled(entry: ConfigEntry) -> bool:
+    """Check whether this entry has opted into warm-up."""
+    return entry.data.get(CONF_POOL) == GIGYA_POOL_EU and entry.data.get(CONF_AROMATIC_WARMUP) is True
+
+
+def has_unique_warmup_serial(hass: HomeAssistant, serial: str) -> bool:
+    """Require one configured warm-up target for this physical machine."""
+    serial_key = serial.strip().casefold()
+    return (
+        sum(
+            isinstance(other_serial := other.data.get(CONF_SERIAL_NUMBER), str)
+            and other_serial.strip().casefold() == serial_key
+            for other in hass.config_entries.async_entries(DOMAIN)
+        )
+        == 1
+    )
 
 
 def register_warmup_action(hass: HomeAssistant) -> None:
@@ -33,7 +52,7 @@ def register_warmup_action(hass: HomeAssistant) -> None:
     cooldown: dict[str, float] = {}
 
     async def warm_up(call: ServiceCall) -> None:
-        entry_id = call.data[_ENTRY_ID]
+        entry_id = call.data[ATTR_CONFIG_ENTRY_ID]
         entry = hass.config_entries.async_get_entry(entry_id)
         if (
             entry is None
@@ -42,7 +61,7 @@ def register_warmup_action(hass: HomeAssistant) -> None:
             or entry.state is not ConfigEntryState.LOADED
         ):
             raise HomeAssistantError("Select a loaded De'Longhi My Coffee Lounge configuration entry.")
-        if entry.data.get(CONF_POOL) != GIGYA_POOL_EU or entry.data.get(CONF_AROMATIC_WARMUP) is not True:
+        if not warmup_enabled(entry):
             raise HomeAssistantError("Enable ECAM630.70 warm-up on this EU configuration entry first.")
         if entry.data.get(CONF_AROMATIC_WARMUP_PENDING):
             raise HomeAssistantError(
@@ -56,14 +75,7 @@ def register_warmup_action(hass: HomeAssistant) -> None:
                 "Warm-up requires a configured serial number and an authenticated EU owner session."
             )
         serial_key = serial.strip().casefold()
-        if (
-            sum(
-                isinstance(other_serial := other.data.get(CONF_SERIAL_NUMBER), str)
-                and other_serial.strip().casefold() == serial_key
-                for other in hass.config_entries.async_entries(DOMAIN)
-            )
-            != 1
-        ):
+        if not has_unique_warmup_serial(hass, serial):
             raise HomeAssistantError("Warm-up requires a unique configuration entry for this serial number.")
         lock = entry_lock(hass, entry_id)
         if lock.locked() or serial_key in running:
@@ -74,9 +86,8 @@ def register_warmup_action(hass: HomeAssistant) -> None:
                 hass.config_entries.async_get_entry(entry_id) is not entry
                 or entry.disabled_by is not None
                 or entry.state is not ConfigEntryState.LOADED
-                or entry.data.get(CONF_AROMATIC_WARMUP) is not True
+                or not warmup_enabled(entry)
                 or entry.data.get(CONF_AROMATIC_WARMUP_PENDING)
-                or entry.data.get(CONF_POOL) != GIGYA_POOL_EU
                 or entry.data.get(CONF_SESSION_TOKEN) != token
                 or entry.data.get(CONF_SERIAL_NUMBER) != serial
             ):
@@ -116,5 +127,9 @@ def register_warmup_action(hass: HomeAssistant) -> None:
             running.remove(serial_key)
 
     async_register_admin_service(
-        hass, DOMAIN, "warm_up", warm_up, schema=vol.Schema({vol.Required(_ENTRY_ID): vol.All(str, vol.Length(min=1))})
+        hass,
+        DOMAIN,
+        SERVICE_WARM_UP,
+        warm_up,
+        schema=vol.Schema({vol.Required(ATTR_CONFIG_ENTRY_ID): vol.All(str, vol.Length(min=1))}),
     )

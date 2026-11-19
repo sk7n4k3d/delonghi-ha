@@ -279,6 +279,11 @@
       "cloud_auto_turn_off_options": {
         "name": "Extinction automatique (min)"
       }
+    },
+    "button": {
+      "warm_up": {
+        "name": "Préchauffer"
+      }
     }
   },
   "options": {
@@ -293,6 +298,11 @@
           "aromatic_warmup": "Activer le préchauffage pour la PrimaDonna Aromatic ECAM630.70 (UE) avec les micrologiciels de l’afficheur et de la carte mère 1.2.0 et du Wi-Fi 2.5.3. Au démarrage, la machine peut évacuer de l’eau chaude de rinçage."
         }
       }
+    }
+  },
+  "device": {
+    "coffee_machine": {
+      "name": "Machine à café"
     }
   }
 }

@@ -24,14 +24,15 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 >
 > The optional **Warm up** action supports the EU PrimaDonna Aromatic ECAM630.70 with UI and mainboard
 > firmware 1.2.0 and Wi-Fi firmware 2.5.3. An attended test confirmed startup, initial heating and
-> rinsing on that combination. Enable **Warm up** in the integration options, then select the machine's
-> configuration entry in the `delonghi_daedalus.warm_up` action. Manual calls require a Home Assistant
-> administrator. Scheduled automations can call the action directly as Home Assistant. For the first
+> rinsing on that combination. Enable **Warm up** in the integration options and press **Warm up** on
+> the machine's device page. Manual presses require a Home Assistant administrator. For an automation,
+> select one machine's configuration entry in the `delonghi_daedalus.warm_up` action. For the first
 > run, attend the machine and keep the spouts clear for the hot-water rinse.
 > Each invocation checks ownership and firmware, then sends one power-on request only after the machine
 > reports Standby. A matching reply acknowledges the request. Check the appliance to confirm warm-up.
 > Home Assistant records the attempt before sending and keeps the record across restarts if delivery
 > is uncertain. Check the machine before turning the option off and on for that entry to re-enable it.
+> [Upstream contribution #59](https://github.com/sk7n4k3d/delonghi-ha/pull/59)
 >
 > An automation action saved with the machine selector looks like this.
 >

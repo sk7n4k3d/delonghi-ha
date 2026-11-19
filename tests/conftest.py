@@ -18,6 +18,7 @@ _HA_MODULES = [
     "homeassistant.exceptions",
     "homeassistant.helpers",
     "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.device_registry",
     "homeassistant.helpers.update_coordinator",
     "homeassistant.helpers.storage",
     "homeassistant.helpers.service",
@@ -68,6 +69,9 @@ class _MockStore:
 
 
 sys.modules["homeassistant.helpers.storage"].Store = _MockStore
+
+
+sys.modules["homeassistant.helpers.device_registry"].DeviceInfo = dict
 
 
 def _wire_submodule(parent: str, child: str) -> None:

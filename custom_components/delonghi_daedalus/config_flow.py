@@ -161,7 +161,7 @@ class DaedalusOptionsFlow(config_entries.OptionsFlow):
                     if new_data != data:
                         self.hass.config_entries.async_update_entry(self._entry, data=new_data)
             if not errors:
-                if enabled != telemetry:
+                if enabled != telemetry or warmup_changed:
                     await self.hass.config_entries.async_reload(self._entry.entry_id)
                 return self.async_create_entry(title="", data={})
 
