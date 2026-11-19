@@ -417,9 +417,23 @@ def test_warmup_requires_each_physically_verified_firmware_version(changed):
         asyncio.run(client.verify_firmware())
     else:
         firmware[changed] = "0.0.0"
-        with pytest.raises(WarmupError, match="No warm-up command was sent"):
+        with pytest.raises(WarmupError, match=r"Warm-up requires UI 1\.2\.0.*No warm-up command was sent"):
             asyncio.run(client.verify_firmware())
     client.fetch.assert_awaited_once_with(timeout=10)
+
+
+def test_firmware_check_reports_missing_capabilities_on_partial_fetch():
+    client = WarmupClient(Mock(), thing_name=_THING, jwt="test-token")
+    client.fetch = AsyncMock(return_value={"MachineStatus": {"state": {"reported": {"Status": "Standby"}}}})
+    with pytest.raises(WarmupError, match="no MachineCapabilities document.*No warm-up command was sent"):
+        asyncio.run(client.verify_firmware())
+
+
+def test_firmware_check_reports_broker_failure_separately():
+    client = WarmupClient(Mock(), thing_name=_THING, jwt="test-token")
+    client.fetch = AsyncMock(side_effect=cloud.CloudTelemetryError("MQTT session failed"))
+    with pytest.raises(WarmupError, match="Could not read the machine firmware.*No warm-up command was sent"):
+        asyncio.run(client.verify_firmware())
 
 
 def test_service_never_calls_command_when_firmware_is_unverified(service):

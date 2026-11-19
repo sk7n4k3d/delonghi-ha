@@ -123,12 +123,15 @@ class WarmupClient(cloud.ShadowClient):
         """Read the firmware versions from the current MachineCapabilities shadow."""
         try:
             async with asyncio.timeout(25):
-                document = (await self.fetch(timeout=10)).get("MachineCapabilities", {})
+                document = (await self.fetch(timeout=10)).get("MachineCapabilities")
         except (cloud.CloudTelemetryError, OSError, TimeoutError):
             raise WarmupError(
                 "Could not read the machine firmware from the EU broker. No warm-up command was sent."
             ) from None
-        if any(_reported(document).get(key) != value for key, value in _SUPPORTED_FIRMWARE.items()):
+        if document is None:
+            raise WarmupError("The EU broker returned no MachineCapabilities document. No warm-up command was sent.")
+        reported = _reported(document)
+        if any(reported.get(key) != value for key, value in _SUPPORTED_FIRMWARE.items()):
             raise WarmupError(
                 "Warm-up requires UI 1.2.0, mainboard 1.2.0, and Wi-Fi 2.5.3. No warm-up command was sent."
             )
