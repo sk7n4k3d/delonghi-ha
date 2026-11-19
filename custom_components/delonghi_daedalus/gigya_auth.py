@@ -37,6 +37,8 @@ MCL_APP_LOGIN_INCLUDE = "id_token,profile,data,preferences"
 # the same credentials twice.
 _CREDENTIAL_ERROR_CODES = frozenset({403001, 403002, 403005, 403023, 403025, 403026, 403042})
 _SESSION_ERROR_CODES = frozenset({403012, 403035})
+# Gigya can return rate limits or temporary account/IP blocks in an HTTP 200.
+_TRANSIENT_ERROR_CODES = frozenset({408, 429, 6005, 403048, 403120, 429000})
 
 
 class GigyaAuthError(RuntimeError):
@@ -219,7 +221,7 @@ def is_session_error(exc: GigyaAuthError) -> bool:
 def is_transient_error(exc: GigyaAuthError) -> bool:
     """Identify rate limits and service errors encoded in Gigya's payload."""
     code = exc.error_code
-    return code in {408, 429, 6005} or str(code).startswith("5")
+    return code in _TRANSIENT_ERROR_CODES or str(code).startswith("5")
 
 
 def apikey_fingerprint(api_key: str) -> str:

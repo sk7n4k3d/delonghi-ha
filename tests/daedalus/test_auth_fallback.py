@@ -14,6 +14,8 @@ from custom_components.delonghi_daedalus.api import (
     DaedalusAuthError,
     DaedalusConnectionError,
 )
+from custom_components.delonghi_daedalus.config_flow import _probe_pools
+from custom_components.delonghi_daedalus.const import GIGYA_POOL_EU
 from custom_components.delonghi_daedalus.lan_protocol import LanProtocolError
 
 HOST = "fd12:b0af::18"  # unique ULA, no collision with other test files
@@ -90,10 +92,8 @@ def test_login_does_NOT_retry_legacy_on_wrong_password(error_code) -> None:
     asyncio.run(_run())
 
 
-def test_login_does_NOT_retry_on_lockout_codes() -> None:
-    """Review #18 F1: 403023 (invalid loginID/password) and 403025 (account
-    locked) are credential refusals too — replaying the legacy body would
-    double every failed login and deepen a lockout."""
+def test_login_does_NOT_retry_on_credential_refusal_codes() -> None:
+    """Refusals such as 403025 (invalid OAuth2 token) stop the format retry."""
 
     async def _run(code: int) -> None:
         seen: list[str] = []
@@ -298,13 +298,16 @@ def test_lan_protocol_error_subclass_ordering() -> None:
         (429, {"errorCode": 403001}),
         (502, {"errorCode": 403025}),
         (200, {"errorCode": "6005"}),
+        (200, {"errorCode": 403048}),
+        (200, {"errorCode": 403120}),
+        (200, {"errorCode": 429000}),
         (200, {"errorCode": 50001}),
         (200, {"errorCode": 500001}),
         (403, {"errorCode": 6005}),
         (200, ["unexpected response"]),
     ],
 )
-def test_unavailable_gigya_does_not_try_the_legacy_format(path, status, payload) -> None:
+def test_unavailable_gigya_does_not_try_another_format_or_pool(path, status, payload) -> None:
     async def _run() -> None:
         calls = 0
 
@@ -318,7 +321,7 @@ def test_unavailable_gigya_does_not_try_the_legacy_format(path, status, payload)
         try:
             with pytest.raises(DaedalusConnectionError):
                 if path == "/accounts.login":
-                    await api.login_and_get_jwt(email="u", password="p")
+                    await _probe_pools(api, email="u", password="p", preferred_pool=GIGYA_POOL_EU)
                 else:
                     await api.refresh_jwt(session_token="st", session_secret="ss")
             assert calls == 1
