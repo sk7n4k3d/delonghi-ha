@@ -806,9 +806,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 notify=server.has_pending,
             )
             self._lan_open_pending_since = time.monotonic()
-            _LAN_LOGGER.info(
-                "LAN registration POST accepted by %s — waiting for key exchange", lan_ip
-            )
+            _LAN_LOGGER.info("LAN registration POST accepted by %s — waiting for key exchange", lan_ip)
         except LanError:
             self._lan_open_pending_since = time.monotonic()
             _LAN_LOGGER.warning("LAN registration POST failed, will retry on next tick")
@@ -837,8 +835,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._lan_open_session()
             elif not server.is_session_alive(LAN_SESSION_STALE_SECONDS):
                 _LAN_LOGGER.warning(
-                    "LAN session stale (device silent for >%.0fs) — dropping keys, "
-                    "re-opening with POST on next tick",
+                    "LAN session stale (device silent for >%.0fs) — dropping keys, re-opening with POST on next tick",
                     LAN_SESSION_STALE_SECONDS,
                 )
                 server.reset_session()
@@ -856,9 +853,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:  # noqa: BLE001 — the tick must never die
             _LAN_LOGGER.debug("LAN session tick failed: %s", err)
         # lan_active reflects reality: a real handshake, never a bare 2xx.
-        self._lan_active = server.session is not None and server.is_session_alive(
-            LAN_SESSION_STALE_SECONDS
-        )
+        self._lan_active = server.session is not None and server.is_session_alive(LAN_SESSION_STALE_SECONDS)
         if server.session is not None:
             self._lan_no_handshake_warned = False
         if (
