@@ -1,0 +1,49 @@
+type: markdown
+title: Coffee machine attention
+content: |-
+  {# Replace the entity IDs below with the ones from this machine.
+     Use none (without quotes) for an alert your machine does not expose. #}
+  {% set alerts = [
+    ('urgent', 'Refill the water tank', 'binary_sensor.machine_low_water_level'),
+    ('urgent', 'Reinsert the water tank', 'binary_sensor.machine_water_tank_missing'),
+    ('urgent', 'Refill the bean hopper', 'binary_sensor.machine_no_coffee_beans'),
+    ('urgent', 'Empty the grounds container', 'binary_sensor.machine_grounds_container_full'),
+    ('advisory', 'Descale the machine', 'binary_sensor.machine_descaling_required'),
+    ('advisory', 'Clean the brew unit', 'binary_sensor.machine_brew_unit_cleaning_required'),
+    ('advisory', 'Replace the water filter', 'binary_sensor.machine_replace_water_filter')
+  ] %}
+  {% set status = namespace(configured=0, urgent=[], advisory=[], incomplete=[]) %}
+  {% for priority, label, entity_id in alerts if entity_id is not none %}
+    {% set status.configured = status.configured + 1 %}
+    {% set entity = states[entity_id] %}
+    {% set value = entity.state if entity is not none else 'missing' %}
+    {% if value == 'on' %}
+      {% if priority == 'urgent' %}
+        {% set status.urgent = status.urgent + [label] %}
+      {% else %}
+        {% set status.advisory = status.advisory + [label] %}
+      {% endif %}
+    {% elif value != 'off' %}
+      {% set detail = value if value in ['missing', 'unavailable'] else 'unknown' %}
+      {% set status.incomplete = status.incomplete + [label ~ ' (' ~ detail ~ ')'] %}
+    {% endif %}
+  {% endfor %}
+  {% if status.urgent %}
+  ### Act now
+
+  - {{ status.urgent | join('\n- ') }}
+  {% endif %}
+  {% if status.advisory %}
+  ### Maintenance reminders
+
+  - {{ status.advisory | join('\n- ') }}
+  {% endif %}
+  {% if status.incomplete %}
+  ### Status incomplete
+
+  - {{ status.incomplete | join('\n- ') }}
+  {% elif status.configured == 0 %}
+  No attention sensors configured.
+  {% elif not (status.urgent or status.advisory) %}
+  No active alerts among configured sensors.
+  {% endif %}
