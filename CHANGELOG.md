@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.5] — 2026-11-21
+
+### Fixed
+
+- **Entités en pause plusieurs fois par jour (#73).** Le ping de réveil
+  `ping_connected` est censé être best-effort, mais un timeout transport
+  (`requests.RequestException`) lui échappait et remontait en `UpdateFailed` :
+  toutes les entités passaient `unavailable` jusqu'au poll suivant, alors que
+  la lecture d'état venait de réussir 80 ms avant. Le timeout est désormais
+  absorbé comme n'importe quelle erreur de ping.
+- **Le select de profil suit enfin la machine (#78).** Un seul résolveur fait
+  loi : choix explicite dans HA → `active_profile` cloud → octet moniteur —
+  plus jamais de repli silencieux sur le profil 1 au brew ou à la synchro de
+  recettes (ces chemins exigent désormais un profil résolu, sinon erreur
+  explicite). Le choix explicite est persisté : il survit aux redémarrages
+  sans renvoi de commande. Et un `d286` gelé (fréquent sur Eletta Explore,
+  prouvé sur le terrain) ne détourne plus la sélection : seul un vrai
+  changement en session suit la machine.
+
+### Changed
+
+- **Octet d'action du brew restreint (#50).** Le contournement « action byte »
+  n'est plus envoyé qu'aux firmwares où son efficacité est prouvée sur
+  matériel (DL-millcore / PrimaDonna Soul ECAM610.75.MB, Espresso et Long
+  Coffee validés), plus en cascade sur toute la gamme.
+
 ## [0.5.0] — Unreleased
 
 ### Breaking changes
