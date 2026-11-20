@@ -1,0 +1,38 @@
+type: vertical-stack
+cards:
+  - type: entities
+    title: Coffee journal
+    show_header_toggle: false
+    entities:
+      - entity: input_text.coffee_journal_bean_name
+        name: Bean name
+      - entity: input_text.coffee_journal_grinder_setting
+        name: Grinder setting
+      - entity: input_text.coffee_journal_note
+        name: Note (optional)
+      - type: button
+        name: Journal entry
+        icon: mdi:notebook-edit-outline
+        action_name: Save entry
+        tap_action:
+          action: perform-action
+          perform_action: script.coffee_journal_save_entry
+      - entity: sensor.coffee_journal_last_saved
+        name: Last saved
+  - type: markdown
+    content: |-
+      {% set entry = state_attr('sensor.coffee_journal_last_saved', 'entry') %}
+      {% if entry %}
+      <div><strong>Saved beans</strong> {{ entry.bean_name | e }}</div>
+      <div><strong>Saved grinder setting</strong> {{ entry.grinder_setting | e }}</div>
+      {% if entry.note %}
+      <div><strong>Saved note</strong> {{ entry.note | e }}</div>
+      {% endif %}
+      {% else %}
+      No journal entries saved.
+      {% endif %}
+  - type: logbook
+    title: Recent journal entries
+    entities:
+      - sensor.coffee_journal_saved_entries
+    hours_to_show: 168

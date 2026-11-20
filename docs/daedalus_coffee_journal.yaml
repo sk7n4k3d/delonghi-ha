@@ -1,0 +1,72 @@
+# Home Assistant package. Copy one per machine and give each copy a distinct
+# coffee_journal prefix and Coffee journal label.
+input_text:
+  coffee_journal_bean_name:
+    name: "Coffee journal: Bean name"
+    initial: ""
+    max: 80
+  coffee_journal_grinder_setting:
+    name: "Coffee journal: Grinder setting"
+    initial: ""
+    max: 32
+  coffee_journal_note:
+    name: "Coffee journal: Note"
+    initial: ""
+    max: 200
+
+script:
+  coffee_journal_save_entry:
+    alias: "Coffee journal: Save entry"
+    description: Record the bean name, grinder setting and note for this machine.
+    mode: queued
+    sequence:
+      - if:
+          - condition: template
+            value_template: >-
+              {{ not (states['input_text.coffee_journal_bean_name']
+                      and states['input_text.coffee_journal_grinder_setting']
+                      and states['input_text.coffee_journal_note'])
+                 or not (states('input_text.coffee_journal_bean_name') | trim)
+                 or not (states('input_text.coffee_journal_grinder_setting') | trim) }}
+        then:
+          - stop: Enter a bean name and grinder setting before saving.
+            error: true
+      - variables:
+          # Keep the values together so strings such as "4.0" stay as entered.
+          entry: >-
+            {{ {
+              'bean_name': states('input_text.coffee_journal_bean_name'),
+              'grinder_setting': states('input_text.coffee_journal_grinder_setting'),
+              'note': states('input_text.coffee_journal_note')
+            } }}
+      # A single event feeds both the latest snapshot and the Activity card.
+      - event: logbook_entry
+        event_data:
+          source: coffee_journal
+          entity_id: sensor.coffee_journal_saved_entries
+          name: Coffee journal
+          message: >-
+            logged {{ entry.bean_name }} at grinder setting {{ entry.grinder_setting }}{% if entry.note %}.
+            Note: {{ entry.note }}{% endif %}
+          entry: "{{ entry }}"
+
+template:
+  # Activity uses a stable entity to display only the journal's log entries.
+  - sensor:
+      - name: "Coffee journal: Saved entries"
+        unique_id: coffee_journal_saved_entries
+        state: "Ready"
+  - trigger:
+      - platform: event
+        event_type: logbook_entry
+        event_data:
+          source: coffee_journal
+          entity_id: sensor.coffee_journal_saved_entries
+    sensor:
+      - name: "Coffee journal: Last saved"
+        unique_id: coffee_journal_last_saved
+        device_class: timestamp
+        state: "{{ trigger.event.time_fired.isoformat() }}"
+        attributes:
+          saved_at: "{{ trigger.event.time_fired.isoformat() }}"
+          entry: "{{ trigger.event.data.entry }}"

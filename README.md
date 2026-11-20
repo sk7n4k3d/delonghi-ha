@@ -37,6 +37,8 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > reports lifetime descale or water filter registration counts through cloud telemetry.
 > [Keep a manual maintenance history](docs/daedalus-maintenance-history.md) for descaling,
 > water filter replacement and brew unit cleaning.
+> [Keep a local coffee and grinder journal](docs/daedalus-coffee-journal.md) to record beans,
+> grinder settings and tasting notes.
 >
 > PrimaDonna Aromatic **ECAM63070** monitoring was verified with Daedalus v0.4.7 on Home Assistant
 > Core 2026.11.1 using an EU owner account. The LAN connection, standby state and firmware
