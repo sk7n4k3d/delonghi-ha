@@ -530,7 +530,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Eletta Explore: stuck at 3 across panel changes — issue #78), a
                 # first sighting, a cache reread, or a post-downtime re-read must
                 # NOT hijack the HA selection. First sighting only sets the baseline.
-                changed = isinstance(machine_profile, int) and machine_profile > 0 and machine_profile != self._last_d286
+                changed = (
+                    isinstance(machine_profile, int) and machine_profile > 0 and machine_profile != self._last_d286
+                )
                 if (
                     changed
                     and self._last_d286 is not None
