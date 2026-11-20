@@ -19,7 +19,7 @@ from homeassistant.helpers.entity import EntityCategory
 from custom_components.delonghi_daedalus import binary_sensor as bs
 from custom_components.delonghi_daedalus import sensor as sp
 from custom_components.delonghi_daedalus.cloud_keys import lookup_cloud_key
-from custom_components.delonghi_daedalus.const import CONF_CLOUD_TELEMETRY, DOMAIN
+from custom_components.delonghi_daedalus.const import CONF_CLOUD_TELEMETRY, CONF_DRINK_VISIBILITY, DOMAIN
 from custom_components.delonghi_daedalus.device import DaedalusDevice
 
 
@@ -364,3 +364,21 @@ def test_brewing_counters_discovered_when_optional_statistics_arrive() -> None:
     coord.update(_cloud(brewing_statistics=totals))
     assert all(entity.available for entity in counters().values())
     assert sum(isinstance(e, sp.DaedalusBrewingStatisticSensor) for e in added) == 3
+
+
+def test_visible_drinks_sensor_appears_on_first_valid_report() -> None:
+    coord = _FakeCoordinator(_CLOUD)
+    entry = _entry()
+    entry.data[CONF_DRINK_VISIBILITY] = True
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), entry, added.extend))
+    assert not any(isinstance(entity, sp.DaedalusVisibleDrinksSensor) for entity in added)
+
+    coord.update(_cloud(visible_drinks_count=0))
+    coord.update(_cloud(visible_drinks_count=0))
+    (sensor,) = [entity for entity in added if isinstance(entity, sp.DaedalusVisibleDrinksSensor)]
+    assert sensor._attr_unique_id == "SN-TEST_visible_drinks_count"
+    assert sensor.available
+    assert sensor.native_value == 0
+    coord.update(_cloud())
+    assert not sensor.available

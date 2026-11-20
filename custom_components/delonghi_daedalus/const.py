@@ -68,6 +68,9 @@ CONF_SESSION_SECRET: Final = "session_secret"  # noqa: S105
 CONF_LAN_AUTH_MESSAGE: Final = "lan_auth_message"
 # Opt-in read-only cloud telemetry (AWS IoT shadow over MQTT/WSS).
 CONF_CLOUD_TELEMETRY: Final = "cloud_telemetry"
+CONF_DRINK_VISIBILITY: Final = "drink_visibility"
+CONF_DRINK_FAVORITES: Final = "drink_favorites"
+CONF_FAVORITE_DRINK: Final = "favorite_drink"
 CONF_AROMATIC_WARMUP: Final = "aromatic_warmup"
 CONF_AROMATIC_WARMUP_PENDING: Final = "aromatic_warmup_pending"
 
@@ -93,3 +96,8 @@ BREWING_STATISTICS_KEYS: Final = {
     "Stopped": "stopped_brew_count",
     "InError": "brewing_error_count",
 }
+
+# Visibility changes independently of operating status.
+DRINK_VISIBILITY_POLL_SECONDS: Final = 15 * 60
+DRINK_VISIBILITY_RETRY_SECONDS: Final = 60 * 60
+DRINK_VISIBILITY_FETCH_TIMEOUT_SECONDS: Final = 10

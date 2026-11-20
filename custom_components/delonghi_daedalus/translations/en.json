@@ -213,6 +213,9 @@
       "stopped_brew_count": {
         "name": "Stopped brew count"
       },
+      "visible_drinks_count": {
+        "name": "Visible drinks"
+      },
       "brewing_error_count": {
         "name": "Brewing error count"
       },
@@ -331,6 +334,11 @@
         "name": "Auto turn-off times (min)"
       }
     },
+    "select": {
+      "favorite_drink": {
+        "name": "Favorite drink"
+      }
+    },
     "button": {
       "warm_up": {
         "name": "Warm up"
@@ -340,6 +348,7 @@
   "options": {
     "error": {
       "lan_verification_required": "Verify the machine certificate in Reconfigure before disabling cloud telemetry.",
+      "invalid_drink_favorites": "Enter up to 50 unique drink names, each on a single line of at most 255 characters.",
       "warmup_storage_error": "Could not save the warm-up option. Check Home Assistant storage and try again."
     },
     "step": {
@@ -347,9 +356,16 @@
         "title": "De'Longhi Daedalus options",
         "data": {
           "cloud_telemetry": "Read-only cloud telemetry: pull live state from the De'Longhi cloud every 2 minutes. Never sends commands. Changing this reloads the integration.",
+          "drink_favorites": "Favorite drink names",
+          "drink_visibility": "Show visible drinks count (requires cloud telemetry)",
           "aromatic_warmup": "Enable Warm up for the EU PrimaDonna Aromatic ECAM630.70 with UI and mainboard 1.2.0 and Wi-Fi 2.5.3. Startup may dispense hot rinse water."
         }
       }
+    }
+  },
+  "exceptions": {
+    "unknown_favorite_drink": {
+      "message": "That drink is no longer in your favorites."
     }
   },
   "issues": {

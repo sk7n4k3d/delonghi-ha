@@ -30,4 +30,4 @@ Capabilities can still appear when cloud status is unavailable. Download the int
 
 Read-only monitoring has been exercised on the PrimaDonna Aromatic ECAM63070. The precise set of entities depends on the fields reported by each machine. For support, download the integration’s diagnostics from Home Assistant. Keep account details, certificate fingerprints and appliance labels out of public issue attachments.
 
-The [beverage protocol research](daedalus-beverage-research.md) records the My Coffee Lounge catalog, command and response handling. Recipe selection and brewing on the ECAM63070 still need model-specific validation.
+See [Visible drinks and favorites](daedalus-drink-favorites.md) to show your machine’s reported visibility count and keep a local list of drink names. The [beverage protocol research](daedalus-beverage-research.md) records the My Coffee Lounge catalog, command and response handling. Recipe selection and brewing on the ECAM63070 still need model-specific validation.

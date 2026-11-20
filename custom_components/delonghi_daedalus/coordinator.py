@@ -21,7 +21,13 @@ from .api import (
     DaedalusLanIdentityError,
     DaedalusLanSerialMismatchError,
 )
-from .cloud import CloudTelemetryError, fetch_brewing_statistics, fetch_cloud_state, flatten_shadow
+from .cloud import (
+    CloudTelemetryError,
+    fetch_brewing_statistics,
+    fetch_cloud_state,
+    fetch_visible_drinks_count,
+    flatten_shadow,
+)
 from .const import (
     BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS,
     BREWING_STATISTICS_POLL_SECONDS,
@@ -29,6 +35,7 @@ from .const import (
     CLOUD_FETCH_TIMEOUT_SECONDS,
     CLOUD_POLL_SECONDS,
     CONF_CLOUD_TELEMETRY,
+    CONF_DRINK_VISIBILITY,
     CONF_HOST,
     CONF_JWT,
     CONF_LAN_AUTH_MESSAGE,
@@ -40,6 +47,9 @@ from .const import (
     CONF_SESSION_TOKEN,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
     DOMAIN,
+    DRINK_VISIBILITY_FETCH_TIMEOUT_SECONDS,
+    DRINK_VISIBILITY_POLL_SECONDS,
+    DRINK_VISIBILITY_RETRY_SECONDS,
     GIGYA_API_KEYS,
     GIGYA_POOL_EU,
 )
@@ -93,6 +103,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cloud_expiry: asyncio.TimerHandle | None = None
         self._cloud_task: asyncio.Task | None = None
         self._brewing_statistics_due_at = 0.0
+        self._drink_visibility_due_at = 0.0
         self._stopping = False
 
     @property
@@ -325,6 +336,8 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _clear_cloud(self) -> None:
         self._cancel_cloud_expiry()
+        if self._cloud_data is not None and self._cloud_data.get("visible_drinks_count") is not None:
+            self._drink_visibility_due_at = 0.0
         self._cloud_data = None
 
     async def _async_cloud_fetch(self) -> None:
@@ -386,9 +399,13 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if thing != self.entry.data.get(CONF_MACHINE_NAME):
             self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_MACHINE_NAME: thing})
             self._brewing_statistics_due_at = 0.0
+            self._drink_visibility_due_at = 0.0
         previous = self._cloud_data
-        if previous and previous.get("machine_name") == thing and "brewing_statistics" in previous:
-            cloud_data["brewing_statistics"] = previous["brewing_statistics"]
+        if previous and previous.get("machine_name") == thing:
+            if "brewing_statistics" in previous:
+                cloud_data["brewing_statistics"] = previous["brewing_statistics"]
+            if self.entry.data.get(CONF_DRINK_VISIBILITY) and "visible_drinks_count" in previous:
+                cloud_data["visible_drinks_count"] = previous["visible_drinks_count"]
         self._cloud_data = cloud_data
         self._cloud_fetched_at = time.monotonic()
         self._cancel_cloud_expiry()
@@ -398,6 +415,13 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The optional read uses a separate session after publishing the regular shadows.
         if time.monotonic() >= self._brewing_statistics_due_at:
             await self._async_update_brewing_statistics(thing, jwt, cloud_data)
+        current = self._cloud_data
+        if (
+            current is not None
+            and self.entry.data.get(CONF_DRINK_VISIBILITY)
+            and time.monotonic() >= self._drink_visibility_due_at
+        ):
+            await self._async_update_drink_visibility(thing, jwt, current)
 
     async def _async_update_brewing_statistics(self, thing: str, jwt: str, cloud_data: dict[str, Any]) -> None:
         counters: dict[str, int] = {}
@@ -413,6 +437,26 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._brewing_statistics_due_at = time.monotonic() + interval
         if counters != cloud_data.get("brewing_statistics", {}):
             self._cloud_data = {**cloud_data, "brewing_statistics": counters}
+            self._publish_snapshot()
+
+    async def _async_update_drink_visibility(self, thing: str, jwt: str, cloud_data: dict[str, Any]) -> None:
+        count: int | None = None
+        try:
+            async with asyncio.timeout(DRINK_VISIBILITY_FETCH_TIMEOUT_SECONDS):
+                count = await fetch_visible_drinks_count(self._api.http_session, thing_name=thing, jwt=jwt)
+        except Exception as exc:  # noqa: BLE001 — optional shadow, separate from cloud health
+            _LOGGER.debug("Daedalus cloud: drink visibility unavailable (%s)", type(exc).__name__)
+
+        if self._cloud_data is not cloud_data:
+            return
+        interval = DRINK_VISIBILITY_POLL_SECONDS if count is not None else DRINK_VISIBILITY_RETRY_SECONDS
+        self._drink_visibility_due_at = time.monotonic() + interval
+        if count != cloud_data.get("visible_drinks_count"):
+            self._cloud_data = dict(cloud_data)
+            if count is None:
+                self._cloud_data.pop("visible_drinks_count")
+            else:
+                self._cloud_data["visible_drinks_count"] = count
             self._publish_snapshot()
 
     def _record_cloud_failure(self, error: str) -> None:

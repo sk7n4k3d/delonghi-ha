@@ -213,6 +213,9 @@
       "stopped_brew_count": {
         "name": "Număr de preparări oprite"
       },
+      "visible_drinks_count": {
+        "name": "Băuturi vizibile"
+      },
       "brewing_error_count": {
         "name": "Număr de erori la preparare"
       },
@@ -331,6 +334,11 @@
         "name": "Intervale pentru oprirea automată (min)"
       }
     },
+    "select": {
+      "favorite_drink": {
+        "name": "Băutură preferată"
+      }
+    },
     "button": {
       "warm_up": {
         "name": "Preîncălzire"
@@ -343,13 +351,21 @@
         "title": "Opțiuni De'Longhi Daedalus",
         "data": {
           "cloud_telemetry": "Citește din cloud starea aparatului la fiecare două minute. Modificarea opțiunii reîncarcă integrarea.",
+          "drink_favorites": "Numele băuturilor preferate",
+          "drink_visibility": "Afișează numărul de băuturi vizibile (necesită telemetrie din cloud)",
           "aromatic_warmup": "Permite preîncălzirea pentru PrimaDonna Aromatic ECAM630.70 (UE) cu firmware 1.2.0 pentru interfață și placa de bază și 2.5.3 pentru Wi-Fi. La pornire, aparatul poate evacua apă fierbinte de clătire."
         }
       }
     },
     "error": {
       "lan_verification_required": "Verifică certificatul aparatului din meniul Reconfigurare înainte să dezactivezi telemetria cloud.",
+      "invalid_drink_favorites": "Introdu cel mult 50 de nume distincte, fiecare pe un singur rând de maximum 255 de caractere.",
       "warmup_storage_error": "Opțiunea de preîncălzire nu a putut fi salvată. Verifică spațiul de stocare din Home Assistant și încearcă din nou."
+    }
+  },
+  "exceptions": {
+    "unknown_favorite_drink": {
+      "message": "Această băutură nu mai este în lista ta de preferințe."
     }
   },
   "issues": {

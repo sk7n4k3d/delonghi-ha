@@ -12,7 +12,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .cloud_keys import KIND_CAPABILITY, CloudEntityDiscovery, CloudKey, cloud_key_display, lookup_cloud_key
-from .const import BREWING_STATISTICS_KEYS, CONF_CLOUD_TELEMETRY, DOMAIN
+from .const import BREWING_STATISTICS_KEYS, CONF_CLOUD_TELEMETRY, CONF_DRINK_VISIBILITY, DOMAIN
 from .coordinator import DaedalusCoordinator
 from .entity import DaedalusCloudEntity, DaedalusEntity
 
@@ -34,8 +34,10 @@ async def async_setup_entry(
         return
     discovery = CloudEntityDiscovery(want_binary=False)
     added_statistics: set[str] = set()
+    visibility_added = False
 
     def _add_cloud_sensors() -> None:
+        nonlocal visibility_added
         cloud = (coordinator.data or {}).get("cloud")
         new: list[SensorEntity] = [
             DaedalusCloudSensor(coordinator, source, key, meta=meta) for source, key, meta in discovery.discover(cloud)
@@ -45,6 +47,13 @@ async def async_setup_entry(
             if key in counters and key not in added_statistics:
                 added_statistics.add(key)
                 new.append(DaedalusBrewingStatisticSensor(coordinator, key=key))
+        if (
+            entry.data.get(CONF_DRINK_VISIBILITY)
+            and not visibility_added
+            and (cloud or {}).get("visible_drinks_count") is not None
+        ):
+            visibility_added = True
+            new.append(DaedalusVisibleDrinksSensor(coordinator))
         if new:
             async_add_entities(new)
 
@@ -112,6 +121,22 @@ class DaedalusBrewingStatisticSensor(_DaedalusSensorBase):
     def native_value(self) -> int | None:
         cloud = (self.coordinator.data or {}).get("cloud") or {}
         return cloud.get("brewing_statistics", {}).get(self._attr_translation_key)
+
+
+class DaedalusVisibleDrinksSensor(_DaedalusSensorBase):
+    """The number of drink flags set to visible in the cloud shadow."""
+
+    def __init__(self, coordinator: DaedalusCoordinator) -> None:
+        super().__init__(coordinator, key="visible_drinks_count")
+
+    @property
+    def native_value(self) -> int | None:
+        cloud = (self.coordinator.data or {}).get("cloud") or {}
+        return cloud.get("visible_drinks_count")
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.native_value is not None
 
 
 class DaedalusCloudSensor(DaedalusCloudEntity, SensorEntity):

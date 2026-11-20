@@ -11,8 +11,10 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MAX_LENGTH_STATE_STATE
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow, FlowResult
+from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig
 
 from .api import (
     DaedalusApi,
@@ -26,7 +28,10 @@ from .const import (
     CONF_AROMATIC_WARMUP,
     CONF_AROMATIC_WARMUP_PENDING,
     CONF_CLOUD_TELEMETRY,
+    CONF_DRINK_FAVORITES,
+    CONF_DRINK_VISIBILITY,
     CONF_EMAIL,
+    CONF_FAVORITE_DRINK,
     CONF_HOST,
     CONF_JWT,
     CONF_LAN_AUTH_MESSAGE,
@@ -71,6 +76,20 @@ _CONF_DEVICE = "device"
 _CONF_CLOUD_ONLY = "cloud_only"
 _CONF_VERIFIED_FINGERPRINT = "verified_fingerprint"
 _SERIAL_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+_MAX_FAVORITES = 50
+
+
+def _favorite_labels(raw_labels: list[str]) -> list[str]:
+    labels: dict[str, str] = {}
+    for raw in raw_labels:
+        label = raw.strip()
+        if label:
+            if len(label) > MAX_LENGTH_STATE_STATE or not label.isprintable() or label in ("unknown", "unavailable"):
+                raise ValueError
+            labels.setdefault(label.casefold(), label)
+    if len(labels) > _MAX_FAVORITES:
+        raise ValueError
+    return list(labels.values())
 
 
 async def _probe_pools(
@@ -143,6 +162,13 @@ class DaedalusOptionsFlow(config_entries.OptionsFlow):
                 warmup = bool(data.get(CONF_AROMATIC_WARMUP))
                 enabled = bool(user_input.get(CONF_CLOUD_TELEMETRY, telemetry))
                 new_warmup = bool(user_input.get(CONF_AROMATIC_WARMUP, warmup))
+                visibility = bool(data.get(CONF_DRINK_VISIBILITY))
+                new_visibility = bool(user_input.get(CONF_DRINK_VISIBILITY, visibility))
+                favorites = data.get(CONF_DRINK_FAVORITES, [])
+                try:
+                    new_favorites = _favorite_labels(user_input.get(CONF_DRINK_FAVORITES, favorites))
+                except ValueError:
+                    errors[CONF_DRINK_FAVORITES] = "invalid_drink_favorites"
                 warmup_changed = data.get(CONF_POOL) == GIGYA_POOL_EU and new_warmup != warmup
                 if telemetry and not enabled and not data.get(CONF_LAN_TLS_FINGERPRINT):
                     errors[CONF_CLOUD_TELEMETRY] = "lan_verification_required"
@@ -157,6 +183,12 @@ class DaedalusOptionsFlow(config_entries.OptionsFlow):
                     new_data = {**data}
                     if enabled != telemetry:
                         new_data[CONF_CLOUD_TELEMETRY] = enabled
+                    if new_visibility != visibility:
+                        new_data[CONF_DRINK_VISIBILITY] = new_visibility
+                    if new_favorites != favorites:
+                        new_data[CONF_DRINK_FAVORITES] = new_favorites
+                        if data.get(CONF_FAVORITE_DRINK) not in new_favorites:
+                            new_data.pop(CONF_FAVORITE_DRINK, None)
                     if warmup_changed and data.get(CONF_POOL) == GIGYA_POOL_EU:
                         new_data[CONF_AROMATIC_WARMUP] = new_warmup
                         if new_warmup:
@@ -164,14 +196,21 @@ class DaedalusOptionsFlow(config_entries.OptionsFlow):
                     if new_data != data:
                         self.hass.config_entries.async_update_entry(self._entry, data=new_data)
             if not errors:
-                if enabled != telemetry or warmup_changed:
+                if enabled != telemetry or warmup_changed or new_visibility != visibility or new_favorites != favorites:
                     await self.hass.config_entries.async_reload(self._entry.entry_id)
                 return self.async_create_entry(title="", data={})
 
         data = self._entry.data
         telemetry = bool(data.get(CONF_CLOUD_TELEMETRY))
         warmup = bool(data.get(CONF_AROMATIC_WARMUP))
-        settings = {vol.Optional(CONF_CLOUD_TELEMETRY, default=telemetry): bool}
+        favorites = data.get(CONF_DRINK_FAVORITES, [])
+        settings = {
+            vol.Optional(CONF_CLOUD_TELEMETRY, default=telemetry): bool,
+            vol.Optional(CONF_DRINK_VISIBILITY, default=bool(data.get(CONF_DRINK_VISIBILITY))): bool,
+            vol.Optional(CONF_DRINK_FAVORITES, default=favorites): SelectSelector(
+                SelectSelectorConfig(options=favorites, multiple=True, custom_value=True, mode="dropdown")
+            ),
+        }
         if data.get(CONF_POOL) == GIGYA_POOL_EU:
             settings[vol.Optional(CONF_AROMATIC_WARMUP, default=warmup)] = bool
         return self.async_show_form(step_id="init", data_schema=vol.Schema(settings), errors=errors)

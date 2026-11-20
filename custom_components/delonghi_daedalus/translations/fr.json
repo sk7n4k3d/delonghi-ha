@@ -213,6 +213,9 @@
       "stopped_brew_count": {
         "name": "Nombre de préparations arrêtées"
       },
+      "visible_drinks_count": {
+        "name": "Boissons visibles"
+      },
       "brewing_error_count": {
         "name": "Nombre d'erreurs de préparation"
       },
@@ -331,6 +334,11 @@
         "name": "Extinction automatique (min)"
       }
     },
+    "select": {
+      "favorite_drink": {
+        "name": "Boisson favorite"
+      }
+    },
     "button": {
       "warm_up": {
         "name": "Préchauffer"
@@ -340,6 +348,7 @@
   "options": {
     "error": {
       "lan_verification_required": "Vérifiez le certificat de la machine dans Reconfigurer avant de désactiver la télémétrie cloud.",
+      "invalid_drink_favorites": "Saisissez jusqu’à 50 noms de boissons différents, chacun sur une seule ligne de 255 caractères maximum.",
       "warmup_storage_error": "Impossible d’enregistrer l’option de préchauffage. Vérifiez le stockage de Home Assistant et réessayez."
     },
     "step": {
@@ -347,9 +356,16 @@
         "title": "Options De'Longhi Daedalus",
         "data": {
           "cloud_telemetry": "Télémétrie cloud en lecture seule : récupère l'état live du cloud De'Longhi toutes les 2 minutes. N'envoie jamais de commande. Modifier cette option recharge l'intégration.",
+          "drink_favorites": "Noms des boissons favorites",
+          "drink_visibility": "Afficher le nombre de boissons visibles (nécessite la télémétrie cloud)",
           "aromatic_warmup": "Activer le préchauffage pour la PrimaDonna Aromatic ECAM630.70 (UE) avec les micrologiciels de l’afficheur et de la carte mère 1.2.0 et du Wi-Fi 2.5.3. Au démarrage, la machine peut évacuer de l’eau chaude de rinçage."
         }
       }
+    }
+  },
+  "exceptions": {
+    "unknown_favorite_drink": {
+      "message": "Cette boisson ne figure plus parmi vos favoris."
     }
   },
   "issues": {
