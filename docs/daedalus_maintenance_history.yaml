@@ -30,8 +30,8 @@ script:
           task: "{{ task }}"
 
 template:
-  - triggers:
-      - trigger: event
+  - trigger:
+      - platform: event
         event_type: coffee_maintenance_manually_completed
         event_data:
           task: descale
@@ -40,8 +40,8 @@ template:
         unique_id: coffee_maintenance_last_descale
         device_class: timestamp
         state: "{{ trigger.event.time_fired.isoformat() }}"
-  - triggers:
-      - trigger: event
+  - trigger:
+      - platform: event
         event_type: coffee_maintenance_manually_completed
         event_data:
           task: water_filter
@@ -50,8 +50,8 @@ template:
         unique_id: coffee_maintenance_last_filter_replacement
         device_class: timestamp
         state: "{{ trigger.event.time_fired.isoformat() }}"
-  - triggers:
-      - trigger: event
+  - trigger:
+      - platform: event
         event_type: coffee_maintenance_manually_completed
         event_data:
           task: brew_unit_cleaning
