@@ -1,0 +1,103 @@
+blueprint:
+  name: De'Longhi My Coffee Lounge maintenance early warning
+  description: >
+    Send a Home Assistant Companion app notification when a descale progress
+    or water filter usage sensor reaches the chosen percentage. Optionally add
+    a supply to a to-do list if the item is not already open.
+  domain: automation
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    progress_sensor:
+      name: Maintenance progress
+      description: Select Descale progress or Water filter usage for one coffee machine.
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: sensor
+    warning_threshold:
+      name: Warning threshold
+      description: Notify when the reading rises to or above this percentage.
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    phone:
+      name: Phone
+      description: Select the phone registered with the Home Assistant Companion app.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+    shopping_list:
+      name: Shopping list or to-do list
+      description: Optional. Choose a list for the shopping item.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: todo
+    shopping_item:
+      name: Shopping item
+      description: Optional. Enter the item to add, such as De'Longhi water filter.
+      default: ""
+      selector:
+        text:
+
+variables:
+  threshold: !input warning_threshold
+  shopping_list: !input shopping_list
+  shopping_item: !input shopping_item
+
+triggers:
+  - trigger: state
+    entity_id: !input progress_sensor
+    to: null
+
+actions:
+  - condition: template
+    value_template: >-
+      {% if trigger is defined and trigger.platform == 'state' and trigger.from_state and trigger.to_state %}
+        {% set before = trigger.from_state.state | float(none) %}
+        {% set after = trigger.to_state.state | float(none) %}
+        {{ before is not none and after is not none
+           and not trigger.from_state.attributes.get('restored', false)
+           and not trigger.to_state.attributes.get('restored', false)
+           and 0 <= before < threshold <= after <= 100 }}
+      {% else %}
+        false
+      {% endif %}
+  - device_id: !input phone
+    domain: mobile_app
+    type: notify
+    title: Coffee machine maintenance
+    message: >-
+      {{ trigger.to_state.name }} reached {{ trigger.to_state.state }}%.
+    continue_on_error: true
+  - if:
+      - condition: template
+        value_template: "{{ shopping_list and shopping_item | trim != '' }}"
+    then:
+      - action: todo.get_items
+        target:
+          entity_id: "{{ shopping_list }}"
+        data:
+          status: needs_action
+        response_variable: open_items
+      - condition: template
+        value_template: >-
+          {{ shopping_list in open_items
+             and 'items' in open_items[shopping_list]
+             and shopping_item | trim | lower not in
+               (open_items[shopping_list]['items'] | map(attribute='summary') | map('trim') | map('lower') | list) }}
+      - action: todo.add_item
+        target:
+          entity_id: "{{ shopping_list }}"
+        data:
+          item: "{{ shopping_item | trim }}"
+
+mode: queued

@@ -76,6 +76,9 @@
   },
   "entity": {
     "binary_sensor": {
+      "water_filter_installed": {
+        "name": "Filtru de apă instalat"
+      },
       "connected": {
         "name": "Conexiune la rețeaua locală"
       },
@@ -209,6 +212,18 @@
       },
       "water_filter_registration_count": {
         "name": "Număr de înregistrări ale filtrelor de apă"
+      },
+      "descale_progress": {
+        "name": "Progresul depunerilor de calcar"
+      },
+      "water_filter_usage": {
+        "name": "Utilizarea filtrului de apă"
+      },
+      "grounds_container_fill": {
+        "name": "Umplerea recipientului de zaț"
+      },
+      "auto_off_delay": {
+        "name": "Întârziere oprire automată"
       },
       "lan_ip": {
         "name": "Adresă IP în rețeaua locală"

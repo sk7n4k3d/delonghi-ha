@@ -83,14 +83,21 @@ CLOUD_POLL_SECONDS: Final = 120
 CLOUD_FETCH_TIMEOUT_SECONDS: Final = 75
 
 
-# The maintenance counters change infrequently and use their own MQTT session.
-MAINTENANCE_COUNTERS_POLL_SECONDS: Final = 15 * 60
-MAINTENANCE_COUNTERS_RETRY_SECONDS: Final = 60 * 60
-MAINTENANCE_COUNTERS_FETCH_TIMEOUT_SECONDS: Final = 10
+# Machine settings change infrequently and use their own MQTT session.
+MACHINE_SETTINGS_POLL_SECONDS: Final = 15 * 60
+MACHINE_SETTINGS_RETRY_SECONDS: Final = 60 * 60
+MACHINE_SETTINGS_FETCH_TIMEOUT_SECONDS: Final = 10
 MAINTENANCE_COUNTER_KEYS: Final = {
     "CalcTotCnt": "descale_count",
     "FilterTotCnt": "water_filter_registration_count",
 }
+MAINTENANCE_PERCENTAGE_KEYS: Final = {
+    "DecalPerc": "descale_progress",
+    "FilterUsagePerc": "water_filter_usage",
+    "GroundCntPerc": "grounds_container_fill",
+}
+AUTO_OFF_DELAY: Final = "auto_off_delay"
+WATER_FILTER_INSTALLED: Final = "water_filter_installed"
 
 
 # Statistics use a separate MQTT session so shadow authorization or timeouts

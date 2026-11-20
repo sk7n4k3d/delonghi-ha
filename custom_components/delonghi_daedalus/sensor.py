@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import json
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import MAX_LENGTH_STATE_STATE
+from homeassistant.const import MAX_LENGTH_STATE_STATE, PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .cloud_keys import KIND_CAPABILITY, CloudEntityDiscovery, CloudKey, cloud_key_display, lookup_cloud_key
-from .const import BREWING_STATISTICS_KEYS, CONF_CLOUD_TELEMETRY, DOMAIN, MAINTENANCE_COUNTER_KEYS
+from .const import (
+    AUTO_OFF_DELAY,
+    BREWING_STATISTICS_KEYS,
+    CONF_CLOUD_TELEMETRY,
+    DOMAIN,
+    MAINTENANCE_COUNTER_KEYS,
+    MAINTENANCE_PERCENTAGE_KEYS,
+)
 from .coordinator import DaedalusCoordinator
 from .entity import DaedalusCloudEntity, DaedalusEntity
 
@@ -33,7 +40,7 @@ async def async_setup_entry(
     if not entry.data.get(CONF_CLOUD_TELEMETRY):
         return
     discovery = CloudEntityDiscovery(want_binary=False)
-    added_counters: set[str] = set()
+    added_settings_and_counters: set[str] = set()
 
     def _add_cloud_sensors() -> None:
         cloud = (coordinator.data or {}).get("cloud")
@@ -41,13 +48,15 @@ async def async_setup_entry(
             DaedalusCloudSensor(coordinator, source, key, meta=meta) for source, key, meta in discovery.discover(cloud)
         ]
         for sensor_cls, keys in (
-            (DaedalusBrewingStatisticSensor, BREWING_STATISTICS_KEYS),
-            (DaedalusMaintenanceCounterSensor, MAINTENANCE_COUNTER_KEYS),
+            (DaedalusBrewingStatisticSensor, BREWING_STATISTICS_KEYS.values()),
+            (DaedalusMaintenanceCounterSensor, MAINTENANCE_COUNTER_KEYS.values()),
+            (DaedalusMaintenanceProgressSensor, MAINTENANCE_PERCENTAGE_KEYS.values()),
+            (DaedalusAutoOffDelaySensor, (AUTO_OFF_DELAY,)),
         ):
-            counters = (cloud or {}).get(sensor_cls.cloud_key, {})
-            for key in keys.values():
-                if key in counters and key not in added_counters:
-                    added_counters.add(key)
+            values = (cloud or {}).get(sensor_cls.cloud_key, {})
+            for key in keys:
+                if key in values and key not in added_settings_and_counters:
+                    added_settings_and_counters.add(key)
                     new.append(sensor_cls(coordinator, key=key))
         if new:
             async_add_entities(new)
@@ -102,11 +111,8 @@ class DaedalusLanIpSensor(_DaedalusLanDiagnosticSensor):
         return data.get("host")
 
 
-class _DaedalusCloudCounterSensor(_DaedalusSensorBase):
+class _DaedalusCloudNumberSensor(_DaedalusSensorBase):
     cloud_key: str
-
-    _attr_entity_category = None
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def available(self) -> bool:
@@ -116,6 +122,10 @@ class _DaedalusCloudCounterSensor(_DaedalusSensorBase):
     def native_value(self) -> int | None:
         cloud = (self.coordinator.data or {}).get("cloud") or {}
         return cloud.get(self.cloud_key, {}).get(self._attr_translation_key)
+
+
+class _DaedalusCloudCounterSensor(_DaedalusCloudNumberSensor):
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
 
 class DaedalusBrewingStatisticSensor(_DaedalusCloudCounterSensor):
@@ -128,6 +138,22 @@ class DaedalusMaintenanceCounterSensor(_DaedalusCloudCounterSensor):
     """One lifetime maintenance counter reported by the machine."""
 
     cloud_key = "maintenance_counters"
+
+
+class DaedalusMaintenanceProgressSensor(_DaedalusCloudNumberSensor):
+    """A maintenance percentage reported by the machine."""
+
+    cloud_key = "machine_settings"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+
+class DaedalusAutoOffDelaySensor(_DaedalusCloudNumberSensor):
+    """The configured delay before the machine automatically turns off."""
+
+    cloud_key = "machine_settings"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
 
 
 class DaedalusCloudSensor(DaedalusCloudEntity, SensorEntity):

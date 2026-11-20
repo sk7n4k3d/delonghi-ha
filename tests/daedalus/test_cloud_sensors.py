@@ -13,7 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
-from homeassistant.components.sensor import SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.delonghi_daedalus import binary_sensor as bs
@@ -375,6 +376,64 @@ def test_maintenance_counters_discovered_once_per_load_when_reported() -> None:
     assert [entity._attr_unique_id for entity in counters(reloaded).values()] == [
         entity._attr_unique_id for entity in counters(added).values()
     ]
+
+
+def test_machine_settings_discovery_availability_and_metadata() -> None:
+    coord = _FakeCoordinator(_cloud(status_flat={"Alarms.Filter": True}))
+    added: list = []
+    hass = _hass(coord)
+    asyncio.run(sp.async_setup_entry(hass, _entry(), added.extend))
+    asyncio.run(bs.async_setup_entry(hass, _entry(), added.extend))
+    assert {entity._attr_translation_key for entity in added}.isdisjoint(
+        {"descale_progress", "water_filter_usage", "grounds_container_fill", "auto_off_delay", "water_filter_installed"}
+    )
+
+    settings = {
+        "descale_progress": 72,
+        "water_filter_usage": 83,
+        "grounds_container_fill": 0,
+        "auto_off_delay": 30,
+        "water_filter_installed": True,
+    }
+    for _ in range(2):
+        coord.update(_cloud(status_flat={"Alarms.Filter": True}, machine_settings=settings))
+    assert sum(entity._attr_translation_key in settings for entity in added) == len(settings)
+    measurements = {
+        entity._attr_translation_key: entity
+        for entity in added
+        if isinstance(entity, sp.DaedalusMaintenanceProgressSensor)
+    }
+    assert set(measurements) == {"descale_progress", "water_filter_usage", "grounds_container_fill"}
+    for key, entity in measurements.items():
+        assert entity._attr_unique_id == f"SN-TEST_{key}"
+        assert entity._attr_native_unit_of_measurement == PERCENTAGE
+        assert entity._attr_state_class == SensorStateClass.MEASUREMENT
+        assert entity.native_value == settings[key]
+        assert entity.available
+
+    delay = next(entity for entity in added if isinstance(entity, sp.DaedalusAutoOffDelaySensor))
+    assert delay._attr_unique_id == "SN-TEST_auto_off_delay"
+    assert delay._attr_device_class == SensorDeviceClass.DURATION
+    assert delay._attr_native_unit_of_measurement == UnitOfTime.MINUTES
+    assert delay.native_value == 30
+    assert delay.available
+
+    installed = next(entity for entity in added if isinstance(entity, bs.DaedalusWaterFilterInstalledSensor))
+    replacement = next(entity for entity in added if entity._attr_translation_key == "cloud_water_filter")
+    assert installed._attr_unique_id == "SN-TEST_water_filter_installed"
+    assert installed._attr_unique_id != replacement._attr_unique_id
+    assert replacement._attr_device_class == BinarySensorDeviceClass.PROBLEM
+    assert installed.available and installed.is_on is True
+
+    coord.update(_cloud(machine_settings={"descale_progress": 0, "water_filter_installed": False}))
+    assert measurements["descale_progress"].native_value == 0
+    assert measurements["descale_progress"].available
+    assert not measurements["water_filter_usage"].available
+    assert not delay.available
+    assert installed.available and installed.is_on is False
+    coord.update({})
+    assert not installed.available
+    assert all(not entity.available for entity in measurements.values())
 
 
 def test_brewing_counters_discovered_when_optional_statistics_arrive() -> None:

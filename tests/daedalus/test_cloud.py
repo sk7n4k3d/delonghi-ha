@@ -22,7 +22,7 @@ from custom_components.delonghi_daedalus.cloud import (
     extract_machine_name,
     fetch_brewing_statistics,
     fetch_cloud_state,
-    fetch_maintenance_counters,
+    fetch_machine_settings,
     flatten_shadow,
     lookup_machine_name,
     mqtt_connect_packet,
@@ -722,25 +722,81 @@ def test_shadow_client_keeps_partial_result_when_one_shadow_is_silent() -> None:
 
 
 @pytest.mark.parametrize(
-    ("reported", "counters"),
+    ("reported", "counters", "settings"),
     [
         (
             {
-                "NotEditable": {"CalcTotCnt": 0, "FilterTotCnt": 2, "Undocumented": 99, "PrivateField": "discard"},
-                "Editable": {"CalcTotCnt": 100, "UserProfileName": "discard"},
+                "NotEditable": {
+                    "CalcTotCnt": 0,
+                    "FilterTotCnt": 2,
+                    "DecalPerc": 72,
+                    "FilterUsagePerc": 100,
+                    "GroundCntPerc": 0,
+                    "Undocumented": 99,
+                    "PrivateField": "discard",
+                },
+                "Editable": {
+                    "CalcTotCnt": 100,
+                    "UserProfileName": "discard",
+                    "AutoTurnOffTimeInMin": 30,
+                    "UserConf": {"FilterInstall": True, "Undocumented": True},
+                },
             },
             {"descale_count": 0, "water_filter_registration_count": 2},
+            {
+                "descale_progress": 72,
+                "water_filter_usage": 100,
+                "grounds_container_fill": 0,
+                "auto_off_delay": 30,
+                "water_filter_installed": True,
+            },
         ),
-        ({"NotEditable": {"CalcTotCnt": True, "FilterTotCnt": -1}}, {}),
-        ({"NotEditable": {"CalcTotCnt": 1.0, "FilterTotCnt": "2"}}, {}),
-        ({"NotEditable": {"CalcTotCnt": 4, "FilterTotCnt": None}}, {"descale_count": 4}),
-        ({"NotEditable": {"FilterTotCnt": 0}}, {"water_filter_registration_count": 0}),
-        ({"noteditable": {"CalcTotCnt": 1}, "CalcTotCnt": 3, "FilterTotCnt": 2}, {}),
-        ({"NotEditable": ["CalcTotCnt", 2]}, {}),
-        (None, {}),
+        ({"NotEditable": {"CalcTotCnt": True, "FilterTotCnt": -1}}, {}, {}),
+        ({"NotEditable": {"CalcTotCnt": 1.0, "FilterTotCnt": "2"}}, {}, {}),
+        ({"NotEditable": {"CalcTotCnt": 4, "FilterTotCnt": None}}, {"descale_count": 4}, {}),
+        ({"NotEditable": {"FilterTotCnt": 0}}, {"water_filter_registration_count": 0}, {}),
+        ({"noteditable": {"CalcTotCnt": 1}, "CalcTotCnt": 3, "FilterTotCnt": 2}, {}, {}),
+        ({"NotEditable": ["CalcTotCnt", 2]}, {}, {}),
+        (
+            {
+                "NotEditable": {"DecalPerc": True, "FilterUsagePerc": -1, "GroundCntPerc": 101},
+                "Editable": {"AutoTurnOffTimeInMin": "30", "UserConf": {"FilterInstall": 1}},
+            },
+            {},
+            {},
+        ),
+        (
+            {
+                "NotEditable": {"DecalPerc": 35, "FilterUsagePerc": 82.0, "GroundCntPerc": "10"},
+                "Editable": {"DecalPerc": 99, "AutoTurnOffTimeInMin": True, "UserConf": {"FilterInstall": True}},
+            },
+            {},
+            {"descale_progress": 35, "water_filter_installed": True},
+        ),
+        (
+            {"NotEditable": {"DecalPerc": 0}, "Editable": {"AutoTurnOffTimeInMin": 0, "UserConf": []}},
+            {},
+            {"descale_progress": 0, "auto_off_delay": 0},
+        ),
+        (
+            {
+                "NotEditable": {"DecalPerc": 4, "FilterUsagePerc": 90},
+                "Editable": {"UserConf": {"FilterInstall": False}},
+            },
+            {},
+            {"descale_progress": 4, "water_filter_installed": False},
+        ),
+        ({"NotEditable": {"FilterUsagePerc": 42}}, {}, {"water_filter_usage": 42}),
+        (
+            {"NotEditable": {"FilterUsagePerc": 42}, "Editable": {"UserConf": {"FilterInstall": "false"}}},
+            {},
+            {"water_filter_usage": 42},
+        ),
+        ({"Editable": ["AutoTurnOffTimeInMin", 30], "FilterInstall": True}, {}, {}),
+        (None, {}, {}),
     ],
 )
-def test_fetch_maintenance_counters_reads_only_verified_fields(monkeypatch, reported, counters) -> None:
+def test_fetch_machine_settings_reads_only_verified_fields(monkeypatch, reported, counters, settings) -> None:
     async def _run() -> None:
         app, seen = _mqtt_server(reported_by_shadow={"MachineSettings": reported})
         runner, port = await _serve(app)
@@ -751,7 +807,9 @@ def test_fetch_maintenance_counters_reads_only_verified_fields(monkeypatch, repo
         )
         try:
             async with aiohttp_session() as session:
-                assert await fetch_maintenance_counters(session, thing_name="thing1", jwt="jwt") == counters
+                result = await fetch_machine_settings(session, thing_name="thing1", jwt="jwt")
+                assert result.maintenance_counters == counters
+                assert result.machine_settings == settings
             base_topic = "$aws/things/thing1/shadow/name/MachineSettings/get"
             assert seen["subscriptions"] == [[f"{base_topic}/accepted", f"{base_topic}/rejected"]]
             assert seen["publishes"] == [base_topic]

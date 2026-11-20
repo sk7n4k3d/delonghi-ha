@@ -1,0 +1,18 @@
+type: entities
+title: Coffee machine care
+show_header_toggle: false
+entities:
+  - entity: sensor.example_descale_progress
+    name: Descale progress
+    icon: mdi:water-sync
+  - entity: sensor.example_water_filter_usage
+    name: Water filter usage
+    icon: mdi:filter-outline
+  - entity: sensor.example_grounds_container_fill
+    name: Grounds container fill
+    icon: mdi:delete-outline
+  - entity: sensor.example_auto_off_delay
+    name: Auto-off delay
+    icon: mdi:timer-outline
+  - entity: binary_sensor.example_water_filter_installed
+    name: Water filter installed
