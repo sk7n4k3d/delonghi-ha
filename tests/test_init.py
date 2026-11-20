@@ -426,6 +426,17 @@ class TestBrewCustomService:
         #           taste=3, milk_froth=2, temperature=1, profile=5 (coord.selected_profile)
         api.brew_custom.assert_called_once_with("DSN-ABC", "americano", None, None, None, 3, 2, 1, 5)
 
+    def test_brew_custom_calls_resolver_not_selected_profile(self):
+        """coderabbit #79: prove the service uses resolve_profile(), not a direct
+        selected_profile read — make the two disagree."""
+        hass, api, coord, handler = self._setup(coord_selected_profile=None)
+        coord.resolve_profile = MagicMock(return_value=3)  # differs from selected (None)
+        call = MagicMock()
+        call.data = {"beverage": "americano"}
+        _run(handler(call))
+        coord.resolve_profile.assert_called_once()
+        assert api.brew_custom.call_args[0][-1] == 3  # profile passed to API is the resolver's
+
     def test_brew_custom_requires_profile_when_unresolved(self):
         # Issue #78: no silent default to slot 1 — the service refuses when no
         # profile is given and none is selected.
@@ -508,6 +519,15 @@ class TestSyncRecipesService:
     def test_sync_recipes_uses_selected_profile(self):
         hass, api, coord, handler = self._setup(coord_selected_profile=3)
         _run(handler(MagicMock(data={})))
+        api.sync_recipes.assert_called_once_with("DSN-ABC", 3)
+
+    def test_sync_recipes_calls_resolver_not_selected_profile(self):
+        """coderabbit #79: the service must consult resolve_profile(), not read
+        selected_profile directly — make the two disagree."""
+        hass, api, coord, handler = self._setup(coord_selected_profile=None)
+        coord.resolve_profile = MagicMock(return_value=3)
+        _run(handler(MagicMock(data={})))
+        coord.resolve_profile.assert_called_once()
         api.sync_recipes.assert_called_once_with("DSN-ABC", 3)
 
     def test_sync_recipes_requires_profile_when_unresolved(self):

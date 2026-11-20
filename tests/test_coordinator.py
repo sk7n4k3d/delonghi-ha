@@ -1631,6 +1631,39 @@ class TestProfileTracking:
         assert coord.selected_profile == 2  # not hijacked to the stale 1
         assert coord._last_d286 == 2  # baseline unmoved by the cache
 
+    def test_failed_refresh_clears_baseline(self):
+        """coderabbit #79: a failed refresh must drop the baseline so the next
+        successful read re-establishes it as a first sighting, not a transition."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        coord.selected_profile = 2
+        coord._last_d286 = 2
+        api.get_status.side_effect = DeLonghiApiError("timeout")
+        with pytest.raises(UpdateFailed):
+            asyncio.run(coord._async_update_data())
+        assert coord._last_d286 is None  # cleared on failure
+
+    def test_recovery_read_rebaselines_without_hijack(self):
+        """After an in-session outage, the first fresh read differing from the
+        pre-outage baseline sets the baseline only — it does not hijack."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        coord.selected_profile = 2
+        coord._last_d286 = 2
+        coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
+        api.get_status.side_effect = DeLonghiApiError("timeout")
+        with pytest.raises(UpdateFailed):
+            asyncio.run(coord._async_update_data())
+        # recover: cloud now advertises 3 (differs from pre-outage 2)
+        api.get_status.side_effect = None
+        self._status_active(api, 3)
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 2  # first post-outage sighting: baseline only
+        assert coord._last_d286 == 3
+
     def test_mark_profile_selection_persists_to_entry(self):
         """Issue #78: an explicit selection is written to the config entry so it
         survives a restart without re-sending a selection command."""

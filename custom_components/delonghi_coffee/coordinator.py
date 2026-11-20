@@ -786,6 +786,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "coffee_beans_count": len(self.coffee_beans),
             }
         except DeLonghiAuthError as err:
+            # Drop the profile baseline so the next successful read re-establishes
+            # it as a first sighting instead of comparing against a pre-outage
+            # value and hijacking the HA selection (issue #78, coderabbit #79).
+            self._last_d286 = None
             # HA only opens the reauth flow on ConfigEntryAuthFailed —
             # a plain UpdateFailed loops forever with last_update_success=False
             # and the user is never prompted to re-enter credentials (audit C1).
@@ -793,9 +797,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # outside the reach of our SanitizeFilter (audit 2026-11-05).
             raise ConfigEntryAuthFailed(f"Authentication error: {sanitize(err)}") from err
         except DeLonghiApiError as err:
+            self._last_d286 = None  # re-baseline on recovery (issue #78)
             # Same: the API error text can carry the DSN-bearing Ayla URL.
             raise UpdateFailed(f"Error fetching data: {sanitize(err)}") from err
         except Exception as err:  # noqa: BLE001 — last-resort guard: coordinator must surface UpdateFailed
+            self._last_d286 = None  # re-baseline on recovery (issue #78)
             _LOGGER.exception("Unexpected error during coordinator refresh")
             raise UpdateFailed(f"Unexpected error: {sanitize(err)}") from err
 
