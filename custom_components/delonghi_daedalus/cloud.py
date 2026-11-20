@@ -59,6 +59,8 @@ _LOGGER = get_logger(__name__)
 
 SHADOWS: tuple[str, ...] = ("MachineStatus", "MachineCapabilities")
 _BREWING_STATISTICS_SHADOW = "BrewingStatisticsTotals"
+_DRINK_VISIBILITY_SHADOW = "DrinkVisibility"
+_DRINK_VISIBILITY_KEY = re.compile(r"id_[0-9]+")
 
 _CONNECT = 1
 _CONNACK = 2
@@ -720,7 +722,7 @@ class ShadowClient:
             # and keep the raw body out of the log line (it can echo the
             # request context); the shadow name is what a retest needs.
             errors[shadow] = f"shadow get rejected by broker: {body[:200]}"
-            log = _LOGGER.debug if shadow == _BREWING_STATISTICS_SHADOW else _LOGGER.warning
+            log = _LOGGER.debug if shadow in (_BREWING_STATISTICS_SHADOW, _DRINK_VISIBILITY_SHADOW) else _LOGGER.warning
             log("Daedalus cloud: shadow get for %s rejected by the broker", shadow)
 
     def _ws_url(self, *, app_style: bool) -> str:
@@ -964,6 +966,22 @@ async def fetch_brewing_statistics(session: aiohttp.ClientSession, *, thing_name
         if type(value) is int and value >= 0:
             counters[key] = value
     return counters
+
+
+async def fetch_visible_drinks_count(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> int | None:
+    """Count the machine's reported visibility flags without keeping recipe identifiers."""
+    client = ShadowClient(session, thing_name=thing_name, jwt=jwt)
+    documents = await client.fetch(shadows=(_DRINK_VISIBILITY_SHADOW,), timeout=5)
+    state = documents.get(_DRINK_VISIBILITY_SHADOW, {}).get("state")
+    reported = state.get("reported") if isinstance(state, dict) else None
+    if not isinstance(reported, dict) or not reported:
+        return None
+    if any(
+        not _DRINK_VISIBILITY_KEY.fullmatch(key) or type(value) is not int or value not in (0, 1)
+        for key, value in reported.items()
+    ):
+        return None
+    return sum(reported.values())
 
 
 async def fetch_reported_lan_ip(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> str | None:

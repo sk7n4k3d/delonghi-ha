@@ -22,6 +22,7 @@ from custom_components.delonghi_daedalus.cloud import (
     extract_machine_name,
     fetch_brewing_statistics,
     fetch_cloud_state,
+    fetch_visible_drinks_count,
     flatten_shadow,
     lookup_machine_name,
     mqtt_connect_packet,
@@ -690,6 +691,39 @@ def test_fetch_brewing_statistics_reads_only_verified_counters(monkeypatch, repo
             async with aiohttp_session() as session:
                 assert await fetch_brewing_statistics(session, thing_name="thing1", jwt="jwt") == counters
             assert seen["publishes"] == ["$aws/things/thing1/shadow/name/BrewingStatisticsTotals/get"]
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("reported", "count"),
+    [
+        ({"id_201": 0, "id_202": 1, "id_203": 1}, 2),
+        ({"id_201": 0}, 0),
+        ({}, None),
+        ([{"id_201": 1}], None),
+        ({"id_201": 1, "unknown": 1}, None),
+        ({"id_201": 1, "id_٢٠٢": 1}, None),
+        ({"id_201": 1, "id_202": True}, None),
+        ({"id_201": 1, "id_202": 2}, None),
+        ({"id_201": 1, "id_202": "0"}, None),
+    ],
+)
+def test_fetch_visible_drinks_count_reads_only_visibility_flags(monkeypatch, reported, count) -> None:
+    async def _run() -> None:
+        app, seen = _mqtt_server(reported_by_shadow={"DrinkVisibility": reported})
+        runner, port = await _serve(app)
+        monkeypatch.setattr(
+            cloud,
+            "ShadowClient",
+            lambda session, **kwargs: ShadowClient(session, broker="127.0.0.1", scheme="ws", port=port, **kwargs),
+        )
+        try:
+            async with aiohttp_session() as session:
+                assert await fetch_visible_drinks_count(session, thing_name="thing1", jwt="jwt") == count
+            assert seen["publishes"] == ["$aws/things/thing1/shadow/name/DrinkVisibility/get"]
         finally:
             await runner.cleanup()
 

@@ -24,6 +24,7 @@ _HA_MODULES = [
     "homeassistant.helpers.storage",
     "homeassistant.helpers.service",
     "homeassistant.helpers.event",
+    "homeassistant.helpers.selector",
     "homeassistant.components",
     "homeassistant.components.sensor",
     "homeassistant.components.binary_sensor",

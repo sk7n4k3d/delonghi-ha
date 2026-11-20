@@ -24,7 +24,10 @@ from custom_components.delonghi_daedalus.config_flow import (
 from custom_components.delonghi_daedalus.const import (
     CONF_AROMATIC_WARMUP,
     CONF_CLOUD_TELEMETRY,
+    CONF_DRINK_FAVORITES,
+    CONF_DRINK_VISIBILITY,
     CONF_EMAIL,
+    CONF_FAVORITE_DRINK,
     CONF_HOST,
     CONF_JWT,
     CONF_LAN_AUTH_MESSAGE,
@@ -700,6 +703,43 @@ def test_options_shows_form_with_current_value() -> None:
     # the checkbox defaults to the stored value
     schema_keys = list(result["data_schema"].schema)
     assert any(str(k) == CONF_CLOUD_TELEMETRY for k in schema_keys)
+    assert result["data_schema"]({})[CONF_DRINK_VISIBILITY] is False
+
+
+def test_options_can_toggle_drink_visibility() -> None:
+    entry = _make_entry(True)
+    flow = _make_options_flow(entry)
+    result = asyncio.run(flow.async_step_init({CONF_DRINK_VISIBILITY: True}))
+    assert result["type"] == "create_entry"
+    assert flow.hass.config_entries.async_update_entry.call_args.kwargs["data"][CONF_DRINK_VISIBILITY] is True
+    flow.hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
+
+
+def test_favorite_options_normalize_labels_and_clear_removed_selection() -> None:
+    entry = _make_entry(True)
+    entry.data.update({CONF_DRINK_FAVORITES: ["Lungo"], CONF_FAVORITE_DRINK: "Lungo", CONF_JWT: "test-token"})
+    flow = _make_options_flow(entry)
+    result = asyncio.run(flow.async_step_init({CONF_DRINK_FAVORITES: ["", " Espresso ", "ESPRESSO", "Café"]}))
+    assert result["type"] == "create_entry"
+    assert flow.hass.config_entries.async_update_entry.call_args.kwargs["data"] == {
+        CONF_EMAIL: "a@b.c",
+        CONF_CLOUD_TELEMETRY: True,
+        CONF_DRINK_FAVORITES: ["Espresso", "Café"],
+        CONF_JWT: "test-token",
+    }
+    flow.hass.config_entries.async_reload.assert_awaited_once_with(entry.entry_id)
+
+
+@pytest.mark.parametrize(
+    "labels", [["x" * 256], ["Too\nLong"], ["unavailable"], ["unknown"], [f"Label {i}" for i in range(51)]]
+)
+def test_favorite_options_reject_unusable_labels(labels: list[str]) -> None:
+    flow = _make_options_flow(_make_entry(True))
+    result = asyncio.run(flow.async_step_init({CONF_DRINK_FAVORITES: labels}))
+    assert result["type"] == "form"
+    assert result["errors"] == {CONF_DRINK_FAVORITES: "invalid_drink_favorites"}
+    flow.hass.config_entries.async_update_entry.assert_not_called()
+    flow.hass.config_entries.async_reload.assert_not_awaited()
 
 
 def test_options_toggle_updates_data_and_reloads() -> None:

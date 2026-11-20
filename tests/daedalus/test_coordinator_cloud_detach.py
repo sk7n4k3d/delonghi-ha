@@ -28,17 +28,21 @@ from custom_components.delonghi_daedalus.const import (
     BREWING_STATISTICS_RETRY_SECONDS,
     CLOUD_POLL_SECONDS,
     CONF_CLOUD_TELEMETRY,
+    CONF_DRINK_VISIBILITY,
     CONF_HOST,
     CONF_JWT,
     CONF_LAN_TLS_FINGERPRINT,
     CONF_MACHINE_NAME,
     CONF_SERIAL_NUMBER,
     CONF_SESSION_TOKEN,
+    DRINK_VISIBILITY_POLL_SECONDS,
+    DRINK_VISIBILITY_RETRY_SECONDS,
 )
 from custom_components.delonghi_daedalus.coordinator import DaedalusCoordinator
 
 _PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_cloud_state"
 _STATS_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_brewing_statistics"
+_VISIBILITY_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_visible_drinks_count"
 
 
 @pytest.fixture(autouse=True)
@@ -645,5 +649,53 @@ def test_statistics_repoll_after_thing_remap_without_reusing_old_counters(_mock_
         assert _mock_statistics.await_count == 2
         assert coord.data["cloud"]["machine_name"] == "thing-2"
         assert coord.data["cloud"]["brewing_statistics"] == {"stopped_brew_count": 0}
+
+    asyncio.run(_go())
+
+
+def test_visibility_is_opt_in_and_keeps_regular_telemetry_on_failure():
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        waiting = asyncio.Event()
+
+        async def visibility(*_args, **_kwargs):
+            if fetch.await_count == 1:
+                return 0
+            waiting.set()
+            await asyncio.Future()
+
+        with (
+            patch(_PATCH, return_value=_CLOUD_STATE),
+            patch(_VISIBILITY_PATCH, side_effect=visibility) as fetch,
+            patch("custom_components.delonghi_daedalus.coordinator.DRINK_VISIBILITY_FETCH_TIMEOUT_SECONDS", 0.05),
+        ):
+            await coord._async_update_data()
+            await coord._cloud_task
+            fetch.assert_not_awaited()
+
+            coord.entry.data[CONF_DRINK_VISIBILITY] = True
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["visible_drinks_count"] == 0
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["visible_drinks_count"] == 0
+            fetch.assert_awaited_once()
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._drink_visibility_due_at -= DRINK_VISIBILITY_POLL_SECONDS + 1
+            await coord._async_update_data()
+            await asyncio.wait_for(waiting.wait(), timeout=2)
+            assert coord.data["cloud"]["status_flat"] == {"a": 1}
+            assert coord.data["connected"] is True
+            assert not coord._cloud_task.done()
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+            assert coord._cloud_error is None
+            assert "visible_drinks_count" not in coord.data["cloud"]
+            assert coord._drink_visibility_due_at >= time.monotonic() + DRINK_VISIBILITY_RETRY_SECONDS - 1
 
     asyncio.run(_go())

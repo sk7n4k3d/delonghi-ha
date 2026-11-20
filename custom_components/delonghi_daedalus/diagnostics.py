@@ -30,6 +30,8 @@ from .cloud import SHADOWS, shadow_accepted_topic, shadow_rejected_topic
 from .cloud_keys import SENSITIVE_KEYS, normalize
 from .const import (
     CONF_CLOUD_TELEMETRY,
+    CONF_DRINK_FAVORITES,
+    CONF_FAVORITE_DRINK,
     CONF_HOST,
     CONF_MACHINE_NAME,
     CONF_SERIAL_NUMBER,
@@ -74,6 +76,8 @@ REDACT_KEYS: set[str] = {
     "host",
     "lan_ip",
     "lan_tls_fingerprint",
+    CONF_DRINK_FAVORITES,
+    CONF_FAVORITE_DRINK,
 }
 
 
