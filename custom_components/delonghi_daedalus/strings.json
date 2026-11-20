@@ -204,6 +204,12 @@
       "serial_number": {
         "name": "Serial number"
       },
+      "descale_count": {
+        "name": "Descale count"
+      },
+      "water_filter_registration_count": {
+        "name": "Water filter registration count"
+      },
       "lan_ip": {
         "name": "LAN IP address"
       },

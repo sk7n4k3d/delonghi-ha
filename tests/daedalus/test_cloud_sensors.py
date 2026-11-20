@@ -337,6 +337,46 @@ def test_platforms_discover_staggered_shadows_and_late_keys(capabilities_at_setu
     assert sorted(cloud_ids(reloaded)) == sorted(cloud_ids(added))
 
 
+def test_maintenance_counters_discovered_once_per_load_when_reported() -> None:
+    coord = _FakeCoordinator(_CLOUD)
+    added: list = []
+    entry = _entry()
+    asyncio.run(sp.async_setup_entry(_hass(coord), entry, added.extend))
+
+    def counters(entities):
+        return {e._attr_translation_key: e for e in entities if isinstance(e, sp.DaedalusMaintenanceCounterSensor)}
+
+    assert not counters(added)
+    coord.update(_cloud(maintenance_counters={"descale_count": 0}))
+    descale = counters(added)["descale_count"]
+    assert descale.native_value == 0
+    assert descale.available
+
+    totals = {"descale_count": 1, "water_filter_registration_count": 0}
+    for _ in range(2):
+        coord.update(_cloud(maintenance_counters=totals))
+    assert sum(isinstance(e, sp.DaedalusMaintenanceCounterSensor) for e in added) == 2
+    for key, entity in counters(added).items():
+        assert entity._attr_unique_id == f"SN-TEST_{key}"
+        assert entity._attr_state_class == SensorStateClass.TOTAL_INCREASING
+        assert entity.native_value == totals[key]
+        assert entity.available
+
+    coord.update(_cloud(maintenance_counters={"descale_count": 1}))
+    assert not counters(added)["water_filter_registration_count"].available
+    coord.update({})
+    assert all(not entity.available for entity in counters(added).values())
+    entry.async_on_unload.call_args.args[0]()
+    assert not coord.listeners
+
+    coord.update(_cloud(maintenance_counters=totals))
+    reloaded: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), reloaded.extend))
+    assert [entity._attr_unique_id for entity in counters(reloaded).values()] == [
+        entity._attr_unique_id for entity in counters(added).values()
+    ]
+
+
 def test_brewing_counters_discovered_when_optional_statistics_arrive() -> None:
     coord = _FakeCoordinator(_CLOUD)
     added: list = []

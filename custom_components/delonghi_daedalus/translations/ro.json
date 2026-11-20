@@ -204,6 +204,12 @@
       "serial_number": {
         "name": "Număr de serie"
       },
+      "descale_count": {
+        "name": "Număr de decalcifieri"
+      },
+      "water_filter_registration_count": {
+        "name": "Număr de înregistrări ale filtrelor de apă"
+      },
       "lan_ip": {
         "name": "Adresă IP în rețeaua locală"
       },

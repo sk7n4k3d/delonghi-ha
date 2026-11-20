@@ -22,6 +22,7 @@ from custom_components.delonghi_daedalus.cloud import (
     extract_machine_name,
     fetch_brewing_statistics,
     fetch_cloud_state,
+    fetch_maintenance_counters,
     flatten_shadow,
     lookup_machine_name,
     mqtt_connect_packet,
@@ -560,7 +561,7 @@ def _mqtt_server(
     ``require_subprotocol`` mimics the AWS IoT ATS gate: a WS upgrade that
     offers no MQTT subprotocol is refused with HTTP 426 before MQTT starts.
     """
-    seen: dict[str, list] = {"connects": [], "paths": [], "publishes": [], "subprotocols": []}
+    seen: dict[str, list] = {"connects": [], "paths": [], "publishes": [], "subprotocols": [], "subscriptions": []}
 
     app = web.Application()
 
@@ -605,12 +606,13 @@ def _mqtt_server(
                     pos = 2
                     if level >= 5:
                         pos += 1 + pkt.payload[pos]  # skip properties length byte(s)
-                    n = 0
+                    topics = []
                     while pos < len(pkt.payload):
                         tlen = int.from_bytes(pkt.payload[pos : pos + 2], "big")
+                        topics.append(pkt.payload[pos + 2 : pos + 2 + tlen].decode())
                         pos += 2 + tlen + 1
-                        n += 1
-                    n = max(1, n)
+                    seen["subscriptions"].append(topics)
+                    n = max(1, len(topics))
                     if level >= 5:
                         codes = bytes([0x87] * n) if deny_subscriptions else bytes([0x00] * n)
                         body = pid + bytes([0x00]) + codes  # empty properties
@@ -714,6 +716,46 @@ def test_shadow_client_keeps_partial_result_when_one_shadow_is_silent() -> None:
             assert docs["MachineStatus"]["state"]["reported"]["shadow"] == "MachineStatus"
         finally:
             await session.close()
+            await runner.cleanup()
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("reported", "counters"),
+    [
+        (
+            {
+                "NotEditable": {"CalcTotCnt": 0, "FilterTotCnt": 2, "Undocumented": 99, "PrivateField": "discard"},
+                "Editable": {"CalcTotCnt": 100, "UserProfileName": "discard"},
+            },
+            {"descale_count": 0, "water_filter_registration_count": 2},
+        ),
+        ({"NotEditable": {"CalcTotCnt": True, "FilterTotCnt": -1}}, {}),
+        ({"NotEditable": {"CalcTotCnt": 1.0, "FilterTotCnt": "2"}}, {}),
+        ({"NotEditable": {"CalcTotCnt": 4, "FilterTotCnt": None}}, {"descale_count": 4}),
+        ({"NotEditable": {"FilterTotCnt": 0}}, {"water_filter_registration_count": 0}),
+        ({"noteditable": {"CalcTotCnt": 1}, "CalcTotCnt": 3, "FilterTotCnt": 2}, {}),
+        ({"NotEditable": ["CalcTotCnt", 2]}, {}),
+        (None, {}),
+    ],
+)
+def test_fetch_maintenance_counters_reads_only_verified_fields(monkeypatch, reported, counters) -> None:
+    async def _run() -> None:
+        app, seen = _mqtt_server(reported_by_shadow={"MachineSettings": reported})
+        runner, port = await _serve(app)
+        monkeypatch.setattr(
+            cloud,
+            "ShadowClient",
+            lambda session, **kwargs: ShadowClient(session, broker="127.0.0.1", scheme="ws", port=port, **kwargs),
+        )
+        try:
+            async with aiohttp_session() as session:
+                assert await fetch_maintenance_counters(session, thing_name="thing1", jwt="jwt") == counters
+            base_topic = "$aws/things/thing1/shadow/name/MachineSettings/get"
+            assert seen["subscriptions"] == [[f"{base_topic}/accepted", f"{base_topic}/rejected"]]
+            assert seen["publishes"] == [base_topic]
+        finally:
             await runner.cleanup()
 
     asyncio.run(_run())

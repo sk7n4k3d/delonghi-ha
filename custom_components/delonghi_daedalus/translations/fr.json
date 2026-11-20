@@ -204,6 +204,12 @@
       "serial_number": {
         "name": "Numéro de série"
       },
+      "descale_count": {
+        "name": "Nombre de détartrages"
+      },
+      "water_filter_registration_count": {
+        "name": "Nombre d’enregistrements de filtres à eau"
+      },
       "lan_ip": {
         "name": "Adresse IP locale"
       },

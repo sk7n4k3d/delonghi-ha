@@ -30,6 +30,8 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > brew unit cleaning and water filter replacement. Enable cloud telemetry, then select your
 > Companion app phone and the corresponding sensors that your machine exposes. Leave unsupported
 > alerts empty. An alert is sent when a selected sensor changes from off to on.
+> [Keep an observed maintenance history](docs/daedalus-observed-maintenance.md) when your machine
+> reports lifetime descale or water filter registration counts through cloud telemetry.
 > [Keep a manual maintenance history](docs/daedalus-maintenance-history.md) for descaling,
 > water filter replacement and brew unit cleaning.
 >

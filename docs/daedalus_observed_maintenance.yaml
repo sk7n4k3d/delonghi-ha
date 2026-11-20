@@ -1,0 +1,14 @@
+# Optional Home Assistant package. Replace each example source entity ID.
+template:
+  - use_blueprint:
+      path: daedalus/daedalus-observed-maintenance.yaml
+      input:
+        counter: sensor.example_descale_count
+        name: "Coffee maintenance: Last descale observed"
+        unique_id: coffee_maintenance_last_descale_observed
+  - use_blueprint:
+      path: daedalus/daedalus-observed-maintenance.yaml
+      input:
+        counter: sensor.example_water_filter_registration_count
+        name: "Coffee maintenance: Last water filter registration observed"
+        unique_id: coffee_maintenance_last_water_filter_registration_observed

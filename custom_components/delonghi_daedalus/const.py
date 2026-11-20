@@ -83,6 +83,16 @@ CLOUD_POLL_SECONDS: Final = 120
 CLOUD_FETCH_TIMEOUT_SECONDS: Final = 75
 
 
+# The maintenance counters change infrequently and use their own MQTT session.
+MAINTENANCE_COUNTERS_POLL_SECONDS: Final = 15 * 60
+MAINTENANCE_COUNTERS_RETRY_SECONDS: Final = 60 * 60
+MAINTENANCE_COUNTERS_FETCH_TIMEOUT_SECONDS: Final = 10
+MAINTENANCE_COUNTER_KEYS: Final = {
+    "CalcTotCnt": "descale_count",
+    "FilterTotCnt": "water_filter_registration_count",
+}
+
+
 # Statistics use a separate MQTT session so shadow authorization or timeouts
 # cannot interfere with MachineStatus and MachineCapabilities.
 BREWING_STATISTICS_POLL_SECONDS: Final = 15 * 60
