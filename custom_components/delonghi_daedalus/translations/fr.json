@@ -240,6 +240,9 @@
       "brewing_error_count": {
         "name": "Nombre d'erreurs de préparation"
       },
+      "brewing_hours": {
+        "name": "Tranches horaires de préparation signalées"
+      },
       "cloud_operating_state": {
         "name": "État de la machine"
       },

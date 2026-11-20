@@ -240,6 +240,9 @@
       "brewing_error_count": {
         "name": "Brewing error count"
       },
+      "brewing_hours": {
+        "name": "Reported brewing time buckets"
+      },
       "cloud_operating_state": {
         "name": "Operating state"
       },

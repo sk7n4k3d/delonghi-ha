@@ -68,6 +68,9 @@ async def async_setup_entry(
         ):
             visibility_added = True
             new.append(DaedalusVisibleDrinksSensor(coordinator))
+        if (cloud or {}).get("brewing_hours") and "brewing_hours" not in added_settings_and_counters:
+            added_settings_and_counters.add("brewing_hours")
+            new.append(DaedalusBrewingHoursSensor(coordinator))
         if new:
             async_add_entities(new)
 
@@ -180,6 +183,29 @@ class DaedalusVisibleDrinksSensor(_DaedalusSensorBase):
     @property
     def available(self) -> bool:
         return super().available and self.native_value is not None
+
+
+class DaedalusBrewingHoursSensor(_DaedalusSensorBase):
+    """Reported time-of-day bucket counts as attributes."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DaedalusCoordinator) -> None:
+        super().__init__(coordinator, key="brewing_hours")
+
+    @property
+    def available(self) -> bool:
+        return super().available and bool(self.extra_state_attributes)
+
+    @property
+    def native_value(self) -> int | None:
+        return len(self.extra_state_attributes) or None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int]:
+        cloud = (self.coordinator.data or {}).get("cloud") or {}
+        return cloud.get("brewing_hours", {})
 
 
 class DaedalusCloudSensor(DaedalusCloudEntity, SensorEntity):

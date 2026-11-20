@@ -481,3 +481,29 @@ def test_visible_drinks_sensor_appears_on_first_valid_report() -> None:
     assert sensor.native_value == 0
     coord.update(_cloud())
     assert not sensor.available
+
+
+def test_time_buckets_are_an_opt_in_diagnostic_with_real_zero_attributes() -> None:
+    coord = _FakeCoordinator(_CLOUD)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+
+    coord.update(_cloud(brewing_statistics={"brew_count": 2}, brewing_hours={}))
+    assert not any(isinstance(entity, sp.DaedalusBrewingHoursSensor) for entity in added)
+    buckets = {"Time0_2": 0, "Time12_14": 2}
+    coord.update(_cloud(brewing_hours=buckets))
+    coord.update(_cloud(brewing_hours=buckets))
+    (histogram,) = [entity for entity in added if isinstance(entity, sp.DaedalusBrewingHoursSensor)]
+    assert histogram._attr_unique_id == "SN-TEST_brewing_hours"
+    assert histogram._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert histogram._attr_entity_registry_enabled_default is False
+    assert histogram.native_value == 2
+    assert histogram.available
+    assert histogram.extra_state_attributes == buckets
+
+    coord.update(_cloud(brewing_statistics={"brew_count": 3}, brewing_hours={}))
+    assert histogram.native_value is None
+    assert not histogram.available
+    coord.update(_cloud(brewing_hours={"Time0_2": 0}))
+    assert histogram.available
+    assert histogram.extra_state_attributes == {"Time0_2": 0}

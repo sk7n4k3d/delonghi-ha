@@ -22,7 +22,12 @@ from custom_components.delonghi_daedalus.api import (
     DaedalusLanIdentityError,
     DaedalusLanSerialMismatchError,
 )
-from custom_components.delonghi_daedalus.cloud import CloudState, CloudTelemetryError, MachineSettingsTelemetry
+from custom_components.delonghi_daedalus.cloud import (
+    BrewingStatistics,
+    CloudState,
+    CloudTelemetryError,
+    MachineSettingsTelemetry,
+)
 from custom_components.delonghi_daedalus.const import (
     BREWING_STATISTICS_POLL_SECONDS,
     BREWING_STATISTICS_RETRY_SECONDS,
@@ -43,13 +48,13 @@ from custom_components.delonghi_daedalus.const import (
 from custom_components.delonghi_daedalus.coordinator import DaedalusCoordinator
 
 _PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_cloud_state"
-_STATS_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_brewing_statistics"
+_STATS_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_brewing_statistics_snapshot"
 _VISIBILITY_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_visible_drinks_count"
 
 
 @pytest.fixture(autouse=True)
 def _mock_statistics():
-    with patch(_STATS_PATCH, return_value={}) as mocked:
+    with patch(_STATS_PATCH, return_value=BrewingStatistics({}, {})) as mocked:
         yield mocked
 
 
@@ -547,7 +552,7 @@ def test_machine_settings_back_off_without_delaying_regular_shadows(_mock_machin
             return MachineSettingsTelemetry(totals, settings)
 
         _mock_machine_settings.side_effect = _settings
-        _mock_statistics.return_value = {"brew_count": 12}
+        _mock_statistics.return_value = BrewingStatistics({"brew_count": 12}, {})
         with (
             patch(_PATCH, return_value=_CLOUD_STATE) as regular_fetch,
             patch("custom_components.delonghi_daedalus.coordinator.MACHINE_SETTINGS_FETCH_TIMEOUT_SECONDS", 0.05),
@@ -683,7 +688,7 @@ def test_machine_settings_read_keeps_original_account_identity(
         async def _statistics(*_args, **_kwargs):
             started.set()
             await release.wait()
-            return {"brew_count": 12}
+            return BrewingStatistics({"brew_count": 12}, {})
 
         _mock_statistics.side_effect = _statistics
         _mock_machine_settings.return_value = MachineSettingsTelemetry({"descale_count": 1})
@@ -744,7 +749,13 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
         coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
         counters = {"brew_count": 12, "stopped_brew_count": 3, "brewing_error_count": 0}
         updated_counters = {**counters, "brew_count": 13}
-        _mock_statistics.side_effect = [counters, CloudTelemetryError("broker refused subscriptions"), updated_counters]
+        buckets = {"Time9_11": 0, "Time12_14": 9}
+        _mock_statistics.side_effect = [
+            BrewingStatistics(counters, buckets),
+            BrewingStatistics(counters, {}),
+            CloudTelemetryError("broker refused subscriptions"),
+            BrewingStatistics(updated_counters, {}),
+        ]
 
         with patch(_PATCH, return_value=_CLOUD_STATE):
             start = time.monotonic()
@@ -753,12 +764,23 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
             assert coord.async_update_listeners.call_count == 2
             assert coord._brewing_statistics_due_at >= start + BREWING_STATISTICS_POLL_SECONDS
             assert coord.data["cloud"]["brewing_statistics"] == counters
+            assert coord.data["cloud"]["brewing_hours"] == buckets
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
             await coord._async_update_data()
             await coord._cloud_task
             assert coord.data["cloud"]["brewing_statistics"] == counters
+            assert coord.data["cloud"]["brewing_hours"] == buckets
             _mock_statistics.assert_awaited_once()
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._brewing_statistics_due_at -= BREWING_STATISTICS_POLL_SECONDS + 1
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["brewing_statistics"] == counters
+            assert coord.data["cloud"]["brewing_hours"] == {}
+            assert coord._cloud_error is None
+            assert _mock_statistics.await_count == 2
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
             coord._brewing_statistics_due_at -= BREWING_STATISTICS_POLL_SECONDS + 1
@@ -767,8 +789,8 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
             assert coord.data["cloud"]["brewing_statistics"] == {}
             assert coord.data["cloud"]["status_flat"] == {"a": 1}
             assert coord._cloud_error is None
-            assert coord.async_update_listeners.call_count == 5
-            assert _mock_statistics.await_count == 2
+            assert coord.async_update_listeners.call_count == 7
+            assert _mock_statistics.await_count == 3
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
             coord._brewing_statistics_due_at -= BREWING_STATISTICS_RETRY_SECONDS + 1
@@ -788,7 +810,7 @@ def test_statistics_cannot_restore_expired_cloud_snapshot(_mock_statistics):
         async def _statistics(*_args, **_kwargs):
             started.set()
             await release.wait()
-            return {"brew_count": 12}
+            return BrewingStatistics({"brew_count": 12}, {"Time12_14": 2})
 
         _mock_statistics.side_effect = _statistics
         with patch(_PATCH, return_value=_CLOUD_STATE):
@@ -814,10 +836,11 @@ def test_statistics_repoll_after_thing_remap_without_reusing_old_counters(_mock_
 
         async def _statistics(_session, *, thing_name, jwt):
             if thing_name == "thing-1":
-                return {"brew_count": 12}
+                return BrewingStatistics({"brew_count": 12}, {"Time0_2": 5})
             assert thing_name == "thing-2"
             assert "brewing_statistics" not in coord.data["cloud"]
-            return {"stopped_brew_count": 0}
+            assert "brewing_hours" not in coord.data["cloud"]
+            return BrewingStatistics({"stopped_brew_count": 0}, {"Time9_11": 0})
 
         _mock_statistics.side_effect = _statistics
         with patch(_PATCH, side_effect=[_CLOUD_STATE, CloudState(_DOCS, "thing-2")]):
@@ -833,6 +856,7 @@ def test_statistics_repoll_after_thing_remap_without_reusing_old_counters(_mock_
         assert _mock_statistics.await_count == 2
         assert coord.data["cloud"]["machine_name"] == "thing-2"
         assert coord.data["cloud"]["brewing_statistics"] == {"stopped_brew_count": 0}
+        assert coord.data["cloud"]["brewing_hours"] == {"Time9_11": 0}
 
     asyncio.run(_go())
 

@@ -21,6 +21,7 @@ from custom_components.delonghi_daedalus.cloud import (
     _shadow_from_topic,
     extract_machine_name,
     fetch_brewing_statistics,
+    fetch_brewing_statistics_snapshot,
     fetch_cloud_state,
     fetch_machine_settings,
     fetch_visible_drinks_count,
@@ -1337,5 +1338,51 @@ def test_cloud_handles_directory_changes_without_reusing_old_status(outcome):
                         assert (result.shadows, result.machine_name) == (caps, prior)
                     else:
                         assert (result.shadows, result.machine_name) == (docs, replacement)
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("reported", "counters", "buckets"),
+    [
+        (
+            {
+                "Brew": "broken",
+                "TimeOfDay": {
+                    "Time0_2": 0,
+                    "Time3_5": True,
+                    "Time6_8": -1,
+                    "Time9_11": 2.0,
+                    "Time12_14": 4,
+                    "Time15_17": 7,
+                    "Time18_20": "3",
+                    "Time21_23": 1,
+                    "Undocumented": 99,
+                },
+            },
+            {},
+            {"Time0_2": 0, "Time12_14": 4, "Time15_17": 7, "Time21_23": 1},
+        ),
+        ({"Brew": 2, "TimeOfDay": [0] * 8}, {"brew_count": 2}, {}),
+        ({"Brew": 2}, {"brew_count": 2}, {}),
+    ],
+)
+def test_time_buckets_share_the_totals_request_and_validate_independently(monkeypatch, reported, counters, buckets):
+    async def _run():
+        app, seen = _mqtt_server(reported_by_shadow={"BrewingStatisticsTotals": reported})
+        runner, port = await _serve(app)
+        monkeypatch.setattr(
+            cloud,
+            "ShadowClient",
+            lambda session, **kwargs: ShadowClient(session, broker="127.0.0.1", scheme="ws", port=port, **kwargs),
+        )
+        try:
+            async with aiohttp_session() as session:
+                result = await fetch_brewing_statistics_snapshot(session, thing_name="thing1", jwt="jwt")
+            assert result.counters == counters
+            assert result.time_of_day == buckets
+            assert seen["publishes"] == ["$aws/things/thing1/shadow/name/BrewingStatisticsTotals/get"]
+        finally:
+            await runner.cleanup()
 
     asyncio.run(_run())

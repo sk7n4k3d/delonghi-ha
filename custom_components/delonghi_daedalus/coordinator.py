@@ -22,9 +22,10 @@ from .api import (
     DaedalusLanSerialMismatchError,
 )
 from .cloud import (
+    BrewingStatistics,
     CloudTelemetryError,
     MachineSettingsTelemetry,
-    fetch_brewing_statistics,
+    fetch_brewing_statistics_snapshot,
     fetch_cloud_state,
     fetch_machine_settings,
     fetch_visible_drinks_count,
@@ -449,8 +450,9 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if key in previous:
                     cloud_data[key] = previous[key]
         if previous and previous.get("machine_name") == thing:
-            if "brewing_statistics" in previous:
-                cloud_data["brewing_statistics"] = previous["brewing_statistics"]
+            for key in ("brewing_statistics", "brewing_hours"):
+                if key in previous:
+                    cloud_data[key] = previous[key]
             if self.entry.data.get(CONF_DRINK_VISIBILITY) and "visible_drinks_count" in previous:
                 cloud_data["visible_drinks_count"] = previous["visible_drinks_count"]
         self._cloud_data = cloud_data
@@ -473,19 +475,28 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_update_machine_settings(thing, jwt, self._cloud_data, credentials[1:])
 
     async def _async_update_brewing_statistics(self, thing: str, jwt: str, cloud_data: dict[str, Any]) -> None:
-        counters: dict[str, int] = {}
+        statistics = BrewingStatistics({}, {})
         try:
             async with asyncio.timeout(BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS):
-                counters = await fetch_brewing_statistics(self._api.http_session, thing_name=thing, jwt=jwt)
+                statistics = await fetch_brewing_statistics_snapshot(self._api.http_session, thing_name=thing, jwt=jwt)
         except Exception as exc:  # noqa: BLE001 — optional shadow, separate from cloud health
             _LOGGER.debug("Daedalus cloud: brewing statistics unavailable (%s)", type(exc).__name__)
 
         if self._cloud_data is not cloud_data:
             return  # The original snapshot expired while statistics were pending.
-        interval = BREWING_STATISTICS_POLL_SECONDS if counters else BREWING_STATISTICS_RETRY_SECONDS
+        interval = (
+            BREWING_STATISTICS_POLL_SECONDS
+            if statistics.counters or statistics.time_of_day
+            else BREWING_STATISTICS_RETRY_SECONDS
+        )
         self._brewing_statistics_due_at = time.monotonic() + interval
-        if counters != cloud_data.get("brewing_statistics", {}):
-            self._cloud_data = {**cloud_data, "brewing_statistics": counters}
+        updates = {
+            key: value
+            for key, value in (("brewing_statistics", statistics.counters), ("brewing_hours", statistics.time_of_day))
+            if value != cloud_data.get(key, {})
+        }
+        if updates:
+            self._cloud_data = {**cloud_data, **updates}
             self._publish_snapshot()
 
     async def _async_update_drink_visibility(self, thing: str, jwt: str, cloud_data: dict[str, Any]) -> None:
