@@ -1679,7 +1679,9 @@ class TestProfileTracking:
         # next poll: cloud+monitor move to 4, but the full-refresh fetch fails
         self._status(api, active=4, monitor=4)
         api.get_properties.side_effect = DeLonghiApiError("boom")
-        coord._last_full_refresh = 0  # force the full-refresh path this cycle
+        # CI-safe: 0 only forces a full refresh once monotonic() > interval;
+        # a fresh CI container has monotonic() < interval and skips the path.
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
         with pytest.raises(UpdateFailed):
             asyncio.run(coord._async_update_data())
         assert coord.resolve_profile() == 2  # not advanced to the failed poll's 4
