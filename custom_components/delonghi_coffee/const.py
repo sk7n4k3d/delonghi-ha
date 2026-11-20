@@ -18,6 +18,10 @@ GIGYA_API_KEY: Final = "4_DRIMLu7jk9bkKwpRRoQOuw"
 # Region configurations
 CONF_REGION: Final = "region"
 
+# Persisted explicit HA profile choice (issue #78): survives restart without
+# re-sending a selection command. None/absent = no explicit choice yet.
+CONF_SELECTED_PROFILE: Final = "selected_profile"
+
 # Gigya always uses EU1 datacenter — confirmed from AndroidManifest.xml
 # Only Ayla endpoints change per region
 GIGYA_URL: Final = "https://accounts.eu1.gigya.com"

@@ -141,7 +141,11 @@ def _register_services(hass: HomeAssistant) -> None:
         taste = call.data.get("taste", 3)
         milk_froth = call.data.get("milk_froth", 2)
         temperature = call.data.get("temperature", 1)
-        profile = call.data.get("profile", coord.selected_profile or 1)
+        # Explicit service profile applies to this call only; otherwise the
+        # shared resolver (issue #78). No target → ask, don't default to slot 1.
+        profile = call.data.get("profile") or coord.resolve_profile()
+        if not profile:
+            raise HAError("Select a profile before brewing (no profile given and none selected).")
 
         try:
             await hass.async_add_executor_job(
@@ -170,7 +174,9 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_sync_recipes(call) -> None:  # noqa: ANN001
         api, coord, dsn = _resolve_target(hass, call)
-        profile = call.data.get("profile", coord.selected_profile or 1)
+        profile = call.data.get("profile") or coord.resolve_profile()
+        if not profile:
+            raise HAError("Select a profile before syncing recipes (no profile given and none selected).")
         try:
             await hass.async_add_executor_job(api.sync_recipes, dsn, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:

@@ -21,6 +21,7 @@ from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError, DeLonghiUnsup
 from .const import (
     ACTIVE_MACHINE_STATES,
     ACTIVE_SCAN_INTERVAL_SECONDS,
+    CONF_SELECTED_PROFILE,
     CONTENTSTACK_RETRY_MAX,
     DOMAIN,
     FULL_REFRESH_INTERVAL,
@@ -118,7 +119,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Instance attribute (not just the module constant) so tests can
         # collapse the wait to 0 without patching asyncio.sleep.
         self._transient_retry_delay: float = TRANSIENT_RETRY_DELAY_SECONDS
-        self.selected_profile: int | None = None  # Set from machine on first refresh
+        # Issue #78: restore the user's explicit HA choice across restarts
+        # WITHOUT sending a selection command. Absent = no explicit choice yet
+        # (falls back to monitor/cloud default).
+        _saved = config_entry.data.get(CONF_SELECTED_PROFILE) if config_entry else None
+        self.selected_profile: int | None = _saved if isinstance(_saved, int) and _saved > 0 else None
+        self._last_d286: int | None = None  # last observed cloud profile id; only a change follows (issue #78)
         # monotonic stamp of the last HA-side selection — the grace window
         # that lets us follow machine-side profile changes without stomping
         # a just-issued command whose cloud echo lags (F-COORD-01 follow-up).
@@ -397,10 +403,47 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Record an HA-side profile selection (called by select.py).
 
         Opens the grace window during which the cloud echo of this very
-        command must not be mistaken for a machine-side change.
+        command must not be mistaken for a machine-side change. Also persists
+        the choice to the config entry so it survives a restart without
+        re-sending a selection command (issue #78).
         """
         self.selected_profile = pid
         self._selected_profile_set_at = monotonic()
+        self._persist_selected_profile(pid)
+
+    def _persist_selected_profile(self, pid: int) -> None:
+        """Store the explicit profile choice on the config entry (best-effort)."""
+        entry = getattr(self, "config_entry", None)
+        if entry is None:
+            return
+        if entry.data.get(CONF_SELECTED_PROFILE) == pid:
+            return
+        new_data = {**entry.data, CONF_SELECTED_PROFILE: pid}
+        try:
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+        except Exception:  # noqa: BLE001 — persistence is best-effort; selection still works this session
+            _LOGGER.debug("Could not persist selected_profile=%s", pid)
+
+    def resolve_profile(self) -> int | None:
+        """Single source of truth for the profile to use (issue #78).
+
+        Precedence: an explicit HA choice (``selected_profile``, persisted and
+        restored) wins; otherwise the cloud ``active_profile`` if present;
+        otherwise the monitor byte. Returns ``None`` when nothing is known, so
+        callers must ask for an explicit profile rather than silently defaulting
+        to slot 1. The select and every implicit brew/recipe-sync path call this
+        so they can never disagree on the target slot.
+        """
+        if self.selected_profile is not None:
+            return self.selected_profile
+        data = self.data or {}
+        cloud = data.get("active_profile")
+        if isinstance(cloud, int) and cloud > 0:
+            return cloud
+        mon = data.get("profile")
+        if isinstance(mon, int) and mon > 0:
+            return mon
+        return None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -473,15 +516,24 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # of our own command; outside it, a differing cloud value means
             # the user moved on the touchscreen and the select must follow.
             monitor_profile = status.get("profile", 0)
+            # Fresh per-poll cloud value first (60 s), full-refresh cache as
+            # fallback for firmwares that do not expose d286.
+            machine_profile = status.get("active_profile") or self._cached_profiles.get("active")
             if self.selected_profile is None and monitor_profile > 0:
+                # No explicit choice yet: seed from the monitor so the dropdown
+                # starts on the machine's truth (issue #78: the cloud d286 can be
+                # frozen and must not be the seed).
                 self.selected_profile = monitor_profile
             elif self.selected_profile is not None:
-                # Fresh per-poll value first (60 s), full-refresh cache as
-                # fallback for firmwares that do not expose d286.
-                machine_profile = status.get("active_profile") or self._cached_profiles.get("active")
+                # Only a genuine in-session CHANGE of the cloud profile id is
+                # evidence of a touchscreen switch. A frozen d286 (observed on the
+                # Eletta Explore: stuck at 3 across panel changes — issue #78), a
+                # first sighting, a cache reread, or a post-downtime re-read must
+                # NOT hijack the HA selection. First sighting only sets the baseline.
+                changed = isinstance(machine_profile, int) and machine_profile > 0 and machine_profile != self._last_d286
                 if (
-                    isinstance(machine_profile, int)
-                    and machine_profile > 0
+                    changed
+                    and self._last_d286 is not None
                     and machine_profile != self.selected_profile
                     and (
                         self._selected_profile_set_at is None
@@ -489,11 +541,14 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                 ):
                     _LOGGER.info(
-                        "Profile %d seen from machine (cloud), was %d in HA — following",
+                        "Profile %d seen from machine (cloud changed from %s), was %d in HA — following",
                         machine_profile,
+                        self._last_d286,
                         self.selected_profile,
                     )
                     self.selected_profile = machine_profile
+            if isinstance(machine_profile, int) and machine_profile > 0:
+                self._last_d286 = machine_profile
 
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.
             # Without this, the MQTT session dies after ~5 min and commands

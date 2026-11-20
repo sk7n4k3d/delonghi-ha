@@ -62,26 +62,13 @@ class DeLonghiProfileSelect(CoordinatorEntity[DeLonghiCoordinator], SelectEntity
     def current_option(self) -> str | None:
         """Return the currently selected profile.
 
-        Authoritative ordering:
-          1. ``coordinator.selected_profile`` — explicit user click on this
-             dropdown overrides everything until next refresh.
-          2. ``data["active_profile"]`` — cloud property (10min refresh),
-             reflects what the *machine UI* currently shows as active.
-          3. ``data["profile"]`` — monitor byte (60s polling), can lag and
-             report the *last brewed* profile. Last-resort fallback only.
+        Delegates to ``coordinator.resolve_profile()`` so the dropdown and every
+        implicit brew/recipe-sync path resolve the same slot and can never
+        disagree (issue #78). Precedence: explicit HA choice (persisted) →
+        cloud ``active_profile`` → monitor byte; ``None`` when nothing is known.
         """
         profiles = self.coordinator.data.get("profiles", {})
-
-        active = self.coordinator.selected_profile
-        if active is None:
-            cloud = self.coordinator.data.get("active_profile")
-            if isinstance(cloud, int) and cloud > 0:
-                active = cloud
-            else:
-                monitor = self.coordinator.data.get("profile")
-                if isinstance(monitor, int) and monitor > 0:
-                    active = monitor
-
+        active = self.coordinator.resolve_profile()
         if active is None:
             return None
         return profiles.get(active, {}).get("name", f"Profile {active}")

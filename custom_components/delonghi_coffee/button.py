@@ -150,7 +150,11 @@ class DeLonghiBrewButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
         safety check inside also sees the LAN-corrected state instead of the
         frozen cloud monitor.
         """
-        profile = self.coordinator.selected_profile or 1
+        profile = self.coordinator.resolve_profile()
+        if profile is None:
+            # Issue #78: do not silently default to slot 1 when the target is
+            # unknown — ask for an explicit profile instead of brewing the wrong one.
+            raise HomeAssistantError(f"Select a profile before brewing {self._beverage_key}.")
         _LOGGER.info("Brewing %s on %s (profile %d)", self._beverage_key, self._dsn, profile)
         try:
             await self.coordinator.async_brew(self._beverage_key, profile)
@@ -241,7 +245,9 @@ class DeLonghiSyncButton(CoordinatorEntity[DeLonghiCoordinator], ButtonEntity):
 
     async def async_press(self) -> None:
         """Force sync recipes for the selected profile."""
-        profile = self.coordinator.selected_profile or 1
+        profile = self.coordinator.resolve_profile()
+        if profile is None:
+            raise HomeAssistantError("Select a profile before syncing recipes.")
         try:
             await self.hass.async_add_executor_job(self._api.sync_recipes, self._dsn, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
