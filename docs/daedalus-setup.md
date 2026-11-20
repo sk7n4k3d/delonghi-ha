@@ -29,3 +29,5 @@ When the device directory confirms the machine and omits its presence, Home Assi
 Capabilities can still appear when cloud status is unavailable. Download the integration’s diagnostics and check `cloud_status_error` for the reason. If neither status nor capabilities are available, check `cloud_error`. Handle an unavailable operating state explicitly in automations.
 
 Read-only monitoring has been exercised on the PrimaDonna Aromatic ECAM63070. The precise set of entities depends on the fields reported by each machine. For support, download the integration’s diagnostics from Home Assistant. Keep account details, certificate fingerprints and appliance labels out of public issue attachments.
+
+The [beverage protocol research](daedalus-beverage-research.md) records the My Coffee Lounge catalog, command and response handling. Recipe selection and brewing on the ECAM63070 still need model-specific validation.
