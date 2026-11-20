@@ -60,6 +60,8 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 >     config_entry_id: YOUR_CONFIGURATION_ENTRY_ID
 > ```
 >
+> [Get a Companion app notification when the machine returns to idle after warm-up](docs/daedalus-warmup-idle.md).
+>
 > [Warm-up protocol reference by FA9US](https://github.com/FA9US/mycoffeeHASS/tree/7b34164d0a3a5ec1032c410c6f35253362732328)
 
 ## Features
