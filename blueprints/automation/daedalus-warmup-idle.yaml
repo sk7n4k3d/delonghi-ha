@@ -1,0 +1,48 @@
+blueprint:
+  name: De’Longhi My Coffee Lounge warm-up idle notification
+  description: >
+    Notify a Companion app phone when Home Assistant observes the selected
+    EU PrimaDonna Aromatic ECAM630.70 return to Idle after a Warm up request.
+    Enable Warm up and cloud telemetry in the integration options.
+  domain: automation
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    machine:
+      name: Coffee machine
+      description: Select the PrimaDonna Aromatic registered by De’Longhi My Coffee Lounge.
+      selector:
+        device:
+          filter:
+            - integration: delonghi_daedalus
+    phone:
+      name: Phone
+      description: Select the phone registered with the Home Assistant Companion app.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+
+trigger_variables:
+  machine_device_id: !input machine
+
+triggers:
+  - trigger: event
+    event_type: "delonghi_daedalus_warmup_idle_{{ machine_device_id }}"
+    event_data:
+      device_id: !input machine
+
+actions:
+  - condition: template
+    value_template: >-
+      {{ trigger is defined and trigger.platform == 'event'
+         and 0 <= (now() - trigger.event.time_fired).total_seconds() < 15 }}
+
+  - device_id: !input phone
+    domain: mobile_app
+    type: notify
+    title: Coffee machine warm-up
+    message: Your coffee machine returned to idle after warm-up.
+
+mode: parallel
+max: 10

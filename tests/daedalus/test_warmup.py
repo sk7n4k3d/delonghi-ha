@@ -671,3 +671,85 @@ def test_button_does_not_delegate_without_context_or_when_entity_disabled(servic
         asyncio.run(button.async_press())
     button.hass.services.async_call.assert_not_awaited()
     service.client.warm_up.assert_not_awaited()
+
+
+class _StatusBroker(_Broker):
+    def __init__(self, observations):
+        super().__init__("status")
+        self.observations = iter(observations)
+        self.reads = 0
+
+    async def send_bytes(self, data):
+        reader = cloud.MqttStreamReader(protocol_version=5)
+        reader.feed(data)
+        packet = reader.next_packet()
+        if packet.type == cloud._SUBSCRIBE:
+            self.messages.append(b"\x90\x05\x00\x01\x00\x01\x01")
+        elif packet.type == cloud._PUBLISH:
+            topic, payload = packet.publish_parts()
+            assert topic == cloud.shadow_get_topic(_THING, "MachineStatus")
+            nonce = json.loads(payload)["clientToken"]
+            self.reads += 1
+            if (observation := next(self.observations, None)) is not None:
+                status = {**observation, "clientToken": nonce}
+                self._publish(_ACCEPTED, {**status, "clientToken": "wrong token"})
+                self._publish(_ACCEPTED, status, retain=True)
+                self._publish(_ACCEPTED.replace(_THING, "another-fixture"), status)
+                self._publish(_ACCEPTED, status)
+
+
+def _status_sample(state, stamp, version, *, alarms=None):
+    return {
+        "state": {"reported": {"Status": state, "alarms": {"General": False} if alarms is None else alarms}},
+        "metadata": {"reported": {"Status": {"timestamp": stamp}}},
+        "version": version,
+    }
+
+
+@pytest.mark.parametrize(
+    ("observations", "idle_at", "reads"),
+    [
+        ([_status_sample("Initialization", 87, 2), _status_sample("Idle", 100, 3)], 100, 2),
+        ([_status_sample("Initialization", 99, 1), _status_sample("Idle", 100, 2)], None, 1),
+        ([_status_sample("Initialization", 99, 2), _status_sample("Idle", 100, 3)], 100, 2),
+        (
+            [
+                _status_sample("Standby", 1, 1),
+                _status_sample("Initialization", 89, 2),
+                _status_sample("Initialization", 89, 2),
+                _status_sample("Idle", 102, 3),
+            ],
+            102,
+            4,
+        ),
+        ([_status_sample("Idle", 100, 3)], None, 1),
+        ([_status_sample("Initialization", 86, 2), _status_sample("Idle", 100, 3)], None, 1),
+        ([_status_sample("Initialization", 101, 2)], None, 1),
+        ([_status_sample("Initialization", 99, 2), _status_sample("Idle", 99, 3)], None, 2),
+        ([_status_sample("Initialization", 99, 2), _status_sample("Idle", 100, 2)], None, 2),
+        ([_status_sample("Initialization", 99, 2), _status_sample("Idle", 100, 1)], None, 2),
+        ([_status_sample("Initialization", 99, 2), _status_sample("Standby", 100, 3)], None, 2),
+        ([_status_sample("Initialization", 99, 2), _status_sample("Idle", 100, 3, alarms={"General": 1})], None, 2),
+        ([_status_sample("Initialization", 99, 2, alarms={}), _status_sample("Idle", 100, 3)], None, 1),
+        ([_status_sample("Initialization", 99, 2, alarms={"General": None})], None, 1),
+        ([_status_sample("Initialization", 99, 2), None, _status_sample("Idle", 100, 3)], None, 2),
+    ],
+)
+def test_observe_idle_requires_fresh_ordered_status_without_alarms(monkeypatch, observations, idle_at, reads):
+    broker = _StatusBroker(observations)
+    client = WarmupClient(Mock(), thing_name=_THING, jwt="test-token")
+    client._connect = AsyncMock(return_value=(broker, 5))
+    monkeypatch.setattr(warmup, "_STATUS_POLL_SECONDS", 0)
+    if idle_at == 102:
+        clock = iter([97, 102])
+    elif observations[0]["metadata"]["reported"]["Status"]["timestamp"] == 87:
+        clock = iter([97, 100])
+    else:
+        clock = iter([100, 100, 100])
+    monkeypatch.setattr(warmup, "time", SimpleNamespace(time=lambda: next(clock)))
+
+    assert asyncio.run(client.observe_idle(sent_at=87, standby_version=1)) == idle_at
+
+    assert broker.reads == reads
+    assert not broker.commands
+    broker.close.assert_awaited_once()

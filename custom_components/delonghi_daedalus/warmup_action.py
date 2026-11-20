@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.const import ATTR_DEVICE_ID
+from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry
 from homeassistant.helpers.service import async_register_admin_service
 
 from .api import DaedalusApi, DaedalusError
+from .cloud import _directory_presence
 from .const import (
     CONF_AROMATIC_WARMUP,
     CONF_AROMATIC_WARMUP_PENDING,
+    CONF_CLOUD_TELEMETRY,
     CONF_POOL,
     CONF_SERIAL_NUMBER,
     CONF_SESSION_SECRET,
@@ -21,11 +26,23 @@ from .const import (
     DOMAIN,
     GIGYA_POOL_EU,
 )
-from .warmup import COMMAND_EXPIRY_SECONDS, WarmupClient, WarmupError, resolve_owned_aromatic
+from .warmup import (
+    COMMAND_EXPIRY_SECONDS,
+    WarmupClient,
+    WarmupError,
+    fetch_owned_device,
+    resolve_owned_aromatic,
+    status_is_recent,
+)
 from .warmup_state import entry_lock, is_pending, save_pending
 
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 SERVICE_WARM_UP = "warm_up"
+_OBSERVATION_WINDOW_SECONDS = 240
+
+
+def _idle_event(device_id: str) -> str:
+    return f"{DOMAIN}_warmup_idle_{device_id}"
 
 
 def warmup_enabled(entry: ConfigEntry) -> bool:
@@ -46,12 +63,71 @@ def has_unique_warmup_serial(hass: HomeAssistant, serial: str) -> bool:
     )
 
 
+def _notification_device(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    if not (
+        entry.data.get(CONF_CLOUD_TELEMETRY)
+        and entry.state is ConfigEntryState.LOADED
+        and entry.disabled_by is None
+        and warmup_enabled(entry)
+        and hass.is_running
+    ):
+        return None
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if coordinator is None:
+        return None
+    registry = device_registry.async_get(hass)
+    device = registry.async_get_device(identifiers=coordinator.device.info()["identifiers"])
+    if (
+        device is not None
+        and device.disabled_by is None
+        and entry.entry_id in device.config_entries
+        and hass.bus.async_listeners().get(_idle_event(device.id))
+    ):
+        return device.id
+    return None
+
+
+async def _observe_idle(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    serial: str,
+    jwt: str,
+    thing: str,
+    device_id: str,
+    context: Context,
+    sent_at: int,
+    standby_version: int,
+    deadline: float,
+) -> None:
+    api = DaedalusApi()
+    try:
+        async with asyncio.timeout_at(deadline):
+            client = WarmupClient(api.http_session, thing_name=thing, jwt=jwt)
+            idle_at = await client.observe_idle(sent_at=sent_at, standby_version=standby_version)
+            if idle_at is None or _notification_device(hass, entry) != device_id:
+                return
+            record = await fetch_owned_device(api.http_session, serial=serial, jwt=jwt)
+            if (
+                record["machineName"] == thing
+                and _directory_presence(record) in ("ONLINE", None)
+                and status_is_recent(idle_at)
+                and _notification_device(hass, entry) == device_id
+            ):
+                hass.bus.async_fire(_idle_event(device_id), {ATTR_DEVICE_ID: device_id}, context=context)
+    except (DaedalusError, WarmupError, OSError, TimeoutError):
+        pass  # Lost or unavailable telemetry leaves the attempt unannounced.
+    finally:
+        await api.close()
+
+
 def register_warmup_action(hass: HomeAssistant) -> None:
     """Register one action with no implicit machine or group target."""
     running: set[str] = set()
     # The pending marker survives restart while delivery is uncertain. After a
     # successful reply and marker clear, restarting drops any remaining cooldown.
     cooldown: dict[str, float] = {}
+    observations: dict[str, asyncio.Task[None]] = {}
 
     async def warm_up(call: ServiceCall) -> None:
         entry_id = call.data[ATTR_CONFIG_ENTRY_ID]
@@ -95,10 +171,21 @@ def register_warmup_action(hass: HomeAssistant) -> None:
             ):
                 raise WarmupError("The target entry changed while checking readiness. No warm-up command was sent.")
 
+        sent_at = None
+        observation_deadline = 0.0
+        device_id = None
+
         async def mark_pending() -> None:
+            nonlocal sent_at, observation_deadline, device_id
             require_loaded_target()
             await save_pending(hass, entry_id, True)
             require_loaded_target()
+            previous = observations.pop(serial_key, None)
+            if previous is not None:
+                previous.cancel()
+            device_id = _notification_device(hass, entry)
+            sent_at = int(time.time())
+            observation_deadline = asyncio.get_running_loop().time() + _OBSERVATION_WINDOW_SECONDS
             cooldown[serial_key] = time.monotonic() + COMMAND_EXPIRY_SECONDS
 
         running.add(serial_key)
@@ -117,10 +204,40 @@ def register_warmup_action(hass: HomeAssistant) -> None:
                     thing = await resolve_owned_aromatic(api.http_session, serial=serial, jwt=jwt)
                     client = WarmupClient(api.http_session, thing_name=thing, jwt=jwt)
                     await client.verify_firmware()
-                    await client.warm_up(before_send=mark_pending)
+                    standby_version = await client.warm_up(before_send=mark_pending)
                     await save_pending(hass, entry_id, False)
                 finally:
                     await api.close()
+
+                if (
+                    sent_at is not None
+                    and standby_version is not None
+                    and device_id is not None
+                    and _notification_device(hass, entry) == device_id
+                ):
+                    observation = entry.async_create_background_task(
+                        hass,
+                        _observe_idle(
+                            hass,
+                            entry,
+                            serial=serial,
+                            jwt=jwt,
+                            thing=thing,
+                            device_id=device_id,
+                            context=call.context,
+                            sent_at=sent_at,
+                            standby_version=standby_version,
+                            deadline=observation_deadline,
+                        ),
+                        f"{DOMAIN} observe warm-up status",
+                    )
+                    observations[serial_key] = observation
+
+                    def clear_observation(task: asyncio.Task[None]) -> None:
+                        if observations.get(serial_key) is task:
+                            del observations[serial_key]
+
+                    observation.add_done_callback(clear_observation)
         except WarmupError as exc:
             raise HomeAssistantError(str(exc)) from None
         except (DaedalusError, TimeoutError, OSError):
