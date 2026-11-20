@@ -1,0 +1,27 @@
+# Add these to configuration.yaml under a single utility_meter: key.
+# Replace each source with the corresponding lifetime sensor from your machine.
+utility_meter:
+  coffee_brew_today:
+    source: sensor.example_brew_count
+    cycle: daily
+    periodically_resetting: false
+  coffee_stopped_today:
+    source: sensor.example_stopped_brew_count
+    cycle: daily
+    periodically_resetting: false
+  coffee_errors_today:
+    source: sensor.example_brewing_error_count
+    cycle: daily
+    periodically_resetting: false
+  coffee_brew_this_week:
+    source: sensor.example_brew_count
+    cycle: weekly
+    periodically_resetting: false
+  coffee_stopped_this_week:
+    source: sensor.example_stopped_brew_count
+    cycle: weekly
+    periodically_resetting: false
+  coffee_errors_this_week:
+    source: sensor.example_brewing_error_count
+    cycle: weekly
+    periodically_resetting: false

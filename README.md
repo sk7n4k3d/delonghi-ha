@@ -22,6 +22,8 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > credits: @mimasek71 (issue #18). Example Lovelace card:
 > [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
 > [Set up My Coffee Lounge and upgrade an existing LAN connection](docs/daedalus-setup.md).
+> [Show daily and weekly preparation counts](docs/daedalus-preparation-dashboard.md)
+> on a Home Assistant dashboard if your machine reports lifetime brewing statistics.
 >
 > Import the [Daedalus maintenance notification blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsk7n4k3d%2Fdelonghi-ha%2Fblob%2Fmaster%2Fblueprints%2Fautomation%2Fdaedalus-maintenance-notifications.yaml)
 > to get Home Assistant Companion app alerts for low water, empty beans, full grounds, descaling,
