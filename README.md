@@ -21,6 +21,7 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > fields to named entities (EN/FR/RO) — alarms surface as `binary_sensor` (`problem`). Field mapping
 > credits: @mimasek71 (issue #18). Example Lovelace card:
 > [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
+> [See current alerts and care reminders](docs/daedalus-attention.md) on one dashboard card.
 > [Set up My Coffee Lounge and upgrade an existing LAN connection](docs/daedalus-setup.md).
 > [Show daily and weekly preparation counts](docs/daedalus-preparation-dashboard.md)
 > on a Home Assistant dashboard if your machine reports lifetime brewing statistics.
