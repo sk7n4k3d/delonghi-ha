@@ -98,6 +98,8 @@ def _make_fake_coord():
     coord.async_refresh_after_command = AsyncMock()
     coord.selected_profile = None
     coord.diagnostic_mode = False
+    # Issue #78: services resolve the profile via resolve_profile(); mirror it.
+    coord.resolve_profile = MagicMock(side_effect=lambda: coord.selected_profile)
     return coord
 
 
@@ -424,16 +426,22 @@ class TestBrewCustomService:
         #           taste=3, milk_froth=2, temperature=1, profile=5 (coord.selected_profile)
         api.brew_custom.assert_called_once_with("DSN-ABC", "americano", None, None, None, 3, 2, 1, 5)
 
-    def test_brew_custom_profile_fallback_to_1_when_coord_none(self):
+    def test_brew_custom_requires_profile_when_unresolved(self):
+        # Issue #78: no silent default to slot 1 — the service refuses when no
+        # profile is given and none is selected.
+        from homeassistant.exceptions import HomeAssistantError
+
         hass, api, coord, handler = self._setup(coord_selected_profile=None)
         call = MagicMock()
         call.data = {"beverage": "latte"}
-        _run(handler(call))
-        # coord.selected_profile is None → fallback to 1
-        api.brew_custom.assert_called_once_with("DSN-ABC", "latte", None, None, None, 3, 2, 1, 1)
+        with pytest.raises(HomeAssistantError):
+            _run(handler(call))
+        api.brew_custom.assert_not_called()
 
     def test_brew_custom_api_error_raises_home_assistant_error(self):
-        hass, api, coord, handler = self._setup()
+        # Issue #78: a profile must resolve before the API call; give one so the
+        # test exercises the API-error path rather than the resolver gate.
+        hass, api, coord, handler = self._setup(coord_selected_profile=1)
         api.brew_custom.side_effect = DeLonghiApiError("tank empty")
         call = MagicMock()
         call.data = {"beverage": "espresso"}
@@ -441,7 +449,7 @@ class TestBrewCustomService:
             _run(handler(call))
 
     def test_brew_custom_auth_error_raises_home_assistant_error(self):
-        hass, api, coord, handler = self._setup()
+        hass, api, coord, handler = self._setup(coord_selected_profile=1)
         api.brew_custom.side_effect = DeLonghiAuthError("expired")
         call = MagicMock()
         call.data = {"beverage": "espresso"}
@@ -502,19 +510,25 @@ class TestSyncRecipesService:
         _run(handler(MagicMock(data={})))
         api.sync_recipes.assert_called_once_with("DSN-ABC", 3)
 
-    def test_sync_recipes_fallback_to_1(self):
+    def test_sync_recipes_requires_profile_when_unresolved(self):
+        # Issue #78: no silent default to slot 1.
+        from homeassistant.exceptions import HomeAssistantError
+
         hass, api, coord, handler = self._setup(coord_selected_profile=None)
-        _run(handler(MagicMock(data={})))
-        api.sync_recipes.assert_called_once_with("DSN-ABC", 1)
+        with pytest.raises(HomeAssistantError):
+            _run(handler(MagicMock(data={})))
+        api.sync_recipes.assert_not_called()
 
     def test_sync_recipes_error_raises_home_assistant_error(self):
-        hass, api, coord, handler = self._setup()
+        # Issue #78: a profile must resolve before the API call; give one so the
+        # test exercises the API-error path rather than the resolver gate.
+        hass, api, coord, handler = self._setup(coord_selected_profile=1)
         api.sync_recipes.side_effect = DeLonghiApiError("boom")
         with pytest.raises(HomeAssistantError, match="boom"):
             _run(handler(MagicMock(data={})))
 
     def test_sync_recipes_auth_error_raises_home_assistant_error(self):
-        hass, api, coord, handler = self._setup()
+        hass, api, coord, handler = self._setup(coord_selected_profile=1)
         api.sync_recipes.side_effect = DeLonghiAuthError("creds")
         with pytest.raises(HomeAssistantError, match="creds"):
             _run(handler(MagicMock(data={})))

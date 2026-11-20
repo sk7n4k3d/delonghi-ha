@@ -22,6 +22,22 @@ def _make_coord(profiles: dict | None = None, selected: int | None = None) -> Ma
         coord.selected_profile = pid
 
     coord.mark_profile_selection = MagicMock(side_effect=_mark)
+
+    def _resolve():
+        # Mirror coordinator.resolve_profile() precedence (issue #78) so the
+        # select tests exercise the real resolution: explicit > cloud > monitor.
+        if coord.selected_profile is not None:
+            return coord.selected_profile
+        d = coord.data or {}
+        c = d.get("active_profile")
+        if isinstance(c, int) and c > 0:
+            return c
+        m = d.get("profile")
+        if isinstance(m, int) and m > 0:
+            return m
+        return None
+
+    coord.resolve_profile = MagicMock(side_effect=_resolve)
     return coord
 
 

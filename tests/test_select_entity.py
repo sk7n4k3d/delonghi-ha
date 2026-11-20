@@ -24,6 +24,21 @@ def _make_coordinator(profiles=None, selected_profile=None, api_ok=True):
     coord.data = {"profiles": profiles or {}}
     coord.api.set_active_profile = MagicMock(return_value=api_ok)
     coord.async_refresh_after_command = AsyncMock()
+
+    def _resolve():
+        # Mirror coordinator.resolve_profile() precedence (issue #78).
+        if coord.selected_profile is not None:
+            return coord.selected_profile
+        d = coord.data or {}
+        c = d.get("active_profile")
+        if isinstance(c, int) and c > 0:
+            return c
+        m = d.get("profile")
+        if isinstance(m, int) and m > 0:
+            return m
+        return None
+
+    coord.resolve_profile = MagicMock(side_effect=_resolve)
     return coord
 
 

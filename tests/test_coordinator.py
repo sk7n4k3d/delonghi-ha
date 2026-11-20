@@ -1558,11 +1558,31 @@ class TestProfileTracking:
         assert coord.selected_profile == 4
         assert coord._selected_profile_set_at is not None
 
-    def test_follows_machine_profile_outside_grace(self):
+    def test_first_or_repeated_cloud_value_keeps_restored_choice(self):
+        """Issue #78: a frozen cloud profile (first sighting or repeated) must NOT
+        hijack the restored/explicit HA choice. Replaces the old F-COORD-01
+        'follow on first differing read' assertion, which was wrong for the Eletta
+        where d286 is stuck."""
         coord, _, _ = _make_coord()
         coord.selected_profile = 2
         coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
-        coord._cached_profiles = {"active": 3, "profiles": {}}
+        coord._cached_profiles = {"active": 3, "profiles": {}}  # first sight of 3
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 2  # first sighting only sets the baseline
+        assert coord._last_d286 == 3
+        asyncio.run(coord._async_update_data())  # repeated 3
+        assert coord.selected_profile == 2
+
+    def test_genuine_cloud_change_follows_outside_grace(self):
+        """A real in-session change of the cloud profile id (baseline 2 → 3)
+        outside the grace window still updates the target (touchscreen tracking
+        on models that publish changes)."""
+        coord, _, _ = _make_coord()
+        coord.selected_profile = 2
+        coord._last_d286 = 2  # baseline already established at 2
+        coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
+        coord._cached_profiles = {"active": 3, "profiles": {}}  # changed 2 → 3
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 3
@@ -1583,3 +1603,59 @@ class TestProfileTracking:
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 2
+
+    def test_mark_profile_selection_persists_to_entry(self):
+        """Issue #78: an explicit selection is written to the config entry so it
+        survives a restart without re-sending a selection command."""
+        coord, _, _ = _make_coord()
+        entry = MagicMock()
+        entry.data = {}
+        coord.config_entry = entry
+        coord.hass.config_entries.async_update_entry = MagicMock()
+        coord.mark_profile_selection(4)
+        coord.hass.config_entries.async_update_entry.assert_called_once()
+        new_data = coord.hass.config_entries.async_update_entry.call_args[1]["data"]
+        assert new_data[coord_mod.CONF_SELECTED_PROFILE] == 4
+
+    def test_persist_is_noop_when_unchanged(self):
+        """Re-selecting the same profile must not rewrite the entry (no churn)."""
+        coord, _, _ = _make_coord()
+        entry = MagicMock()
+        entry.data = {coord_mod.CONF_SELECTED_PROFILE: 4}
+        coord.config_entry = entry
+        coord.hass.config_entries.async_update_entry = MagicMock()
+        coord.mark_profile_selection(4)
+        coord.hass.config_entries.async_update_entry.assert_not_called()
+
+
+class TestResolveProfile:
+    """Issue #78: resolve_profile() is the single source of truth for the target
+    slot. Precedence: explicit HA choice > cloud active_profile > monitor byte;
+    None when nothing is known (callers must ask, never silently default to 1)."""
+
+    def _coord(self, selected=None, data=None):
+        coord, _, _ = _make_coord()
+        coord.selected_profile = selected
+        coord.data = data or {}
+        return coord
+
+    def test_explicit_choice_wins(self):
+        coord = self._coord(selected=2, data={"active_profile": 3, "profile": 4})
+        assert coord.resolve_profile() == 2
+
+    def test_falls_back_to_cloud_active(self):
+        coord = self._coord(selected=None, data={"active_profile": 3, "profile": 4})
+        assert coord.resolve_profile() == 3
+
+    def test_falls_back_to_monitor(self):
+        coord = self._coord(selected=None, data={"profile": 4})
+        assert coord.resolve_profile() == 4
+
+    def test_returns_none_when_nothing_known(self):
+        # The conflict-unresolved case: nothing selected, no cloud, no monitor.
+        coord = self._coord(selected=None, data={})
+        assert coord.resolve_profile() is None
+
+    def test_ignores_non_positive_cloud_value(self):
+        coord = self._coord(selected=None, data={"active_profile": 0, "profile": 0})
+        assert coord.resolve_profile() is None
