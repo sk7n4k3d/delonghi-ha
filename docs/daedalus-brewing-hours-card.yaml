@@ -1,0 +1,29 @@
+type: markdown
+title: Brewing counts by time of day
+content: |
+  {% set source = 'sensor.example_reported_brewing_time_buckets' %}
+  {% set available = states(source) not in ('unknown', 'unavailable') %}
+  {% set labels = {
+    'Time0_2': '00:00–02:59',
+    'Time3_5': '03:00–05:59',
+    'Time6_8': '06:00–08:59',
+    'Time9_11': '09:00–11:59',
+    'Time12_14': '12:00–14:59',
+    'Time15_17': '15:00–17:59',
+    'Time18_20': '18:00–20:59',
+    'Time21_23': '21:00–23:59',
+  } %}
+  {% set chart = namespace(peak=0) %}
+  {% for key in labels %}
+    {% set count = state_attr(source, key) if available else none %}
+    {% if count is number and count > chart.peak %}
+      {% set chart.peak = count %}
+    {% endif %}
+  {% endfor %}
+  | Hour range | Count | |
+  |---|---:|---|
+  {% for key, label in labels.items() -%}
+    {% set count = state_attr(source, key) if available else none -%}
+    {% set length = ((count * 20 / chart.peak) | round(0, 'ceil') | int) if count is number and chart.peak > 0 else 0 -%}
+    | {{ label }} | {{ count if count is number else '—' }} | {{ '█' * length }} |
+  {% endfor %}

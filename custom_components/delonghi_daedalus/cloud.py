@@ -51,6 +51,7 @@ from .const import (
     AWS_REST_BASE_URL_PROD,
     AWS_REST_SOURCE_HEADER,
     BREWING_STATISTICS_KEYS,
+    BREWING_TIME_OF_DAY_KEYS,
     CLOUD_POLL_SECONDS,
     MAINTENANCE_COUNTER_KEYS,
     MAINTENANCE_PERCENTAGE_KEYS,
@@ -95,6 +96,14 @@ class CloudState:
     shadows: dict[str, dict[str, Any]]
     machine_name: str
     status_error: str | None = None
+
+
+@dataclass(frozen=True)
+class BrewingStatistics:
+    """Independent projections of the optional brewing statistics shadow."""
+
+    counters: dict[str, int]
+    time_of_day: dict[str, int]
 
 
 # --------------------------------------------------------------------- REST --
@@ -963,11 +972,21 @@ async def fetch_cloud_state(
 
 async def fetch_brewing_statistics(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> dict[str, int]:
     """Read the verified lifetime counters from the optional statistics shadow."""
+    return (await fetch_brewing_statistics_snapshot(session, thing_name=thing_name, jwt=jwt)).counters
+
+
+async def fetch_brewing_statistics_snapshot(
+    session: aiohttp.ClientSession, *, thing_name: str, jwt: str
+) -> BrewingStatistics:
+    """Read totals and time buckets in the same read-only shadow request."""
     client = ShadowClient(session, thing_name=thing_name, jwt=jwt)
     documents = await client.fetch(shadows=(_BREWING_STATISTICS_SHADOW,), timeout=5)
     state = documents[_BREWING_STATISTICS_SHADOW].get("state")
     reported = state.get("reported") if isinstance(state, dict) else None
-    return _nonnegative_integers(reported, BREWING_STATISTICS_KEYS)
+    counters = _nonnegative_integers(reported, BREWING_STATISTICS_KEYS)
+    time_of_day = reported.get("TimeOfDay") if isinstance(reported, dict) else None
+    buckets = _nonnegative_integers(time_of_day, {key: key for key in BREWING_TIME_OF_DAY_KEYS})
+    return BrewingStatistics(counters, buckets)
 
 
 @dataclass(slots=True)

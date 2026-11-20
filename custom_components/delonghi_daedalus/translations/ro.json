@@ -240,6 +240,9 @@
       "brewing_error_count": {
         "name": "Număr de erori la preparare"
       },
+      "brewing_hours": {
+        "name": "Intervale orare de preparare raportate"
+      },
       "cloud_operating_state": {
         "name": "Starea aparatului"
       },
