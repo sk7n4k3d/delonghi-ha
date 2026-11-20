@@ -231,6 +231,33 @@
       "brew_count": {
         "name": "Număr de preparări"
       },
+      "hot_brew_count": {
+        "name": "Număr de preparări calde"
+      },
+      "cold_brew_count": {
+        "name": "Număr de preparări reci"
+      },
+      "recipe_brew_count": {
+        "name": "Număr de preparări pentru rețeta {recipe_id}"
+      },
+      "recipe_cappuccino_brew_count": {
+        "name": "Număr de preparări de cappuccino"
+      },
+      "recipe_latte_macchiato_brew_count": {
+        "name": "Număr de preparări de Latte Macchiato"
+      },
+      "recipe_cafe_con_leche_brew_count": {
+        "name": "Număr de preparări de Café con Leche"
+      },
+      "recipe_caffe_crema_brew_count": {
+        "name": "Număr de preparări de Caffè Crema"
+      },
+      "recipe_black_eye_brew_count": {
+        "name": "Număr de preparări de Black Eye"
+      },
+      "recipe_iced_latte_macchiato_brew_count": {
+        "name": "Număr de preparări de Latte Macchiato cu gheață"
+      },
       "stopped_brew_count": {
         "name": "Număr de preparări oprite"
       },

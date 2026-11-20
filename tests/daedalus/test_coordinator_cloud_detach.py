@@ -750,11 +750,13 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
         counters = {"brew_count": 12, "stopped_brew_count": 3, "brewing_error_count": 0}
         updated_counters = {**counters, "brew_count": 13}
         buckets = {"Time9_11": 0, "Time12_14": 9}
+        recipes = {7: 4, 42: 0}
+        clusters = {"hot_brew_count": 5, "cold_brew_count": 0}
         _mock_statistics.side_effect = [
-            BrewingStatistics(counters, buckets),
-            BrewingStatistics(counters, {}),
+            BrewingStatistics(counters, buckets, recipes, clusters),
+            BrewingStatistics(counters, {}, {7: 5}, clusters),
             CloudTelemetryError("broker refused subscriptions"),
-            BrewingStatistics(updated_counters, {}),
+            BrewingStatistics(updated_counters, {}, {42: 0}, {"cold_brew_count": 0}),
         ]
 
         with patch(_PATCH, return_value=_CLOUD_STATE):
@@ -765,12 +767,16 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
             assert coord._brewing_statistics_due_at >= start + BREWING_STATISTICS_POLL_SECONDS
             assert coord.data["cloud"]["brewing_statistics"] == counters
             assert coord.data["cloud"]["brewing_hours"] == buckets
+            assert coord.data["cloud"]["recipe_brew_counts"] == recipes
+            assert coord.data["cloud"]["cluster_brew_counts"] == clusters
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
             await coord._async_update_data()
             await coord._cloud_task
             assert coord.data["cloud"]["brewing_statistics"] == counters
             assert coord.data["cloud"]["brewing_hours"] == buckets
+            assert coord.data["cloud"]["recipe_brew_counts"] == recipes
+            assert coord.data["cloud"]["cluster_brew_counts"] == clusters
             _mock_statistics.assert_awaited_once()
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
@@ -779,6 +785,8 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
             await coord._cloud_task
             assert coord.data["cloud"]["brewing_statistics"] == counters
             assert coord.data["cloud"]["brewing_hours"] == {}
+            assert coord.data["cloud"]["recipe_brew_counts"] == {7: 5}
+            assert coord.data["cloud"]["cluster_brew_counts"] == clusters
             assert coord._cloud_error is None
             assert _mock_statistics.await_count == 2
 
@@ -787,6 +795,8 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
             await coord._async_update_data()
             await coord._cloud_task
             assert coord.data["cloud"]["brewing_statistics"] == {}
+            assert coord.data["cloud"]["recipe_brew_counts"] == {}
+            assert coord.data["cloud"]["cluster_brew_counts"] == {}
             assert coord.data["cloud"]["status_flat"] == {"a": 1}
             assert coord._cloud_error is None
             assert coord.async_update_listeners.call_count == 7
@@ -797,6 +807,30 @@ def test_statistics_survive_regular_fetches_and_clear_when_denied(_mock_statisti
             await coord._async_update_data()
             await coord._cloud_task
             assert coord.data["cloud"]["brewing_statistics"] == updated_counters
+            assert coord.data["cloud"]["recipe_brew_counts"] == {42: 0}
+            assert coord.data["cloud"]["cluster_brew_counts"] == {"cold_brew_count": 0}
+
+    asyncio.run(_go())
+
+
+@pytest.mark.parametrize(
+    ("statistics", "key", "counts"),
+    [
+        (BrewingStatistics(recipes={42: 0}), "recipe_brew_counts", {42: 0}),
+        (BrewingStatistics(clusters={"cold_brew_count": 0}), "cluster_brew_counts", {"cold_brew_count": 0}),
+    ],
+)
+def test_drink_only_statistics_use_normal_poll_interval(_mock_statistics, statistics, key, counts):
+    async def _go():
+        coord = _make_coordinator()
+        _mock_statistics.return_value = statistics
+        with patch(_PATCH, return_value=_CLOUD_STATE):
+            start = time.monotonic()
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"][key] == counts
+            assert start + BREWING_STATISTICS_POLL_SECONDS <= coord._brewing_statistics_due_at
+            assert coord._brewing_statistics_due_at < start + BREWING_STATISTICS_RETRY_SECONDS
 
     asyncio.run(_go())
 
@@ -810,7 +844,7 @@ def test_statistics_cannot_restore_expired_cloud_snapshot(_mock_statistics):
         async def _statistics(*_args, **_kwargs):
             started.set()
             await release.wait()
-            return BrewingStatistics({"brew_count": 12}, {"Time12_14": 2})
+            return BrewingStatistics({"brew_count": 12}, {"Time12_14": 2}, {7: 2}, {"hot_brew_count": 2})
 
         _mock_statistics.side_effect = _statistics
         with patch(_PATCH, return_value=_CLOUD_STATE):
@@ -836,17 +870,21 @@ def test_statistics_repoll_after_thing_remap_without_reusing_old_counters(_mock_
 
         async def _statistics(_session, *, thing_name, jwt):
             if thing_name == "thing-1":
-                return BrewingStatistics({"brew_count": 12}, {"Time0_2": 5})
+                return BrewingStatistics({"brew_count": 12}, {"Time0_2": 5}, {7: 3}, {"hot_brew_count": 5})
             assert thing_name == "thing-2"
             assert "brewing_statistics" not in coord.data["cloud"]
             assert "brewing_hours" not in coord.data["cloud"]
-            return BrewingStatistics({"stopped_brew_count": 0}, {"Time9_11": 0})
+            assert "recipe_brew_counts" not in coord.data["cloud"]
+            assert "cluster_brew_counts" not in coord.data["cloud"]
+            return BrewingStatistics({"stopped_brew_count": 0}, {"Time9_11": 0}, {42: 0}, {"cold_brew_count": 0})
 
         _mock_statistics.side_effect = _statistics
         with patch(_PATCH, side_effect=[_CLOUD_STATE, CloudState(_DOCS, "thing-2")]):
             await coord._async_update_data()
             await coord._cloud_task
             assert coord.data["cloud"]["brewing_statistics"] == {"brew_count": 12}
+            assert coord.data["cloud"]["recipe_brew_counts"] == {7: 3}
+            assert coord.data["cloud"]["cluster_brew_counts"] == {"hot_brew_count": 5}
             assert coord._brewing_statistics_due_at > time.monotonic()
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
@@ -857,6 +895,8 @@ def test_statistics_repoll_after_thing_remap_without_reusing_old_counters(_mock_
         assert coord.data["cloud"]["machine_name"] == "thing-2"
         assert coord.data["cloud"]["brewing_statistics"] == {"stopped_brew_count": 0}
         assert coord.data["cloud"]["brewing_hours"] == {"Time9_11": 0}
+        assert coord.data["cloud"]["recipe_brew_counts"] == {42: 0}
+        assert coord.data["cloud"]["cluster_brew_counts"] == {"cold_brew_count": 0}
 
     asyncio.run(_go())
 

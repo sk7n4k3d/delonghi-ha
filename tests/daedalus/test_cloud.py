@@ -1386,3 +1386,79 @@ def test_time_buckets_share_the_totals_request_and_validate_independently(monkey
             await runner.cleanup()
 
     asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    ("recipes", "clusters", "expected_recipes", "expected_clusters"),
+    [
+        (
+            [
+                {"ID": 42, "Brew": 3},
+                {"ID": 7, "Brew": 0},
+                {"ID": 7, "Brew": 0},
+                {"ID": 0, "Brew": 1},
+                {"ID": 4294967295, "Brew": 2},
+                {"ID": 4294967296, "Brew": 3},
+                {"ID": 8, "Brew": 2},
+                {"ID": 8, "Brew": 3},
+                {"ID": 8, "Brew": 2},
+                {"ID": 9, "Brew": None},
+                {"ID": 9, "Brew": 4},
+                {"ID": 10, "Brew": -1},
+                {"ID": 11, "Brew": True},
+                {"ID": 12, "Brew": 2.0},
+                {"ID": 13, "Brew": "2"},
+                {"ID": 14},
+                {"ID": "7", "Brew": 1},
+                {"ID": -2, "Brew": 1},
+                {"ID": True, "Brew": 1},
+                {"ID": 21.0, "Brew": 1},
+                {},
+                None,
+            ],
+            [
+                {"Name": "COLD", "Brew": 0},
+                {"Name": "HOT", "Brew": 5},
+                {"Name": "HOT", "Brew": 5},
+                {"Name": "hot", "Brew": 6},
+                {"Name": "OTHER", "Brew": 9},
+                {"Name": 1, "Brew": 4},
+                "COLD",
+            ],
+            {0: 1, 7: 0, 9: 4, 42: 3, 4294967295: 2},
+            {"hot_brew_count": 5, "cold_brew_count": 0},
+        ),
+        (
+            {"42": 7},
+            [{"Name": "HOT", "Brew": 1}, {"Name": "HOT", "Brew": 2}, {"Name": "COLD", "Brew": False}],
+            {},
+            {},
+        ),
+        ([{"ID": 42, "Brew": 0}], {"HOT": 5}, {42: 0}, {}),
+        (None, [{"Name": "HOT", "Brew": 0}], {}, {"hot_brew_count": 0}),
+    ],
+)
+def test_drink_counters_share_the_statistics_request(
+    monkeypatch, recipes, clusters, expected_recipes, expected_clusters
+):
+    async def _run():
+        reported = {"Brew": 5, "TimeOfDay": {"Time0_2": 1}, "Recipes": recipes, "Clusters": clusters}
+        app, seen = _mqtt_server(reported_by_shadow={"BrewingStatisticsTotals": reported})
+        runner, port = await _serve(app)
+        monkeypatch.setattr(
+            cloud,
+            "ShadowClient",
+            lambda session, **kwargs: ShadowClient(session, broker="127.0.0.1", scheme="ws", port=port, **kwargs),
+        )
+        try:
+            async with aiohttp_session() as session:
+                result = await fetch_brewing_statistics_snapshot(session, thing_name="thing1", jwt="jwt")
+            assert result.counters == {"brew_count": 5}
+            assert result.time_of_day == {"Time0_2": 1}
+            assert result.recipes == expected_recipes
+            assert result.clusters == expected_clusters
+            assert seen["publishes"] == ["$aws/things/thing1/shadow/name/BrewingStatisticsTotals/get"]
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(_run())
