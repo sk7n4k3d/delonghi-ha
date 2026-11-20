@@ -249,7 +249,7 @@ class TestBrewBeverage:
         }
         captured: dict[str, bool] = {}
 
-        def _capture_recipe_to_brew(recipe, *, is_iced, is_cold_brew, profile):
+        def _capture_recipe_to_brew(recipe, *, is_iced, is_cold_brew, profile, action_byte=0x03):
             captured["is_iced"] = is_iced
             captured["is_cold_brew"] = is_cold_brew
             return bytes([0x0D, 0x0A, 0x83]) + b"\x00" * 7 + b"\xab\xcd"
@@ -278,7 +278,7 @@ class TestBrewBeverage:
         props = {"d302_rec_2_brew_over_ice": {"value": _fake_recipe_prop()}}
         captured: dict[str, bool] = {}
 
-        def _capture(recipe, *, is_iced, is_cold_brew, profile):
+        def _capture(recipe, *, is_iced, is_cold_brew, profile, action_byte=0x03):
             captured["is_iced"] = is_iced
             return bytes([0x0D, 0x0A, 0x83]) + b"\x00" * 7 + b"\xab\xcd"
 
@@ -312,7 +312,7 @@ class TestBrewBeverage:
             props = {f"d302_rec_2_{key}": {"value": _fake_recipe_prop()}}
             captured: dict[str, bool] = {}
 
-            def _capture(recipe, *, is_iced, is_cold_brew, profile, _cap=captured):
+            def _capture(recipe, *, is_iced, is_cold_brew, profile, action_byte=0x03, _cap=captured):
                 _cap["is_iced"] = is_iced
                 return bytes([0x0D, 0x0A, 0x83]) + b"\x00" * 7 + b"\xab\xcd"
 
@@ -335,7 +335,7 @@ class TestBrewBeverage:
         }
         captured: dict[str, bool] = {}
 
-        def _capture(recipe, *, is_iced, is_cold_brew, profile):
+        def _capture(recipe, *, is_iced, is_cold_brew, profile, action_byte=0x03):
             captured["is_iced"] = is_iced
             captured["is_cold_brew"] = is_cold_brew
             return bytes([0x0D, 0x0A, 0x83]) + b"\x00" * 7 + b"\xab\xcd"
@@ -1377,3 +1377,29 @@ class TestPreBrewCheckInjectedStatus:
         with patch.object(api, "get_status", return_value={"machine_state": "Ready", "alarms": []}) as mock_status:
             api._pre_brew_check("DSN", self._RECIPE, "espresso")
         mock_status.assert_called_once_with("DSN")
+
+
+class TestBrewActionByteGate:
+    """Issue #50 / PR #76: the brew action byte is scoped to the confirmed
+    DL-millcore firmware only; every other family keeps the historical 0x03."""
+
+    _RECIPE = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
+
+    def test_millcore_uses_action_0x01(self):
+        assert _make_api(oem_model="DL-millcore")._brew_action_byte() == 0x01
+
+    def test_striker_keeps_action_0x03(self):
+        assert _make_api(oem_model="DL-striker-cb")._brew_action_byte() == 0x03
+
+    def test_unidentified_model_keeps_action_0x03(self):
+        # No model known up front must NOT default to the millcore byte.
+        assert _make_api(oem_model="")._brew_action_byte() == 0x03
+
+    def test_recipe_converter_honours_action_byte(self):
+        # The action byte is the 6th byte (index 5) of the brew frame.
+        cmd = DeLonghiApi._recipe_to_brew_command(self._RECIPE, profile=1, action_byte=0x01)
+        assert cmd[5] == 0x01
+
+    def test_recipe_converter_defaults_to_0x03(self):
+        cmd = DeLonghiApi._recipe_to_brew_command(self._RECIPE, profile=1)
+        assert cmd[5] == 0x03
