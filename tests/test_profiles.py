@@ -21,9 +21,9 @@ class TestProfileParsing:
         self.api = DeLonghiApi.__new__(DeLonghiApi)
 
     def test_empty_properties(self):
-        """No profile properties returns defaults."""
+        """No profile properties → active stays None (issue #78: never invent slot 1)."""
         result = self.api.parse_profiles({})
-        assert result["active"] == 1
+        assert result["active"] is None
         assert result["profiles"] == {}
 
     def test_active_profile_from_d286(self):

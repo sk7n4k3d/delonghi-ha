@@ -138,6 +138,7 @@ class TestInit:
         assert coord._cached_bean_system_par == {}
         assert coord._lan_config is None
         assert coord.selected_profile is None
+        assert coord._auto_profile is None
         assert coord.seen_alarm_bits == set()
         assert coord.custom_recipe_names == {}
         assert coord.drink_catalog == {}
@@ -383,8 +384,11 @@ class TestAsyncUpdateDataLight:
         assert result["machine_state"] == "Ready"
         assert result["profile"] == 2
         assert result["status"] == "RUN"
-        # First refresh (selected_profile was None) → seeded from the monitor.
-        assert coord.selected_profile == 2
+        # No explicit choice: the monitor byte is only the AUTOMATIC default, it
+        # never becomes an explicit selection (issue #78 / PR #79 review).
+        assert coord.selected_profile is None
+        assert coord._auto_profile == 2
+        assert coord.resolve_profile() == 2
         assert result["monitor_stale"] is False
         # Full-refresh cached dicts must be default empty
         assert result["counters"] == {}
@@ -1538,13 +1542,18 @@ class TestBrewDelivery:
         api.send_command.assert_not_called()
 
 
-class TestProfileTracking:
-    """F-COORD-01 follow-up: the select follows machine-side profile changes.
+# Sentinel: the per-poll status omits ``active_profile`` entirely (firmwares
+# without d286, or a read that came back UNKNOWN).
+_NO_ACTIVE = object()
 
-    The cloud ``active_profile`` property (authoritative, refreshed on the
-    full cycle) is followed outside a grace window opened by an HA-side
-    selection; the monitor byte is never used for this (it lags and reports
-    the last-brewed profile — the original stomping bug).
+
+class TestProfileTracking:
+    """Issue #78 / PR #79 review: explicit choice vs automatic observation.
+
+    ``selected_profile`` is the user's EXPLICIT choice — restored, persisted and
+    never written by a poll. ``_auto_profile`` is the AUTOMATIC default derived
+    from what the machine reports (fresh cloud ``active_profile`` / monitor
+    byte) and is only consulted while no explicit choice exists.
     """
 
     def _settle(self, coord):
@@ -1552,34 +1561,344 @@ class TestProfileTracking:
         coord._last_full_refresh = monotonic()
         coord._last_keepalive = monotonic()
 
-    def test_mark_profile_selection_stamps(self):
+    def _status(self, api, *, active=_NO_ACTIVE, monitor=0, status="RUN"):
+        """Script the per-poll status: fresh cloud ``active_profile`` and the
+        monitor byte (``profile``)."""
+        payload = {
+            "machine_state": "Off",
+            "profile": monitor,
+            "monitor_raw": None,
+            "status": status,
+            "alarms": [],
+            "alarm_word": None,
+        }
+        if active is not _NO_ACTIVE:
+            payload["active_profile"] = active
+        api.get_status = MagicMock(return_value=payload)
+
+    # ── the four acceptance cases of the PR #79 review ──────────────────
+
+    def test_cas1_conflicting_signals_are_not_resolved(self):
+        """No saved choice, monitor 1 vs cloud 3: a conflict is NOT resolved."""
+        coord, _, api = _make_coord()
+        self._status(api, active=3, monitor=1)
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile is None  # never seeded from the monitor
+        assert coord._auto_profile is None  # picking one of two conflicts is #78
+        assert coord.resolve_profile() is None
+
+    def test_cas2_nothing_usable_is_unresolved_and_never_fabricates_1(self):
+        """No saved choice and no usable signal → unresolved, and the published
+        data keeps the absence instead of inventing slot 1."""
+        coord, _, api = _make_coord()
+        self._status(api, monitor=0)  # no fresh cloud value, monitor byte 0
+        self._settle(coord)
+        result = asyncio.run(coord._async_update_data())
+        assert coord._auto_profile is None
+        assert coord.resolve_profile() is None
+        assert result["active_profile"] is None  # absent, not 1
+
+    def test_cas3_saved_choice_survives_cloud_moving_3_then_4(self):
+        """A saved explicit 2 stays 2 while the cloud moves 3 → 4."""
+        coord, _, api = _make_coord()
+        coord.selected_profile = 2  # restored from the config entry
+        self._settle(coord)
+        self._status(api, active=3, monitor=0)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 2
+        assert coord.resolve_profile() == 2
+        self._status(api, active=4, monitor=0)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 2  # a cloud move never overwrites it
+        assert coord.resolve_profile() == 2
+        assert coord._auto_profile is None  # automatic default not computed
+        assert coord._last_d286 is None  # explicit mode does not observe at all
+
+    def test_cas4_read_gap_rebaselines_without_hijacking_auto(self):
+        """fresh 2 → a poll with no fresh value → fresh 3: the gap re-poses the
+        baseline, and the 3 is adopted only on agreement, never as a hijack."""
+        coord, _, api = _make_coord()
+        self._settle(coord)
+        self._status(api, active=2, monitor=0)
+        asyncio.run(coord._async_update_data())
+        assert coord._auto_profile == 2
+        assert coord._last_d286 == 2
+        # read gap: this poll carries no fresh cloud value at all
+        self._status(api, monitor=0, status="UNKNOWN")
+        asyncio.run(coord._async_update_data())
+        assert coord._last_d286 is None  # baseline dropped, not compared
+        assert coord._auto_profile is None  # nothing usable this poll
+        # first sighting after the gap: baseline again, and a conflicting pair
+        # stays unresolved instead of "following" the 3
+        self._status(api, active=3, monitor=4)
+        asyncio.run(coord._async_update_data())
+        assert coord._last_d286 == 3
+        assert coord._auto_profile is None
+        assert coord.resolve_profile() is None
+        # the same value confirmed by the monitor resolves normally
+        self._status(api, active=3, monitor=3)
+        asyncio.run(coord._async_update_data())
+        assert coord._auto_profile == 3
+        assert coord.resolve_profile() == 3
+
+    def test_conflict_vetoes_follow_on_every_poll(self):
+        """numanx11 #79 blocker: a conflict vetoes automatic following on EVERY
+        poll, not just at startup. (3,3)->3, (4,3)->ask, (4,3)->ask, (4,4)->4."""
+        coord, _, api = _make_coord()
+        self._settle(coord)
+        self._status(api, active=3, monitor=3)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 3
+        # cloud moves to 4 while the monitor still says 3: contradictory pair,
+        # must NOT follow the cloud to 4 — ask instead
+        self._status(api, active=4, monitor=3)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() is None
+        assert coord._last_d286 == 4  # baseline kept current during the conflict
+        # identical contradictory reading: still unresolved
+        self._status(api, active=4, monitor=3)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() is None
+        # signals agree on 4: resolves to 4
+        self._status(api, active=4, monitor=4)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 4
+
+    def test_failed_full_refresh_does_not_advance_auto_target(self):
+        """numanx11 #79 r3: a poll whose full-refresh later fails must NOT
+        advance the automatic target — resolve() stays on the last good value
+        that was actually published."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        self._status(api, active=2, monitor=2)
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 2
+        # next poll: cloud+monitor move to 4, but the full-refresh fetch fails
+        self._status(api, active=4, monitor=4)
+        api.get_properties.side_effect = DeLonghiApiError("boom")
+        # CI-safe: 0 only forces a full refresh once monotonic() > interval;
+        # a fresh CI container has monotonic() < interval and skips the path.
+        coord._last_full_refresh = -FULL_REFRESH_INTERVAL - 1
+        with pytest.raises(UpdateFailed):
+            asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 2  # not advanced to the failed poll's 4
+
+    def test_lan_monitor_push_updates_auto_target(self):
+        """numanx11 #79 r3: a LAN frame publishing a monitor slot must move the
+        automatic target so resolve() agrees with the published observation."""
+        coord, _, api = _make_coord()
+        coord.async_set_updated_data = MagicMock()
+        coord._lan_server = _make_lan_server(True)
+        self._status(api, monitor=2)  # monitor-only poll -> auto 2
+        self._settle(coord)
+        coord.data = asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 2
+        # a LAN frame pushes monitor 4 while the cloud profile is absent
+        with patch.object(coord, "_lan_monitor_status", return_value={"profile": 4, "machine_state": "Ready"}):
+            asyncio.run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": "x"}}))
+        assert coord.resolve_profile() == 4  # auto target followed the LAN monitor
+
+    def test_out_of_range_cloud_value_is_not_a_slot(self):
+        """Validation: a slot must be a whole number in 1..5 — 7 is neither a
+        default nor an observation."""
+        coord, _, api = _make_coord()
+        self._status(api, active=7, monitor=0)
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord._auto_profile is None
+        assert coord._last_d286 is None
+        assert coord.resolve_profile() is None
+
+    # ── explicit vs automatic behaviour ─────────────────────────────────
+
+    def test_mark_profile_selection_stamps_explicit_choice(self):
         coord, _, _ = _make_coord()
         coord.mark_profile_selection(4)
-        assert coord.selected_profile == 4
-        assert coord._selected_profile_set_at is not None
+        assert coord.selected_profile == 4  # explicit, not an observation
+        assert coord.resolve_profile() == 4
 
-    def test_follows_machine_profile_outside_grace(self):
-        coord, _, _ = _make_coord()
+    def test_first_or_repeated_cloud_value_keeps_restored_choice(self):
+        """Issue #78: a frozen cloud profile (first sighting or repeated) must
+        NOT touch the restored/explicit HA choice. Replaces the old F-COORD-01
+        'follow on first differing read' assertion, which was wrong for the
+        Eletta where d286 is stuck."""
+        coord, _, api = _make_coord()
         coord.selected_profile = 2
-        coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
-        coord._cached_profiles = {"active": 3, "profiles": {}}
+        self._status(api, active=3, monitor=1)  # fresh cloud advertises 3
         self._settle(coord)
         asyncio.run(coord._async_update_data())
-        assert coord.selected_profile == 3
+        assert coord.selected_profile == 2
+        asyncio.run(coord._async_update_data())  # repeated 3
+        assert coord.selected_profile == 2
+        assert coord.resolve_profile() == 2
 
-    def test_grace_window_absorbs_own_command_echo(self):
-        coord, _, _ = _make_coord()
+    def test_genuine_cloud_change_follows_the_auto_default(self):
+        """NEW MODEL: in automatic mode a real in-session change (baseline 2 → 3)
+        moves ``_auto_profile`` — it is never promoted to an explicit choice."""
+        coord, _, api = _make_coord()
+        coord._auto_profile = 2
+        coord._last_d286 = 2  # baseline already established at 2
+        self._status(api, active=3, monitor=0)  # monitor silent, cloud moved
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord._auto_profile == 3
+        assert coord._last_d286 == 3
+        assert coord.selected_profile is None
+        assert coord.resolve_profile() == 3
+
+    def test_own_command_echo_cannot_override_explicit_choice(self):
+        """No grace window any more: the explicit choice is simply never
+        overwritten, so the lagging echo of our own command is harmless."""
+        coord, _, api = _make_coord()
         coord.mark_profile_selection(3)
-        coord._cached_profiles = {"active": 2, "profiles": {}}  # stale echo of our own command
+        self._status(api, active=2, monitor=2)  # stale echo of our own command
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 3
+        assert coord.resolve_profile() == 3
 
     def test_missing_cloud_active_never_stomps(self):
         coord, _, _ = _make_coord()
         coord.selected_profile = 2
-        coord._selected_profile_set_at = None
         coord._cached_profiles = {"profiles": {}}  # no "active" key at all
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 2
+
+    def test_stale_cached_value_is_not_a_transition(self):
+        """coderabbit #79: when the per-poll status omits active_profile, an
+        older full-refresh cached value must not become the default."""
+        coord, _, _ = _make_coord()  # default status: no active_profile, profile 0
+        coord._auto_profile = 2
+        coord._last_d286 = 2
+        coord._cached_profiles = {"active": 1, "profiles": {}}  # stale cache, differs
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile is None  # nothing seeded from the cache
+        assert coord._auto_profile is None  # the stale cache is not a default
+        assert coord._last_d286 is None  # no fresh value: baseline re-posed
+
+    def test_failed_refresh_clears_baseline(self):
+        """coderabbit #79: a failed refresh must drop the baseline so the next
+        successful read re-establishes it as a first sighting, not a transition."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        coord._auto_profile = 2
+        coord._last_d286 = 2
+        api.get_status.side_effect = DeLonghiApiError("timeout")
+        with pytest.raises(UpdateFailed):
+            asyncio.run(coord._async_update_data())
+        assert coord._last_d286 is None  # cleared on failure
+
+    def test_recovery_read_rebaselines_without_hijack(self):
+        """After an in-session outage, the first fresh read differing from the
+        pre-outage baseline sets the baseline only — it is not a transition, and
+        it never becomes an explicit choice."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        coord._auto_profile = 2
+        coord._last_d286 = 2
+        api.get_status.side_effect = DeLonghiApiError("timeout")
+        with pytest.raises(UpdateFailed):
+            asyncio.run(coord._async_update_data())
+        # recover: cloud now advertises 3 (differs from pre-outage 2), monitor
+        # silent — the value is adopted as the automatic default by agreement
+        self._status(api, active=3, monitor=0)
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord._last_d286 == 3  # post-outage sighting: baseline only
+        assert coord._auto_profile == 3
+        assert coord.selected_profile is None  # never promoted to an explicit choice
+
+    def test_published_active_profile_keeps_a_real_cloud_value(self):
+        """A slot the machine really reports stays resolved."""
+        coord, _, api = _make_coord()
+        self._status(api, active=4, monitor=0)
+        self._settle(coord)
+        result = asyncio.run(coord._async_update_data())
+        assert result["active_profile"] == 4
+
+    def test_published_active_profile_falls_back_to_cache_not_to_1(self):
+        """Without a fresh value the full-refresh cache is published — and when
+        even that knows nothing, the absence is preserved (see CAS2)."""
+        coord, _, _ = _make_coord()
+        coord._cached_profiles = {"active": 5, "profiles": {}}
+        self._settle(coord)
+        result = asyncio.run(coord._async_update_data())  # fresh absent
+        assert result["active_profile"] == 5
+
+    def test_saved_out_of_range_choice_is_ignored(self):
+        """A corrupt config-entry value is not an explicit choice."""
+        entry = MagicMock()
+        entry.data = {coord_mod.CONF_SELECTED_PROFILE: 7}
+        coord = DeLonghiCoordinator(_make_hass(), _make_api(), "DSN-1", config_entry=entry)
+        assert coord.selected_profile is None
+        assert coord._auto_profile is None
+        assert coord.resolve_profile() is None
+
+    def test_mark_profile_selection_persists_to_entry(self):
+        """Issue #78: an explicit selection is written to the config entry so it
+        survives a restart without re-sending a selection command."""
+        coord, _, _ = _make_coord()
+        entry = MagicMock()
+        entry.data = {}
+        coord.config_entry = entry
+        coord.hass.config_entries.async_update_entry = MagicMock()
+        coord.mark_profile_selection(4)
+        coord.hass.config_entries.async_update_entry.assert_called_once()
+        new_data = coord.hass.config_entries.async_update_entry.call_args[1]["data"]
+        assert new_data[coord_mod.CONF_SELECTED_PROFILE] == 4
+
+    def test_persist_is_noop_when_unchanged(self):
+        """Re-selecting the same profile must not rewrite the entry (no churn)."""
+        coord, _, _ = _make_coord()
+        entry = MagicMock()
+        entry.data = {coord_mod.CONF_SELECTED_PROFILE: 4}
+        coord.config_entry = entry
+        coord.hass.config_entries.async_update_entry = MagicMock()
+        coord.mark_profile_selection(4)
+        coord.hass.config_entries.async_update_entry.assert_not_called()
+
+
+class TestResolveProfile:
+    """Issue #78: resolve_profile() is the single source of truth for the target
+    slot. Precedence: EXPLICIT choice (persisted) > AUTOMATIC default (observed).
+    Only valid slots (a whole number in 1..5) are ever returned; ``None`` when
+    neither is known, so callers must ask instead of defaulting to slot 1."""
+
+    def _coord(self, selected=None, auto=None):
+        coord, _, _ = _make_coord()
+        coord.selected_profile = selected
+        coord._auto_profile = auto
+        return coord
+
+    def test_explicit_choice_wins(self):
+        assert self._coord(selected=2, auto=3).resolve_profile() == 2
+
+    def test_falls_back_to_auto_default(self):
+        assert self._coord(selected=None, auto=3).resolve_profile() == 3
+
+    def test_returns_none_when_nothing_known(self):
+        # The conflict-unresolved case: nothing selected, no automatic default.
+        assert self._coord().resolve_profile() is None
+
+    def test_invalid_explicit_falls_through_to_auto(self):
+        # 7 is not a slot, so it is not a choice either — never returned.
+        assert self._coord(selected=7, auto=4).resolve_profile() == 4
+
+    def test_never_returns_an_out_of_range_auto_default(self):
+        assert self._coord(selected=None, auto=7).resolve_profile() is None
+        assert self._coord(selected=None, auto=0).resolve_profile() is None
+        assert self._coord(selected=None, auto=-2).resolve_profile() is None
+
+    def test_non_int_values_are_not_slots(self):
+        assert self._coord(selected="3", auto=None).resolve_profile() is None
+        assert self._coord(selected=None, auto="4").resolve_profile() is None
+
+    def test_zero_explicit_is_not_a_choice(self):
+        assert self._coord(selected=0, auto=None).resolve_profile() is None

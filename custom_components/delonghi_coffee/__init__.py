@@ -120,6 +120,37 @@ def _resolve_target(hass: HomeAssistant, call) -> tuple[DeLonghiApi, DeLonghiCoo
     return bundle["api"], bundle["coordinator"], bundle["dsn"]
 
 
+def _resolve_service_profile(call, coord, action: str) -> int:  # noqa: ANN001
+    """Profile a service call should act on.
+
+    Two different things must not be conflated (PR #79 review): the *explicit*
+    choice (``selected_profile``, persisted, only changed by the user) and the
+    *automatic* observation (cloud / monitor byte, via ``resolve_profile()``).
+
+    - ``profile`` present → that value is the caller's explicit intent, so the
+      resolver is never consulted. It must be a real slot: a whole number in
+      1..5. ``profile: 0`` or ``7`` is a caller error and must not silently
+      fall through to the resolver.
+    - ``profile`` absent → fall back to ``coord.resolve_profile()``, and refuse
+      to guess slot 1 when nothing is known.
+    """
+    from homeassistant.exceptions import HomeAssistantError as HAError
+
+    data = call.data if isinstance(getattr(call, "data", None), dict) else {}
+
+    if "profile" in data:
+        raw = data["profile"]
+        # bool is an int subclass: True would sneak through as slot 1.
+        if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 5:
+            raise HAError(f"Invalid profile {raw!r}: expected a whole number between 1 and 5.")
+        return raw
+
+    profile = coord.resolve_profile()
+    if not profile:
+        raise HAError(f"Select a profile before {action} (no profile given and none selected).")
+    return profile
+
+
 def _register_services(hass: HomeAssistant) -> None:
     """Register domain-wide services exactly once across all entries.
 
@@ -141,7 +172,9 @@ def _register_services(hass: HomeAssistant) -> None:
         taste = call.data.get("taste", 3)
         milk_froth = call.data.get("milk_froth", 2)
         temperature = call.data.get("temperature", 1)
-        profile = call.data.get("profile", coord.selected_profile or 1)
+        # Explicit service profile applies to this call only; otherwise the
+        # shared resolver (issue #78). No target → ask, don't default to slot 1.
+        profile = _resolve_service_profile(call, coord, "brewing")
 
         try:
             await hass.async_add_executor_job(
@@ -170,7 +203,7 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_sync_recipes(call) -> None:  # noqa: ANN001
         api, coord, dsn = _resolve_target(hass, call)
-        profile = call.data.get("profile", coord.selected_profile or 1)
+        profile = _resolve_service_profile(call, coord, "syncing recipes")
         try:
             await hass.async_add_executor_job(api.sync_recipes, dsn, profile)
         except (DeLonghiApiError, DeLonghiAuthError) as err:

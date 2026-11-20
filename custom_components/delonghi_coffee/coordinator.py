@@ -21,6 +21,7 @@ from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError, DeLonghiUnsup
 from .const import (
     ACTIVE_MACHINE_STATES,
     ACTIVE_SCAN_INTERVAL_SECONDS,
+    CONF_SELECTED_PROFILE,
     CONTENTSTACK_RETRY_MAX,
     DOMAIN,
     FULL_REFRESH_INTERVAL,
@@ -28,7 +29,6 @@ from .const import (
     LAN_SESSION_STALE_SECONDS,
     MONITOR_STALE_TIMEOUT,
     MQTT_KEEPALIVE_INTERVAL,
-    PROFILE_TRACK_GRACE_SECONDS,
     SCAN_INTERVAL_SECONDS,
 )
 from .contentstack import fetch_bean_adapt, fetch_coffee_beans, fetch_drink_catalog
@@ -67,6 +67,40 @@ _LAN_MONITOR_STATUS_KEYS: tuple[str, ...] = (
     # witness of the two.
     "monitor_ts",
 )
+
+
+def _valid_slot(value: Any) -> bool:
+    """True when ``value`` is a usable profile slot: a whole number in 1..5.
+
+    Issue #78 review (PR #79): the old ``> 0`` test was too loose — it accepted
+    ids the machine never offers (7) and let a half-parsed value pass for a
+    choice. Anything else (``None``, 0, 7, ``"3"``) means *no slot*, so the
+    resolver stays unresolved and the caller must ask instead of brewing on an
+    invented slot 1.
+    """
+    return isinstance(value, int) and 1 <= value <= 5
+
+
+def _auto_target_from(cloud: Any, monitor: Any) -> int | None:
+    """Derive the automatic profile target from a cloud + monitor reading.
+
+    Pure (no state). The single rule shared by the per-poll observation and the
+    LAN push, so ``resolve_profile()`` and the published observation can never
+    disagree (numanx11 #79 round 3):
+      - both valid and different -> ``None`` (conflict: ask, never guess)
+      - cloud valid (no conflict) -> cloud (authoritative touchscreen signal)
+      - only monitor valid -> monitor
+      - neither -> ``None``
+    """
+    cloud_ok = _valid_slot(cloud)
+    mon_ok = _valid_slot(monitor)
+    if cloud_ok and mon_ok and cloud != monitor:
+        return None
+    if cloud_ok:
+        return cloud
+    if mon_ok:
+        return monitor
+    return None
 
 
 class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -118,11 +152,22 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Instance attribute (not just the module constant) so tests can
         # collapse the wait to 0 without patching asyncio.sleep.
         self._transient_retry_delay: float = TRANSIENT_RETRY_DELAY_SECONDS
-        self.selected_profile: int | None = None  # Set from machine on first refresh
-        # monotonic stamp of the last HA-side selection — the grace window
-        # that lets us follow machine-side profile changes without stomping
-        # a just-issued command whose cloud echo lags (F-COORD-01 follow-up).
-        self._selected_profile_set_at: float | None = None
+        # Issue #78 / PR #79 review — two separate things, never conflated:
+        #
+        # ``selected_profile`` is the user's EXPLICIT choice only: restored from
+        # the config entry, set by ``mark_profile_selection``, and changed only
+        # when the user changes or clears it. Observation never writes it.
+        #
+        # ``_auto_profile`` is the AUTOMATIC default derived from what the
+        # machine reports (fresh cloud ``active_profile`` / monitor byte). It is
+        # computed only while there is no explicit choice, is never persisted and
+        # is never promoted to ``selected_profile``.
+        _saved = config_entry.data.get(CONF_SELECTED_PROFILE) if config_entry else None
+        self.selected_profile: int | None = _saved if _valid_slot(_saved) else None
+        self._auto_profile: int | None = None
+        # last observed fresh cloud profile id; only a change observed in
+        # session follows, and only in automatic mode (issue #78)
+        self._last_d286: int | None = None
         self.seen_alarm_bits: set[int] = set()  # Track which inverted bits the machine supports
         self.custom_recipe_names: dict[str, str] = {}  # custom_1 → "café midi"
         self.drink_catalog: dict[int, dict] = {}  # ContentStack drink_id → {name, clusters, ingredients}
@@ -396,11 +441,54 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def mark_profile_selection(self, pid: int) -> None:
         """Record an HA-side profile selection (called by select.py).
 
-        Opens the grace window during which the cloud echo of this very
-        command must not be mistaken for a machine-side change.
+        This is the ONLY way ``selected_profile`` becomes an explicit choice
+        besides a restore from the config entry, and it is persisted so the
+        choice survives a restart without re-sending a selection command
+        (issue #78). Nothing here needs a grace window any more: the poll
+        tracking never writes ``selected_profile``, so the cloud echo of this
+        very command cannot overwrite it (PR #79 review).
         """
         self.selected_profile = pid
-        self._selected_profile_set_at = monotonic()
+        self._persist_selected_profile(pid)
+
+    def _persist_selected_profile(self, pid: int) -> None:
+        """Store the explicit profile choice on the config entry (best-effort)."""
+        entry = getattr(self, "config_entry", None)
+        if entry is None:
+            return
+        if entry.data.get(CONF_SELECTED_PROFILE) == pid:
+            return
+        new_data = {**entry.data, CONF_SELECTED_PROFILE: pid}
+        try:
+            self.hass.config_entries.async_update_entry(entry, data=new_data)
+        except Exception:  # noqa: BLE001 — persistence is best-effort; selection still works this session
+            _LOGGER.debug("Could not persist selected_profile=%s", pid)
+
+    def resolve_profile(self) -> int | None:
+        """Single source of truth for the profile to use (issue #78).
+
+        Precedence between the two distinct notions (PR #79 review):
+
+        1. ``selected_profile`` — the user's EXPLICIT choice (persisted on the
+           config entry, or set via ``mark_profile_selection``). It never
+           changes on its own.
+        2. ``_auto_profile`` — the AUTOMATIC default observed from the machine
+           (fresh cloud ``active_profile`` agreeing with the monitor byte, or
+           whichever of the two is the only usable signal). Only consulted while
+           no explicit choice exists.
+
+        Both must pass ``_valid_slot`` (a whole number in 1..5) to be returned,
+        so a corrupt or out-of-range value can never reach a brew command.
+        ``None`` when neither is known: callers must then ask for an explicit
+        profile instead of silently defaulting to slot 1. The select entity and
+        every implicit brew/recipe-sync path call this, so they can never
+        disagree on the target slot.
+        """
+        if _valid_slot(self.selected_profile):
+            return self.selected_profile
+        if _valid_slot(self._auto_profile):
+            return self._auto_profile
+        return None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
@@ -462,38 +550,51 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_cloud_monitor_raw = status.get("monitor_raw")
             status = self._apply_lan_monitor(status)
 
-            # selected_profile tracking (F-COORD-01 follow-up).
+            # Profile observation (issue #78, PR #79 review).
             #
-            # Seed from the monitor once so the dropdown starts on the
-            # machine's truth. Then FOLLOW the machine — but only the cloud
-            # ``active_profile`` property (authoritative), never the monitor
-            # byte, which lags and reports the last-brewed profile and used
-            # to silently revert HA selections (the original F-COORD-01 bug).
-            # A grace window after an HA-side selection absorbs the echo lag
-            # of our own command; outside it, a differing cloud value means
-            # the user moved on the touchscreen and the select must follow.
-            monitor_profile = status.get("profile", 0)
-            if self.selected_profile is None and monitor_profile > 0:
-                self.selected_profile = monitor_profile
-            elif self.selected_profile is not None:
-                # Fresh per-poll value first (60 s), full-refresh cache as
-                # fallback for firmwares that do not expose d286.
-                machine_profile = status.get("active_profile") or self._cached_profiles.get("active")
-                if (
-                    isinstance(machine_profile, int)
-                    and machine_profile > 0
-                    and machine_profile != self.selected_profile
-                    and (
-                        self._selected_profile_set_at is None
-                        or (now - self._selected_profile_set_at) > PROFILE_TRACK_GRACE_SECONDS
-                    )
-                ):
-                    _LOGGER.info(
-                        "Profile %d seen from machine (cloud), was %d in HA — following",
-                        machine_profile,
-                        self.selected_profile,
-                    )
-                    self.selected_profile = machine_profile
+            # What the machine reports feeds the AUTOMATIC default ONLY. An
+            # explicit choice (``selected_profile``: restored from the config
+            # entry, or set by ``mark_profile_selection``) is never seeded,
+            # followed or cleared here — it changes only when the user changes
+            # or clears it. That is why no grace window is needed any more: an
+            # echo of our own command has nothing to overwrite.
+            #
+            # ``fresh`` is the per-poll cloud ``active_profile`` (d286), the only
+            # signal of a touchscreen switch; the full-refresh cache is never a
+            # transition signal. ``mon`` is the monitor byte, which lags and
+            # reports the last-brewed profile (the original F-COORD-01 stomping
+            # bug) — so it is a default on its own, never a follow trigger.
+            fresh = status.get("active_profile")
+            mon = status.get("profile", 0)
+            fresh_ok = _valid_slot(fresh)
+            # Compute the candidate automatic target into locals; the COMMIT
+            # happens only at the successful return below, so a poll whose
+            # full-refresh later raises never advances the target (numanx11 #79
+            # r3: a failed poll must not make resolve() disagree with the last
+            # good published observation).
+            if self.selected_profile is not None:
+                cand_auto = self._auto_profile  # explicit choice: observations do not touch it
+                cand_baseline = self._last_d286
+            else:
+                # Automatic mode. The conflict/agreement rule lives in
+                # _auto_target_from (shared with the LAN push so resolve() and
+                # the published observation can never disagree).
+                cand_auto = _auto_target_from(fresh, mon)
+                if fresh_ok:
+                    # Keep the cloud baseline current even during a conflict, so
+                    # a later agreement is measured against the latest reading.
+                    if self._last_d286 is not None and fresh != self._last_d286 and cand_auto == fresh:
+                        _LOGGER.info(
+                            "Profile %d seen from machine (cloud changed from %s) — following",
+                            fresh,
+                            self._last_d286,
+                        )
+                    cand_baseline = fresh
+                else:
+                    # Read gap (UNKNOWN, or a firmware that never publishes
+                    # d286): re-baseline so the next sighting is a first
+                    # observation, not a transition out of a stale value.
+                    cand_baseline = None
 
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.
             # Without this, the MQTT session dies after ~5 min and commands
@@ -692,6 +793,22 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.diagnostic_mode and self._last_all_props:
                 self._last_diagnostic = get_diagnostic_dump(self._last_all_props, self._cached_counters, status)
 
+            # Commit the automatic target only now that the whole refresh has
+            # succeeded (numanx11 #79 r3): a poll that raised earlier leaves the
+            # last good target in place, so resolve() never runs ahead of the
+            # published observation.
+            if self.selected_profile is None:
+                self._auto_profile = cand_auto
+                self._last_d286 = cand_baseline
+
+            # The published active profile must PRESERVE an absence rather than
+            # invent slot 1 (issue #78): a fresh cloud slot that is a real one
+            # wins, otherwise the full-refresh cache, otherwise ``None``.
+            published_active = status.get("active_profile")
+            if not _valid_slot(published_active):
+                cached_active = self._cached_profiles.get("active")
+                published_active = cached_active if _valid_slot(cached_active) else None
+
             return {
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": machine_state,
@@ -713,7 +830,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,
                 "beverages": self.beverages,
-                "active_profile": status.get("active_profile") or self._cached_profiles.get("active", 1),
+                "active_profile": published_active,
                 "profiles": self._cached_profiles.get("profiles", {}),
                 "beans": self._cached_beans,
                 "bean_system_par": self._cached_bean_system_par,
@@ -726,6 +843,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "coffee_beans_count": len(self.coffee_beans),
             }
         except DeLonghiAuthError as err:
+            # Drop the profile baseline so the next successful read re-establishes
+            # it as a first sighting instead of comparing against a pre-outage
+            # value and hijacking the HA selection (issue #78, coderabbit #79).
+            self._last_d286 = None
             # HA only opens the reauth flow on ConfigEntryAuthFailed —
             # a plain UpdateFailed loops forever with last_update_success=False
             # and the user is never prompted to re-enter credentials (audit C1).
@@ -733,9 +854,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # outside the reach of our SanitizeFilter (audit 2026-11-05).
             raise ConfigEntryAuthFailed(f"Authentication error: {sanitize(err)}") from err
         except DeLonghiApiError as err:
+            self._last_d286 = None  # re-baseline on recovery (issue #78)
             # Same: the API error text can carry the DSN-bearing Ayla URL.
             raise UpdateFailed(f"Error fetching data: {sanitize(err)}") from err
         except Exception as err:  # noqa: BLE001 — last-resort guard: coordinator must surface UpdateFailed
+            self._last_d286 = None  # re-baseline on recovery (issue #78)
             _LOGGER.exception("Unexpected error during coordinator refresh")
             raise UpdateFailed(f"Unexpected error: {sanitize(err)}") from err
 
@@ -950,6 +1073,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         self._monitor_stale_count = 0
                     if merged.get("machine_state") != before:
                         _LAN_LOGGER.info("LAN monitor: machine state %s → %s", before, merged.get("machine_state"))
+                    # Keep the automatic target in sync with the LAN-published
+                    # monitor so resolve() and the published observation agree
+                    # (numanx11 #79 r3). Explicit choice wins; a cloud/monitor
+                    # conflict asks. The cloud baseline (_last_d286) is left
+                    # alone — a LAN monitor byte is not a cloud transition.
+                    if self.selected_profile is None:
+                        self._auto_profile = _auto_target_from(merged.get("active_profile"), merged.get("profile"))
             self.async_set_updated_data(merged)
         else:
             self.async_set_updated_data(self.data if self.data else {})

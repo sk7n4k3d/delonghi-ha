@@ -2080,6 +2080,45 @@ class DeLonghiApi:
     # 16-bit parameter IDs (quantities in mL)
     _BIG_PARAMS: set[int] = {1, 9, 15}  # COFFEE, MILK, HOT_WATER
 
+    # Fixed overhead of a finished brew frame: 6 header bytes
+    # (0x0D, len, 0x83, 0xF0, bev_id, 0x03) + profile_save + CRC(2). Anything
+    # shorter cannot carry a profile byte.
+    _BREW_FRAME_MIN_LEN: int = 9
+
+    @classmethod
+    def _assert_frame_profile(cls, frame: bytes, profile: int) -> None:
+        """Refuse a ready-made brew frame that would not select ``profile``.
+
+        The ``profile_save`` byte — the last one before the CRC, written as
+        ``(profile << 2) | 2`` — is what makes the machine switch user
+        profiles. Some models store the finished 0x83 command in the cloud
+        instead of a 0xD0 recipe, so the builder hands it straight through;
+        that frame must be checked before it reaches the transport, otherwise
+        asking for profile 3 while only a profile-1 frame exists brews from a
+        slot the UI does not show (issue #79 review, acceptance case 4).
+
+        Patching the byte instead is not an option: the frame carries a CRC
+        computed over it, and its quantities belong to the profile it was
+        captured for. Rejecting is the only honest answer.
+
+        Raises:
+            DeLonghiApiError: the frame encodes another profile, or is too
+                short to carry a profile byte at all (so it cannot be proven
+                to select the requested one).
+        """
+        if len(frame) < cls._BREW_FRAME_MIN_LEN:
+            raise DeLonghiApiError(
+                f"Prebuilt brew frame is too short ({len(frame)} bytes) to carry a profile "
+                f"byte; cannot verify it selects profile {profile}"
+            )
+        encoded = frame[-3] >> 2
+        if encoded != profile:
+            raise DeLonghiApiError(
+                f"Prebuilt brew frame encodes profile {encoded} (profile_save 0x{frame[-3]:02X}), "
+                f"but profile {profile} was requested; refusing to brew a profile the user "
+                "did not select"
+            )
+
     @classmethod
     def _recipe_to_brew_command(
         cls,
@@ -2104,8 +2143,23 @@ class DeLonghiApi:
         - For cold_brew: append ICED(31)=3 + INTENSITY(38)=value
         - Always append RINSE(39)=1
         - End with profile_save = (profile << 2) | 2
+
+        A frame that already starts with 0x0D is already a brew command and is
+        returned untouched — but only after :meth:`_assert_frame_profile`
+        proved it encodes the requested profile.
+
+        Raises:
+            DeLonghiApiError: ``profile`` is not a supported slot (a whole
+                number 1-5, same boundary as ``brew_custom`` /
+                ``set_active_profile``), or a prebuilt frame selects another
+                profile.
         """
+        # bool is an int subclass: True would sneak through as slot 1.
+        if isinstance(profile, bool) or not isinstance(profile, int) or not 1 <= profile <= 5:
+            raise DeLonghiApiError(f"Profile must be 1-5, got {profile}")
+
         if recipe[0] == 0x0D:
+            cls._assert_frame_profile(recipe, profile)
             return recipe
 
         bev_id = recipe[5]
@@ -2152,7 +2206,9 @@ class DeLonghiApi:
     def parse_profiles(self, props: dict[str, Any]) -> dict[str, Any]:
         """Parse user profiles from pre-fetched properties."""
         profiles: dict[int, dict[str, Any]] = {}
-        active = 1
+        # Issue #78: do NOT invent slot 1 when the machine never publishes d286.
+        # ``active`` stays None until a real, in-range (1-5) value is observed.
+        active: int | None = None
 
         colors = {0: "green", 1: "red", 2: "blue", 3: "orange"}
         figures = {0: "woman", 1: "man", 2: "kid"}
@@ -2207,7 +2263,8 @@ class DeLonghiApi:
             if val:
                 try:
                     raw = base64.b64decode(val)
-                    active = raw[4] if len(raw) > 4 else 1
+                    if len(raw) > 4 and 1 <= raw[4] <= 5:
+                        active = raw[4]
                 except (ValueError, IndexError):
                     pass
 

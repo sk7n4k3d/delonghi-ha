@@ -180,6 +180,9 @@ def _make_coord(machine_state: str = "Ready", selected_profile: int = 1) -> Magi
     coord.async_brew = AsyncMock(return_value=True)
     coord.request_fast_poll = MagicMock()
     coord.async_request_refresh = AsyncMock()
+    # Issue #78: the button resolves the profile via resolve_profile(); mirror
+    # it on the mock so it tracks the current selected_profile (None → unresolved).
+    coord.resolve_profile = MagicMock(side_effect=lambda: coord.selected_profile)
     return coord
 
 
@@ -314,11 +317,16 @@ class TestSyncButtonEntity:
         _run(entity.async_press())
         api.sync_recipes.assert_called_once_with("DSN", 2)
 
-    def test_press_defaults_to_profile_one_when_none_selected(self):
+    def test_press_requires_explicit_profile_when_unresolved(self):
+        # Issue #78: no silent default to slot 1. With no resolvable profile the
+        # button must refuse rather than brew/sync an unintended slot.
+        from homeassistant.exceptions import HomeAssistantError
+
         entity, api = self._entity("Ready")
         entity.coordinator.selected_profile = None
-        _run(entity.async_press())
-        api.sync_recipes.assert_called_once_with("DSN", 1)
+        with pytest.raises(HomeAssistantError):
+            _run(entity.async_press())
+        api.sync_recipes.assert_not_called()
 
 
 class TestLanDiagnosticButtonEntity:

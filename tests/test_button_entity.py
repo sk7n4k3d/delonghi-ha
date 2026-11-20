@@ -31,6 +31,8 @@ def _make_coordinator(selected_profile=2, custom_recipe_names=None, beverages=No
     coord.async_brew = AsyncMock(return_value=True)
     coord.request_fast_poll = MagicMock()
     coord.async_request_refresh = AsyncMock()
+    # Issue #78: mirror resolve_profile() on the mock (tracks selected_profile).
+    coord.resolve_profile = MagicMock(side_effect=lambda: coord.selected_profile)
     return coord
 
 
@@ -129,13 +131,17 @@ class TestBrewButtonPress:
         # issue #50: no direct cloud-only brew anymore
         api.brew_beverage.assert_not_called()
 
-    def test_falls_back_to_profile_1_when_none(self):
+    def test_requires_explicit_profile_when_none(self):
+        # Issue #78: no silent default to slot 1 — refuse when unresolved.
+        from homeassistant.exceptions import HomeAssistantError
+
         coord = _make_coordinator(selected_profile=None)
         api = _make_api()
         btn = DeLonghiBrewButton(api, coord, "DSN", "m", "n", None, "espresso", {"name": "X", "icon": "y"})
         btn.hass = _make_hass_with_executor()
-        _run(btn.async_press())
-        coord.async_brew.assert_awaited_once_with("espresso", 1)
+        with pytest.raises(HomeAssistantError):
+            _run(btn.async_press())
+        coord.async_brew.assert_not_awaited()
 
     def test_api_error_raises_home_assistant_error(self):
         from homeassistant.exceptions import HomeAssistantError
@@ -246,13 +252,17 @@ class TestSyncButton:
         _run(btn.async_press())
         api.sync_recipes.assert_called_once_with("DSN", 4)
 
-    def test_press_defaults_profile_to_1(self):
+    def test_press_requires_profile_when_none(self):
+        # Issue #78: no silent default to slot 1.
+        from homeassistant.exceptions import HomeAssistantError
+
         coord = _make_coordinator(selected_profile=None)
         api = _make_api()
         btn = DeLonghiSyncButton(api, coord, "DSN", "m", "n", None)
         btn.hass = _make_hass_with_executor()
-        _run(btn.async_press())
-        api.sync_recipes.assert_called_once_with("DSN", 1)
+        with pytest.raises(HomeAssistantError):
+            _run(btn.async_press())
+        api.sync_recipes.assert_not_called()
 
 
 class TestAsyncSetupEntry:
