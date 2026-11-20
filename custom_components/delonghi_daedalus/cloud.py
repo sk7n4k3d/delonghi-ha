@@ -51,6 +51,7 @@ from .const import (
     AWS_REST_SOURCE_HEADER,
     BREWING_STATISTICS_KEYS,
     CLOUD_POLL_SECONDS,
+    MAINTENANCE_COUNTER_KEYS,
 )
 from .lan_protocol import LanProtocolError, validate_lan_host
 from .redact import get_logger, mask_serial, sanitize_text
@@ -58,6 +59,7 @@ from .redact import get_logger, mask_serial, sanitize_text
 _LOGGER = get_logger(__name__)
 
 SHADOWS: tuple[str, ...] = ("MachineStatus", "MachineCapabilities")
+_MACHINE_SETTINGS_SHADOW = "MachineSettings"
 _BREWING_STATISTICS_SHADOW = "BrewingStatisticsTotals"
 _DRINK_VISIBILITY_SHADOW = "DrinkVisibility"
 _DRINK_VISIBILITY_KEY = re.compile(r"id_[0-9]+")
@@ -718,6 +720,10 @@ class ShadowClient:
                 results[shadow] = parsed if isinstance(parsed, dict) else {"value": parsed}
                 _LOGGER.debug("Daedalus cloud: %s shadow accepted (%d bytes)", shadow, len(body))
         elif topic.endswith("/get/rejected"):
+            if shadow == _MACHINE_SETTINGS_SHADOW:
+                errors[shadow] = "MachineSettings shadow get rejected by broker"
+                _LOGGER.debug("Daedalus cloud: shadow get for %s rejected by the broker", shadow)
+                return
             # The rejected payload is broker-controlled text — truncate hard,
             # and keep the raw body out of the log line (it can echo the
             # request context); the shadow name is what a retest needs.
@@ -958,10 +964,26 @@ async def fetch_brewing_statistics(session: aiohttp.ClientSession, *, thing_name
     documents = await client.fetch(shadows=(_BREWING_STATISTICS_SHADOW,), timeout=5)
     state = documents[_BREWING_STATISTICS_SHADOW].get("state")
     reported = state.get("reported") if isinstance(state, dict) else None
+    return _nonnegative_counters(reported, BREWING_STATISTICS_KEYS)
+
+
+async def fetch_maintenance_counters(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> dict[str, int]:
+    """Read descaling and water filter registrations from the MachineSettings shadow."""
+    if not _THING_NAME_RE.fullmatch(thing_name):
+        raise CloudTelemetryError("Invalid cloud thing name")
+    client = ShadowClient(session, thing_name=thing_name, jwt=jwt)
+    documents = await client.fetch(shadows=(_MACHINE_SETTINGS_SHADOW,), timeout=5)
+    state = documents.get(_MACHINE_SETTINGS_SHADOW, {}).get("state")
+    reported = state.get("reported") if isinstance(state, dict) else None
+    settings = reported.get("NotEditable") if isinstance(reported, dict) else None
+    return _nonnegative_counters(settings, MAINTENANCE_COUNTER_KEYS)
+
+
+def _nonnegative_counters(reported: Any, keys: dict[str, str]) -> dict[str, int]:
     if not isinstance(reported, dict):
         return {}
     counters: dict[str, int] = {}
-    for field, key in BREWING_STATISTICS_KEYS.items():
+    for field, key in keys.items():
         value = reported.get(field)
         if type(value) is int and value >= 0:
             counters[key] = value

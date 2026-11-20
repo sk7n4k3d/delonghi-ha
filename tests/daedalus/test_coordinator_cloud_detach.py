@@ -37,6 +37,8 @@ from custom_components.delonghi_daedalus.const import (
     CONF_SESSION_TOKEN,
     DRINK_VISIBILITY_POLL_SECONDS,
     DRINK_VISIBILITY_RETRY_SECONDS,
+    MAINTENANCE_COUNTERS_POLL_SECONDS,
+    MAINTENANCE_COUNTERS_RETRY_SECONDS,
 )
 from custom_components.delonghi_daedalus.coordinator import DaedalusCoordinator
 
@@ -48,6 +50,12 @@ _VISIBILITY_PATCH = "custom_components.delonghi_daedalus.coordinator.fetch_visib
 @pytest.fixture(autouse=True)
 def _mock_statistics():
     with patch(_STATS_PATCH, return_value={}) as mocked:
+        yield mocked
+
+
+@pytest.fixture(autouse=True)
+def _mock_maintenance_counters():
+    with patch("custom_components.delonghi_daedalus.coordinator.fetch_maintenance_counters", return_value={}) as mocked:
         yield mocked
 
 
@@ -513,6 +521,166 @@ def test_lan_listener_detects_disconnect_and_reconnects_without_commands():
         original.send_command.assert_not_awaited()
         replacement.send_command.assert_not_awaited()
         await coord._stop_lan_listener()
+
+    asyncio.run(_go())
+
+
+def test_maintenance_counters_back_off_without_delaying_regular_shadows(_mock_maintenance_counters, _mock_statistics):
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        started = asyncio.Event()
+        totals = {"descale_count": 1, "water_filter_registration_count": 0}
+
+        async def _maintenance(_session, *, thing_name, jwt):
+            assert thing_name == "thing-1"
+            assert jwt == "jwt"
+            if _mock_maintenance_counters.await_count == 1:
+                started.set()
+                await asyncio.Event().wait()
+            if _mock_maintenance_counters.await_count == 3:
+                raise CloudTelemetryError("settings shadow not found")
+            return totals
+
+        _mock_maintenance_counters.side_effect = _maintenance
+        _mock_statistics.return_value = {"brew_count": 12}
+        with (
+            patch(_PATCH, return_value=_CLOUD_STATE) as regular_fetch,
+            patch("custom_components.delonghi_daedalus.coordinator.MAINTENANCE_COUNTERS_FETCH_TIMEOUT_SECONDS", 0.05),
+        ):
+            await coord._async_update_data()
+            await asyncio.wait_for(started.wait(), timeout=2)
+            data = await coord._async_update_data()
+            assert data["connected"]
+            assert data["cloud"]["status_flat"] == {"a": 1}
+            assert data["cloud"]["brewing_statistics"] == {"brew_count": 12}
+            assert "maintenance_counters" not in data["cloud"]
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+            assert coord._maintenance_counters_due_at > time.monotonic() + MAINTENANCE_COUNTERS_RETRY_SECONDS - 1
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            _mock_maintenance_counters.assert_awaited_once()
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._maintenance_counters_due_at = 0
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["maintenance_counters"] == totals
+            assert coord._maintenance_counters_due_at > time.monotonic() + MAINTENANCE_COUNTERS_POLL_SECONDS - 1
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["maintenance_counters"] == totals
+            assert _mock_maintenance_counters.await_count == 2
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._maintenance_counters_due_at = 0
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["maintenance_counters"] == {}
+            assert coord.data["cloud"]["brewing_statistics"] == {"brew_count": 12}
+            assert "cloud_error" not in coord.data
+            assert regular_fetch.await_count == 5
+
+    asyncio.run(_go())
+
+
+def test_offline_machine_clears_maintenance_counters_until_next_due_read(_mock_maintenance_counters):
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        offline = CloudState(
+            {"MachineCapabilities": {"state": {"reported": {"Languages": ["en"]}}}},
+            "thing-1",
+            status_error="Device directory reports the machine offline",
+        )
+        _mock_maintenance_counters.side_effect = [{"descale_count": 1}, {"descale_count": 2}]
+        with patch(_PATCH, side_effect=[_CLOUD_STATE, offline, _CLOUD_STATE, _CLOUD_STATE]):
+            await coord._async_cloud_fetch()
+            assert coord.data["cloud"]["maintenance_counters"] == {"descale_count": 1}
+            due_at = coord._maintenance_counters_due_at
+
+            await coord._async_cloud_fetch()
+            assert coord.data["cloud"]["capabilities_flat"]
+            assert "status_flat" not in coord.data["cloud"]
+            assert "maintenance_counters" not in coord.data["cloud"]
+
+            await coord._async_cloud_fetch()
+            assert coord.data["cloud"]["status_flat"] == {"a": 1}
+            assert "maintenance_counters" not in coord.data["cloud"]
+            assert coord._maintenance_counters_due_at == due_at
+            _mock_maintenance_counters.assert_awaited_once()
+
+            coord._maintenance_counters_due_at = 0
+            await coord._async_cloud_fetch()
+            assert coord.data["cloud"]["maintenance_counters"] == {"descale_count": 2}
+
+    asyncio.run(_go())
+
+
+@pytest.mark.parametrize("invalidate", ["cloud expiry", "account change"])
+def test_pending_maintenance_counters_do_not_restore_an_obsolete_report(_mock_maintenance_counters, invalidate):
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _maintenance(*_args, **_kwargs):
+            started.set()
+            await release.wait()
+            return {"descale_count": 1}
+
+        _mock_maintenance_counters.side_effect = _maintenance
+        with patch(_PATCH, return_value=_CLOUD_STATE):
+            await coord._async_update_data()
+            await asyncio.wait_for(started.wait(), timeout=2)
+            if invalidate == "cloud expiry":
+                coord._cancel_cloud_expiry()
+                coord._expire_cloud()
+            else:
+                coord.entry.data[CONF_SESSION_TOKEN] = "updated-session"
+            release.set()
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+            assert "maintenance_counters" not in coord.data.get("cloud", {})
+            assert coord._maintenance_counters_due_at == 0
+
+    asyncio.run(_go())
+
+
+@pytest.mark.parametrize(
+    ("updated_key", "expected"),
+    [(CONF_SESSION_TOKEN, {}), (CONF_JWT, {"descale_count": 1})],
+)
+def test_maintenance_read_keeps_original_account_identity(
+    _mock_statistics, _mock_maintenance_counters, updated_key, expected
+):
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _statistics(*_args, **_kwargs):
+            started.set()
+            await release.wait()
+            return {"brew_count": 12}
+
+        _mock_statistics.side_effect = _statistics
+        _mock_maintenance_counters.return_value = {"descale_count": 1}
+        with patch(_PATCH, return_value=_CLOUD_STATE):
+            await coord._async_update_data()
+            await asyncio.wait_for(started.wait(), timeout=2)
+            coord.entry.data[updated_key] = "updated-value"
+            release.set()
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+
+        assert coord.data["cloud"]["brewing_statistics"] == {"brew_count": 12}
+        assert coord.data["cloud"].get("maintenance_counters", {}) == expected
+        assert _mock_maintenance_counters.await_count == int(bool(expected))
 
     asyncio.run(_go())
 

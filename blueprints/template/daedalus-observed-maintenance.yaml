@@ -1,0 +1,44 @@
+blueprint:
+  name: Daedalus observed maintenance
+  description: Save when Home Assistant sees a Daedalus lifetime maintenance counter increase.
+  domain: template
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    counter:
+      name: Daedalus lifetime maintenance counter
+      description: Select the Descale count or Water filter registration count for this machine.
+      selector:
+        entity:
+          domain: sensor
+          integration: delonghi_daedalus
+    name:
+      name: Timestamp sensor name
+      selector:
+        text:
+    unique_id:
+      name: Timestamp sensor unique ID
+      description: Use a distinct, stable ID for each counter and machine.
+      selector:
+        text:
+
+trigger:
+  - platform: state
+    entity_id: !input counter
+    to: null
+condition:
+  - condition: template
+    value_template: >-
+      {% set previous = trigger.from_state %}
+      {% set current = trigger.to_state %}
+      {{ previous is not none and current is not none
+         and not previous.attributes.get('restored', false)
+         and not current.attributes.get('restored', false)
+         and previous.state | regex_match('[0-9]{1,255}\\Z')
+         and current.state | regex_match('[0-9]{1,255}\\Z')
+         and (current.state | int) > (previous.state | int) }}
+sensor:
+  - name: !input name
+    unique_id: !input unique_id
+    device_class: timestamp
+    state: "{{ utcnow().isoformat() }}"
