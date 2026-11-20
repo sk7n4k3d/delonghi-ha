@@ -7,7 +7,7 @@ the appliance offline.
 
 ## Set up the package
 
-1. Copy [daedalus-maintenance-history.yaml](daedalus-maintenance-history.yaml) into the `packages`
+1. Copy [daedalus_maintenance_history.yaml](daedalus_maintenance_history.yaml) into the `packages`
    directory in your Home Assistant configuration directory. To enable
    [packages](https://www.home-assistant.io/docs/configuration/packages/) for the first time, create
    the directory and add the following to `configuration.yaml`. If the file already contains
@@ -31,7 +31,8 @@ the appliance offline.
 
 ## Set up another machine
 
-Save another copy of the package with a different filename. Before restarting, replace
+Save another copy as `office_maintenance_history.yaml` or use another filename with lowercase
+letters, digits or underscores. Before restarting, replace
 every `coffee_maintenance` in that copy with a distinct lowercase prefix such as
 `office_coffee_maintenance`, and change the display label `Coffee maintenance` to
 `Office coffee maintenance`. Check the new entity IDs when copying the dashboard card, and
