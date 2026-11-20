@@ -907,3 +907,32 @@ def test_visibility_is_opt_in_and_keeps_regular_telemetry_on_failure():
             assert coord._drink_visibility_due_at >= time.monotonic() + DRINK_VISIBILITY_RETRY_SECONDS - 1
 
     asyncio.run(_go())
+
+
+def test_visibility_cannot_restore_expired_cloud_snapshot():
+    async def _go():
+        coord = _make_coordinator()
+        coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
+        coord.entry.data[CONF_DRINK_VISIBILITY] = True
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def visibility(*_args, **_kwargs):
+            started.set()
+            await release.wait()
+            return 3
+
+        with patch(_PATCH, return_value=_CLOUD_STATE), patch(_VISIBILITY_PATCH, side_effect=visibility):
+            await coord._async_update_data()
+            await asyncio.wait_for(started.wait(), timeout=2)
+            assert coord.data["cloud"]["status_flat"] == {"a": 1}
+            coord._cancel_cloud_expiry()
+            coord._expire_cloud()
+            release.set()
+            await asyncio.wait_for(coord._cloud_task, timeout=2)
+
+        assert "cloud" not in coord.data
+        assert coord._cloud_data is None
+        assert coord._drink_visibility_due_at == 0.0
+
+    asyncio.run(_go())
