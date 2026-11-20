@@ -1,6 +1,6 @@
 # Manual coffee machine maintenance history
 
-Use this optional package with Home Assistant 2025.9 or later to save the last time you logged a
+Use this optional package with Home Assistant 2024.11 or later to save the last time you logged a
 descale, water filter replacement or brew unit cleaning. Log each task after completing it on the
 machine. The Home Assistant action supplies the timestamps and works with LAN-only setups or with
 the appliance offline.
@@ -34,7 +34,7 @@ the appliance offline.
 Save another copy of the package with a different filename. Before restarting, replace
 every `coffee_maintenance` in that copy with a distinct lowercase prefix such as
 `office_coffee_maintenance`, and change the display label `Coffee maintenance` to
-`Office coffee maintenance`. Apply the same entity ID prefix to the dashboard card, and
+`Office coffee maintenance`. Check the new entity IDs when copying the dashboard card, and
 give the card a title that identifies the machine. Each machine then has its own logging
 action and timestamps. Keep the prefixes fixed after logging items to preserve the sensors'
 registered identities.

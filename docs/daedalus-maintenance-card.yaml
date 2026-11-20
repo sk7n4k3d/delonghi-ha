@@ -2,7 +2,7 @@ type: entities
 title: Coffee machine maintenance
 show_header_toggle: false
 entities:
-  - entity: sensor.coffee_maintenance_last_descale
+  - entity: sensor.coffee_maintenance_last_descale_logged
     name: Last descale logged
   - type: button
     name: Descaling
@@ -15,7 +15,7 @@ entities:
         task: descale
       confirmation:
         text: Log descaling as completed now?
-  - entity: sensor.coffee_maintenance_last_filter_replacement
+  - entity: sensor.coffee_maintenance_last_filter_replacement_logged
     name: Last filter replacement logged
   - type: button
     name: Water filter replacement
@@ -28,7 +28,7 @@ entities:
         task: water_filter
       confirmation:
         text: Log water filter replacement as completed now?
-  - entity: sensor.coffee_maintenance_last_brew_unit_cleaning
+  - entity: sensor.coffee_maintenance_last_brew_unit_cleaning_logged
     name: Last brew unit cleaning logged
   - type: button
     name: Brew unit cleaning

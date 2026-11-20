@@ -38,7 +38,6 @@ template:
     sensor:
       - name: "Coffee maintenance: Last descale logged"
         unique_id: coffee_maintenance_last_descale
-        default_entity_id: sensor.coffee_maintenance_last_descale
         device_class: timestamp
         state: "{{ trigger.event.time_fired.isoformat() }}"
   - triggers:
@@ -49,7 +48,6 @@ template:
     sensor:
       - name: "Coffee maintenance: Last filter replacement logged"
         unique_id: coffee_maintenance_last_filter_replacement
-        default_entity_id: sensor.coffee_maintenance_last_filter_replacement
         device_class: timestamp
         state: "{{ trigger.event.time_fired.isoformat() }}"
   - triggers:
@@ -60,6 +58,5 @@ template:
     sensor:
       - name: "Coffee maintenance: Last brew unit cleaning logged"
         unique_id: coffee_maintenance_last_brew_unit_cleaning
-        default_entity_id: sensor.coffee_maintenance_last_brew_unit_cleaning
         device_class: timestamp
         state: "{{ trigger.event.time_fired.isoformat() }}"
