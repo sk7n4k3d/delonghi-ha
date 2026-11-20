@@ -1129,6 +1129,33 @@ class TestTransientRetry:
         assert api.get_properties.call_count >= 1  # properties fetch still happened
         assert result is not None
 
+    def test_full_refresh_wake_timeout_does_not_reset_keepalive_freshness(self):
+        """Issue #73 review (numanx11): a full refresh whose wake ping times out must
+        NOT mark the heartbeat fresh. Otherwise the next poll skips an overdue
+        keepalive. The successful properties GET still publishes, but the missed wake
+        is counted and `_last_keepalive` is left where it was."""
+        coord, _, api = _make_coord()
+        self._full_refresh(coord)
+        coord._keepalive_failures = 2
+        ka_before = coord._last_keepalive
+        api.ping_connected.side_effect = requests.ReadTimeout("HTTPSConnectionPool read timeout")
+        api.get_properties.return_value = {"d270_serialnumber": {"value": "ECAM61075MBXYZ"}}
+        _run(coord._async_update_data())
+        assert coord._keepalive_failures == 3  # missed wake counted, not cleared by the GET
+        assert coord._last_keepalive == ka_before  # heartbeat NOT advanced on a failed wake
+
+    def test_full_refresh_wake_success_clears_keepalive(self):
+        """Companion: when the wake ping succeeds, the full refresh does count as a
+        keepalive — misses cleared and freshness advanced."""
+        coord, _, api = _make_coord()
+        self._full_refresh(coord)
+        coord._keepalive_failures = 2
+        api.ping_connected.return_value = True
+        api.get_properties.return_value = {"d270_serialnumber": {"value": "ECAM61075MBXYZ"}}
+        _run(coord._async_update_data())
+        assert coord._keepalive_failures == 0
+        assert coord._last_keepalive > 0
+
     def test_properties_recovers_on_retry(self):
         """Full-refresh get_properties gets the same single retry."""
         coord, _, api = _make_coord()
