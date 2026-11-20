@@ -1116,17 +1116,17 @@ class TestParseProfilesErrors:
         """Malformed d052 falls through to pass."""
         api = _make_api()
         props = {"d052_profile_name4": {"value": "not-base64!!!"}}
-        # Should not raise — just returns defaults
+        # Should not raise — active stays None (issue #78: no fabricated slot 1)
         result = api.parse_profiles(props)
-        assert result["active"] == 1
+        assert result["active"] is None
 
     def test_d286_decode_failure(self):
         """Malformed d286_mach_sett_profile falls through to pass."""
         api = _make_api()
         props = {"d286_mach_sett_profile": {"value": "not-base64!!!"}}
         result = api.parse_profiles(props)
-        # active defaults to 1 (fallback)
-        assert result["active"] == 1
+        # active stays None on a malformed d286 (issue #78: never invent slot 1)
+        assert result["active"] is None
 
 
 # ---------------------------------------------------------------------------

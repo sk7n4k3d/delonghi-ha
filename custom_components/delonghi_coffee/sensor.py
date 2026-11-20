@@ -403,6 +403,8 @@ class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         one, leading to drift between the sensor state and the attributes.
         """
         active = self._resolve_active_profile_id()
+        if active is None:
+            return "Unknown"
         profiles = self.coordinator.data.get("profiles", {})
         profile = profiles.get(active, {})
         return profile.get("name", f"Profile {active}")
@@ -424,15 +426,19 @@ class DeLonghiProfileSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
             attrs[f"profile_{pid}_figure"] = pdata.get("figure", "")
         return attrs
 
-    def _resolve_active_profile_id(self) -> int:
-        """Cloud `active_profile` first, monitor `profile` as fallback."""
+    def _resolve_active_profile_id(self) -> int | None:
+        """Cloud `active_profile` first, monitor `profile` as fallback.
+
+        Issue #78: returns ``None`` when neither reports a real in-range slot
+        (1-5) — the sensor shows "Unknown" rather than inventing Profile 1.
+        """
         cloud = self.coordinator.data.get("active_profile")
-        if isinstance(cloud, int) and cloud > 0:
+        if isinstance(cloud, int) and 1 <= cloud <= 5:
             return cloud
         monitor = self.coordinator.data.get("profile")
-        if isinstance(monitor, int) and monitor > 0:
+        if isinstance(monitor, int) and 1 <= monitor <= 5:
             return monitor
-        return 1
+        return None
 
 
 class DeLonghiBeanSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):

@@ -1,8 +1,16 @@
 """Test ECAM command building — length bytes, format, CRC."""
 
-from unittest.mock import MagicMock
+import base64
+from unittest.mock import MagicMock, patch
 
-from custom_components.delonghi_coffee.api import DeLonghiApi
+import pytest
+
+from custom_components.delonghi_coffee.api import DeLonghiApi, DeLonghiApiError
+
+# Real captured espresso brew frame (MITM capture, profile 1). Stored as a
+# ready-made 0x83 command rather than a 0xD0 recipe, so the builder takes the
+# passthrough branch. profile_save = 0x06 = (1 << 2) | 2 → slot 1.
+PREBUILT_ESPRESSO_SLOT_1 = bytes.fromhex("0d1383f0010308000100281b010205270106") + b"\x51\xd7"
 
 
 class TestCommandLengthBytes:
@@ -91,9 +99,56 @@ class TestRecipeToBrew:
         assert 8 in param_ids, "TASTE(8) must be preserved"
 
     def test_passthrough_existing_brew(self):
-        """If input already starts with 0x0D, return as-is."""
-        brew = bytes.fromhex("0d1383f0010308000100281b010205270106") + b"\x51\xd7"
-        assert DeLonghiApi._recipe_to_brew_command(brew) is brew
+        """If input already starts with 0x0D and selects the requested profile,
+        return it byte-for-byte (rebuilding would break its CRC)."""
+        assert DeLonghiApi._recipe_to_brew_command(PREBUILT_ESPRESSO_SLOT_1, profile=1) is PREBUILT_ESPRESSO_SLOT_1
+
+    def test_passthrough_rejects_frame_of_another_profile(self):
+        """Issue #79 review, case 4: profile 3 requested while only the
+        profile-1 prebuilt Espresso frame exists → the mismatch must be
+        rejected, not handed back as a frame that still encodes slot 1."""
+        with pytest.raises(DeLonghiApiError, match="encodes profile 1"):
+            DeLonghiApi._recipe_to_brew_command(PREBUILT_ESPRESSO_SLOT_1, profile=3)
+
+    def test_passthrough_mismatch_never_reaches_the_machine(self):
+        """Same mismatch one level up (the cloud property holds the prebuilt
+        frame): the real builder runs, the error surfaces before dispatch and
+        nothing is sent."""
+        api = DeLonghiApi("user@example.com", "pw", region="EU", oem_model="DL-striker-cb")
+        props = {"d302_rec_3_espresso": {"value": base64.b64encode(PREBUILT_ESPRESSO_SLOT_1).decode()}}
+        with (
+            patch.object(api, "get_properties", return_value=props),
+            patch.object(api, "ping_connected", return_value=True),
+            patch.object(api, "_pre_brew_check"),
+            patch.object(api, "send_command") as mock_send,
+            pytest.raises(DeLonghiApiError, match="refusing to brew a profile"),
+        ):
+            api.brew_beverage("DSN", "espresso", profile=3)
+        mock_send.assert_not_called()
+
+    def test_passthrough_frame_without_profile_byte_is_rejected(self):
+        """Too short to carry profile_save → the slot cannot be verified."""
+        short = bytes([0x0D, 0x05, 0x83, 0xF0, 0x01, 0x03, 0x06, 0x00])
+        with pytest.raises(DeLonghiApiError, match="too short"):
+            DeLonghiApi._recipe_to_brew_command(short, profile=1)
+
+    def test_built_frame_encodes_requested_profile(self):
+        """The frame handed to the transport selects exactly the profile that
+        was asked for, checked with the same decoder the guard uses."""
+        recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
+        for profile in (1, 2, 3, 4, 5):
+            cmd = DeLonghiApi._recipe_to_brew_command(recipe, profile=profile)
+            DeLonghiApi._assert_frame_profile(cmd, profile)  # raises on any mismatch
+            assert cmd[-(2 + 1)] == (profile << 2) | 2
+
+    @pytest.mark.parametrize("bad", [0, 6, 7, True, "2", None])
+    def test_unsupported_profile_rejected_before_building(self, bad):
+        """The builder is where the slot enters the frame, so it validates the
+        same boundary as brew_custom / set_active_profile: a whole number
+        1-5. Positive-only validation accepted 7 (issue #79 review)."""
+        recipe = bytes([0xD0, 0x08, 0xA6, 0xF0, 0x01, 0x01, 8, 3, 0x00, 0x00])
+        with pytest.raises(DeLonghiApiError, match="Profile must be 1-5"):
+            DeLonghiApi._recipe_to_brew_command(recipe, profile=bad)
 
     def test_profile_save_byte(self):
         """profile_save = (profile << 2) | 2."""
