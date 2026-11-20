@@ -549,39 +549,41 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.selected_profile is not None:
                 pass  # explicit choice: observations must not touch it
             else:
-                # Automatic mode: agree the two signals before trusting either.
-                if fresh_ok and mon_ok:
-                    # A conflicting pair is NOT resolved. Picking one here is
-                    # how the wrong profile got brewed (#78); the caller must
-                    # ask instead.
-                    self._auto_profile = fresh if fresh == mon else None
-                elif fresh_ok:
-                    self._auto_profile = fresh
-                elif mon_ok:
-                    self._auto_profile = mon
-                else:
-                    # Nothing usable this poll: unresolved, NOT a fabricated
-                    # slot 1.
+                # Automatic mode. A conflicting pair (both signals valid but
+                # different) is NEVER resolved and NEVER followed — picking one
+                # is how the wrong profile got brewed (#78). The conflict vetoes
+                # the follow on every poll, not just at startup (numanx11 #79):
+                # we keep the cloud baseline current so a later agreement is
+                # measured against the latest reading, but the target stays
+                # unresolved until the signals agree or only one remains.
+                conflict = fresh_ok and mon_ok and fresh != mon
+                if conflict:
                     self._auto_profile = None
-                if fresh_ok:
+                    self._last_d286 = fresh
+                elif fresh_ok:
+                    # Single agreeing signal (or cloud only). A genuine
+                    # in-session change of the cloud value follows in the
+                    # automatic default (never in ``selected_profile``).
                     if self._last_d286 is None:
                         self._last_d286 = fresh  # first sighting: baseline only
                     elif fresh != self._last_d286:
-                        # A genuine in-session touchscreen switch: follow it in
-                        # the automatic default (never in ``selected_profile``).
                         _LOGGER.info(
-                            "Profile %d seen from machine (cloud changed from %s), automatic default was %s — following",
+                            "Profile %d seen from machine (cloud changed from %s) — following",
                             fresh,
                             self._last_d286,
-                            self._auto_profile,
                         )
-                        self._auto_profile = fresh
                         self._last_d286 = fresh
+                    self._auto_profile = fresh
+                elif mon_ok:
+                    # Monitor-only default (no cloud signal to track).
+                    self._auto_profile = mon
+                    self._last_d286 = None
                 else:
                     # Read gap (status UNKNOWN, or a firmware that never
-                    # publishes d286): re-baseline, so the next sighting is a
-                    # first observation and not a transition out of a value we
-                    # stopped observing.
+                    # publishes d286): unresolved, and re-baseline so the next
+                    # sighting is a first observation, not a transition out of a
+                    # value we stopped observing.
+                    self._auto_profile = None
                     self._last_d286 = None
 
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.

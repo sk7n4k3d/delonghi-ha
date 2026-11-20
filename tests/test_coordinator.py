@@ -1642,6 +1642,29 @@ class TestProfileTracking:
         assert coord._auto_profile == 3
         assert coord.resolve_profile() == 3
 
+    def test_conflict_vetoes_follow_on_every_poll(self):
+        """numanx11 #79 blocker: a conflict vetoes automatic following on EVERY
+        poll, not just at startup. (3,3)->3, (4,3)->ask, (4,3)->ask, (4,4)->4."""
+        coord, _, api = _make_coord()
+        self._settle(coord)
+        self._status(api, active=3, monitor=3)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 3
+        # cloud moves to 4 while the monitor still says 3: contradictory pair,
+        # must NOT follow the cloud to 4 — ask instead
+        self._status(api, active=4, monitor=3)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() is None
+        assert coord._last_d286 == 4  # baseline kept current during the conflict
+        # identical contradictory reading: still unresolved
+        self._status(api, active=4, monitor=3)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() is None
+        # signals agree on 4: resolves to 4
+        self._status(api, active=4, monitor=4)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 4
+
     def test_out_of_range_cloud_value_is_not_a_slot(self):
         """Validation: a slot must be a whole number in 1..5 — 7 is neither a
         default nor an observation."""
