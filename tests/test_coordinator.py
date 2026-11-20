@@ -1665,6 +1665,40 @@ class TestProfileTracking:
         asyncio.run(coord._async_update_data())
         assert coord.resolve_profile() == 4
 
+    def test_failed_full_refresh_does_not_advance_auto_target(self):
+        """numanx11 #79 r3: a poll whose full-refresh later fails must NOT
+        advance the automatic target — resolve() stays on the last good value
+        that was actually published."""
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        self._status(api, active=2, monitor=2)
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 2
+        # next poll: cloud+monitor move to 4, but the full-refresh fetch fails
+        self._status(api, active=4, monitor=4)
+        api.get_properties.side_effect = DeLonghiApiError("boom")
+        coord._last_full_refresh = 0  # force the full-refresh path this cycle
+        with pytest.raises(UpdateFailed):
+            asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 2  # not advanced to the failed poll's 4
+
+    def test_lan_monitor_push_updates_auto_target(self):
+        """numanx11 #79 r3: a LAN frame publishing a monitor slot must move the
+        automatic target so resolve() agrees with the published observation."""
+        coord, _, api = _make_coord()
+        coord.async_set_updated_data = MagicMock()
+        coord._lan_server = _make_lan_server(True)
+        self._status(api, monitor=2)  # monitor-only poll -> auto 2
+        self._settle(coord)
+        coord.data = asyncio.run(coord._async_update_data())
+        assert coord.resolve_profile() == 2
+        # a LAN frame pushes monitor 4 while the cloud profile is absent
+        with patch.object(coord, "_lan_monitor_status", return_value={"profile": 4, "machine_state": "Ready"}):
+            asyncio.run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": "x"}}))
+        assert coord.resolve_profile() == 4  # auto target followed the LAN monitor
+
     def test_out_of_range_cloud_value_is_not_a_slot(self):
         """Validation: a slot must be a whole number in 1..5 — 7 is neither a
         default nor an observation."""

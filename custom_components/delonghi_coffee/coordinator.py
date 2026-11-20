@@ -81,6 +81,28 @@ def _valid_slot(value: Any) -> bool:
     return isinstance(value, int) and 1 <= value <= 5
 
 
+def _auto_target_from(cloud: Any, monitor: Any) -> int | None:
+    """Derive the automatic profile target from a cloud + monitor reading.
+
+    Pure (no state). The single rule shared by the per-poll observation and the
+    LAN push, so ``resolve_profile()`` and the published observation can never
+    disagree (numanx11 #79 round 3):
+      - both valid and different -> ``None`` (conflict: ask, never guess)
+      - cloud valid (no conflict) -> cloud (authoritative touchscreen signal)
+      - only monitor valid -> monitor
+      - neither -> ``None``
+    """
+    cloud_ok = _valid_slot(cloud)
+    mon_ok = _valid_slot(monitor)
+    if cloud_ok and mon_ok and cloud != monitor:
+        return None
+    if cloud_ok:
+        return cloud
+    if mon_ok:
+        return monitor
+    return None
+
+
 class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to fetch data from De'Longhi machine.
 
@@ -545,46 +567,34 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             fresh = status.get("active_profile")
             mon = status.get("profile", 0)
             fresh_ok = _valid_slot(fresh)
-            mon_ok = _valid_slot(mon)
+            # Compute the candidate automatic target into locals; the COMMIT
+            # happens only at the successful return below, so a poll whose
+            # full-refresh later raises never advances the target (numanx11 #79
+            # r3: a failed poll must not make resolve() disagree with the last
+            # good published observation).
             if self.selected_profile is not None:
-                pass  # explicit choice: observations must not touch it
+                cand_auto = self._auto_profile  # explicit choice: observations do not touch it
+                cand_baseline = self._last_d286
             else:
-                # Automatic mode. A conflicting pair (both signals valid but
-                # different) is NEVER resolved and NEVER followed — picking one
-                # is how the wrong profile got brewed (#78). The conflict vetoes
-                # the follow on every poll, not just at startup (numanx11 #79):
-                # we keep the cloud baseline current so a later agreement is
-                # measured against the latest reading, but the target stays
-                # unresolved until the signals agree or only one remains.
-                conflict = fresh_ok and mon_ok and fresh != mon
-                if conflict:
-                    self._auto_profile = None
-                    self._last_d286 = fresh
-                elif fresh_ok:
-                    # Single agreeing signal (or cloud only). A genuine
-                    # in-session change of the cloud value follows in the
-                    # automatic default (never in ``selected_profile``).
-                    if self._last_d286 is None:
-                        self._last_d286 = fresh  # first sighting: baseline only
-                    elif fresh != self._last_d286:
+                # Automatic mode. The conflict/agreement rule lives in
+                # _auto_target_from (shared with the LAN push so resolve() and
+                # the published observation can never disagree).
+                cand_auto = _auto_target_from(fresh, mon)
+                if fresh_ok:
+                    # Keep the cloud baseline current even during a conflict, so
+                    # a later agreement is measured against the latest reading.
+                    if self._last_d286 is not None and fresh != self._last_d286 and cand_auto == fresh:
                         _LOGGER.info(
                             "Profile %d seen from machine (cloud changed from %s) — following",
                             fresh,
                             self._last_d286,
                         )
-                        self._last_d286 = fresh
-                    self._auto_profile = fresh
-                elif mon_ok:
-                    # Monitor-only default (no cloud signal to track).
-                    self._auto_profile = mon
-                    self._last_d286 = None
+                    cand_baseline = fresh
                 else:
-                    # Read gap (status UNKNOWN, or a firmware that never
-                    # publishes d286): unresolved, and re-baseline so the next
-                    # sighting is a first observation, not a transition out of a
-                    # value we stopped observing.
-                    self._auto_profile = None
-                    self._last_d286 = None
+                    # Read gap (UNKNOWN, or a firmware that never publishes
+                    # d286): re-baseline so the next sighting is a first
+                    # observation, not a transition out of a stale value.
+                    cand_baseline = None
 
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.
             # Without this, the MQTT session dies after ~5 min and commands
@@ -782,6 +792,14 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Build diagnostic dump if enabled
             if self.diagnostic_mode and self._last_all_props:
                 self._last_diagnostic = get_diagnostic_dump(self._last_all_props, self._cached_counters, status)
+
+            # Commit the automatic target only now that the whole refresh has
+            # succeeded (numanx11 #79 r3): a poll that raised earlier leaves the
+            # last good target in place, so resolve() never runs ahead of the
+            # published observation.
+            if self.selected_profile is None:
+                self._auto_profile = cand_auto
+                self._last_d286 = cand_baseline
 
             # The published active profile must PRESERVE an absence rather than
             # invent slot 1 (issue #78): a fresh cloud slot that is a real one
@@ -1055,6 +1073,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         self._monitor_stale_count = 0
                     if merged.get("machine_state") != before:
                         _LAN_LOGGER.info("LAN monitor: machine state %s → %s", before, merged.get("machine_state"))
+                    # Keep the automatic target in sync with the LAN-published
+                    # monitor so resolve() and the published observation agree
+                    # (numanx11 #79 r3). Explicit choice wins; a cloud/monitor
+                    # conflict asks. The cloud baseline (_last_d286) is left
+                    # alone — a LAN monitor byte is not a cloud transition.
+                    if self.selected_profile is None:
+                        self._auto_profile = _auto_target_from(merged.get("active_profile"), merged.get("profile"))
             self.async_set_updated_data(merged)
         else:
             self.async_set_updated_data(self.data if self.data else {})
