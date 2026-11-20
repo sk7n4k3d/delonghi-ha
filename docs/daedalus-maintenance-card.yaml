@@ -1,0 +1,43 @@
+type: entities
+title: Coffee machine maintenance
+show_header_toggle: false
+entities:
+  - entity: sensor.coffee_maintenance_last_descale
+    name: Last descale logged
+  - type: button
+    name: Descaling
+    icon: mdi:water-sync
+    action_name: Log completion
+    tap_action:
+      action: perform-action
+      perform_action: script.coffee_maintenance_log_completed_task
+      data:
+        task: descale
+      confirmation:
+        text: Log descaling as completed now?
+  - entity: sensor.coffee_maintenance_last_filter_replacement
+    name: Last filter replacement logged
+  - type: button
+    name: Water filter replacement
+    icon: mdi:water-pump
+    action_name: Log completion
+    tap_action:
+      action: perform-action
+      perform_action: script.coffee_maintenance_log_completed_task
+      data:
+        task: water_filter
+      confirmation:
+        text: Log water filter replacement as completed now?
+  - entity: sensor.coffee_maintenance_last_brew_unit_cleaning
+    name: Last brew unit cleaning logged
+  - type: button
+    name: Brew unit cleaning
+    icon: mdi:coffee-maker
+    action_name: Log completion
+    tap_action:
+      action: perform-action
+      perform_action: script.coffee_maintenance_log_completed_task
+      data:
+        task: brew_unit_cleaning
+      confirmation:
+        text: Log brew unit cleaning as completed now?

@@ -1,0 +1,65 @@
+# Home Assistant package. Copy one per machine and use a distinct
+# coffee_maintenance prefix and Coffee maintenance label for each copy.
+script:
+  coffee_maintenance_log_completed_task:
+    alias: "Coffee maintenance: Log completed task"
+    description: Save the current time for maintenance you have completed on this machine.
+    mode: queued
+    fields:
+      task:
+        name: Completed task
+        required: true
+        selector:
+          select:
+            options:
+              - label: Descaling
+                value: descale
+              - label: Water filter replacement
+                value: water_filter
+              - label: Brew unit cleaning
+                value: brew_unit_cleaning
+    sequence:
+      - if:
+          - condition: template
+            value_template: "{{ task | default('') not in ['descale', 'water_filter', 'brew_unit_cleaning'] }}"
+        then:
+          - stop: Select a supported maintenance task.
+            error: true
+      - event: coffee_maintenance_manually_completed
+        event_data:
+          task: "{{ task }}"
+
+template:
+  - triggers:
+      - trigger: event
+        event_type: coffee_maintenance_manually_completed
+        event_data:
+          task: descale
+    sensor:
+      - name: "Coffee maintenance: Last descale logged"
+        unique_id: coffee_maintenance_last_descale
+        default_entity_id: sensor.coffee_maintenance_last_descale
+        device_class: timestamp
+        state: "{{ trigger.event.time_fired.isoformat() }}"
+  - triggers:
+      - trigger: event
+        event_type: coffee_maintenance_manually_completed
+        event_data:
+          task: water_filter
+    sensor:
+      - name: "Coffee maintenance: Last filter replacement logged"
+        unique_id: coffee_maintenance_last_filter_replacement
+        default_entity_id: sensor.coffee_maintenance_last_filter_replacement
+        device_class: timestamp
+        state: "{{ trigger.event.time_fired.isoformat() }}"
+  - triggers:
+      - trigger: event
+        event_type: coffee_maintenance_manually_completed
+        event_data:
+          task: brew_unit_cleaning
+    sensor:
+      - name: "Coffee maintenance: Last brew unit cleaning logged"
+        unique_id: coffee_maintenance_last_brew_unit_cleaning
+        default_entity_id: sensor.coffee_maintenance_last_brew_unit_cleaning
+        device_class: timestamp
+        state: "{{ trigger.event.time_fired.isoformat() }}"
