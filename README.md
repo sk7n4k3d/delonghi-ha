@@ -23,6 +23,12 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > [`docs/daedalus-cloud-card.yaml`](docs/daedalus-cloud-card.yaml).
 > [Set up My Coffee Lounge and upgrade an existing LAN connection](docs/daedalus-setup.md).
 >
+> Import the [Daedalus maintenance notification blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsk7n4k3d%2Fdelonghi-ha%2Fblob%2Fmaster%2Fblueprints%2Fautomation%2Fdaedalus-maintenance-notifications.yaml)
+> to get Home Assistant Companion app alerts for low water, empty beans, full grounds, descaling,
+> brew unit cleaning and water filter replacement. Enable cloud telemetry, then select your
+> Companion app phone and the corresponding sensors that your machine exposes. Leave unsupported
+> alerts empty. An alert is sent when a selected sensor changes from off to on.
+>
 > PrimaDonna Aromatic **ECAM63070** monitoring was verified with Daedalus v0.4.7 on Home Assistant
 > Core 2026.11.1 using an EU owner account. The LAN connection, standby state and firmware
 > sensors worked with display/main board 1.2.0 and Wi-Fi module 2.5.3.

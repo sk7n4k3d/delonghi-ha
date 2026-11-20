@@ -1,0 +1,124 @@
+blueprint:
+  name: De'Longhi My Coffee Lounge maintenance notifications
+  description: >
+    Send a Home Assistant Companion app notification when a selected
+    maintenance sensor changes from off to on. Leave any unsupported alerts
+    empty and select each sensor only under the alert it reports.
+  domain: automation
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    phone:
+      name: Phone
+      description: Select the phone registered with the Home Assistant Companion app.
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+    low_water:
+      name: Low water level
+      default: []
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: binary_sensor
+          multiple: true
+    no_coffee_beans:
+      name: No coffee beans
+      default: []
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: binary_sensor
+          multiple: true
+    grounds_container:
+      name: Grounds container full
+      default: []
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: binary_sensor
+          multiple: true
+    descale:
+      name: Descaling required
+      default: []
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: binary_sensor
+          multiple: true
+    brew_unit_cleaning:
+      name: Brew unit cleaning required
+      default: []
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: binary_sensor
+          multiple: true
+    water_filter:
+      name: Replace water filter
+      default: []
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: binary_sensor
+          multiple: true
+
+triggers:
+  - trigger: state
+    entity_id: !input low_water
+    from: "off"
+    to: "on"
+    id: low_water
+  - trigger: state
+    entity_id: !input no_coffee_beans
+    from: "off"
+    to: "on"
+    id: no_coffee_beans
+  - trigger: state
+    entity_id: !input grounds_container
+    from: "off"
+    to: "on"
+    id: grounds_container
+  - trigger: state
+    entity_id: !input descale
+    from: "off"
+    to: "on"
+    id: descale
+  - trigger: state
+    entity_id: !input brew_unit_cleaning
+    from: "off"
+    to: "on"
+    id: brew_unit_cleaning
+  - trigger: state
+    entity_id: !input water_filter
+    from: "off"
+    to: "on"
+    id: water_filter
+
+actions:
+  - condition: template
+    value_template: "{{ trigger is defined and trigger.id is defined }}"
+  - variables:
+      maintenance_steps:
+        low_water: Refill the water tank with fresh water.
+        no_coffee_beans: Refill the bean hopper with coffee beans.
+        grounds_container: Empty and reinsert the grounds container.
+        descale: Follow the machine's on-screen descaling instructions.
+        brew_unit_cleaning: Follow the machine's instructions to clean the brew unit.
+        water_filter: Replace the water filter and follow the machine's setup instructions.
+  - device_id: !input phone
+    domain: mobile_app
+    type: notify
+    title: Coffee machine maintenance
+    message: >-
+      {{ trigger.to_state.name }}. {{ maintenance_steps[trigger.id] }}
+
+mode: parallel
+max: 20
