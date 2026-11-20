@@ -50,6 +50,7 @@ from .const import (
     AWS_REST_BASE_URL_LEGACY_PROD,
     AWS_REST_BASE_URL_PROD,
     AWS_REST_SOURCE_HEADER,
+    BREWING_CLUSTER_KEYS,
     BREWING_STATISTICS_KEYS,
     BREWING_TIME_OF_DAY_KEYS,
     CLOUD_POLL_SECONDS,
@@ -65,6 +66,8 @@ _LOGGER = get_logger(__name__)
 SHADOWS: tuple[str, ...] = ("MachineStatus", "MachineCapabilities")
 _MACHINE_SETTINGS_SHADOW = "MachineSettings"
 _BREWING_STATISTICS_SHADOW = "BrewingStatisticsTotals"
+# Bound the length of derived Home Assistant entity identifiers.
+_MAX_RECIPE_ID = (1 << 32) - 1
 _DRINK_VISIBILITY_SHADOW = "DrinkVisibility"
 _DRINK_VISIBILITY_KEY = re.compile(r"id_[0-9]+")
 
@@ -102,8 +105,10 @@ class CloudState:
 class BrewingStatistics:
     """Independent projections of the optional brewing statistics shadow."""
 
-    counters: dict[str, int]
-    time_of_day: dict[str, int]
+    counters: dict[str, int] = field(default_factory=dict)
+    time_of_day: dict[str, int] = field(default_factory=dict)
+    recipes: dict[int, int] = field(default_factory=dict)
+    clusters: dict[str, int] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------- REST --
@@ -113,7 +118,7 @@ class BrewingStatistics:
 _GROUPED_DEVICE_KEYS: tuple[str, ...] = ("ownedByMe", "sharedToMe")
 _DIRECTORY_SERIAL_KEYS = ("serialNumber", "serial_number", "serial", "serialNo", "SerialNo")
 _DIRECTORY_NAME_KEYS = ("machineName", "machine_name", "thingName", "thing_name", "name")
-_DIRECTORY_MODEL_RE = re.compile(r"(?:ECAM|EXAM)[0-9]{3}\.?[0-9]{2}[A-Z]{0,3}", re.ASCII | re.IGNORECASE)
+_DIRECTORY_MODEL_RE = re.compile(r"(?:ECAM|EXAM)[0-9]{3}\.?[0-9]{2}(?:\.?[A-Z]{1,3})?", re.ASCII | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -978,15 +983,41 @@ async def fetch_brewing_statistics(session: aiohttp.ClientSession, *, thing_name
 async def fetch_brewing_statistics_snapshot(
     session: aiohttp.ClientSession, *, thing_name: str, jwt: str
 ) -> BrewingStatistics:
-    """Read totals and time buckets in the same read-only shadow request."""
+    """Read the brewing counters and time buckets in one read-only shadow request."""
     client = ShadowClient(session, thing_name=thing_name, jwt=jwt)
     documents = await client.fetch(shadows=(_BREWING_STATISTICS_SHADOW,), timeout=5)
     state = documents[_BREWING_STATISTICS_SHADOW].get("state")
     reported = state.get("reported") if isinstance(state, dict) else None
+    if not isinstance(reported, dict):
+        return BrewingStatistics()
+
     counters = _nonnegative_integers(reported, BREWING_STATISTICS_KEYS)
-    time_of_day = reported.get("TimeOfDay") if isinstance(reported, dict) else None
-    buckets = _nonnegative_integers(time_of_day, {key: key for key in BREWING_TIME_OF_DAY_KEYS})
-    return BrewingStatistics(counters, buckets)
+    buckets = _nonnegative_integers(reported.get("TimeOfDay"), {key: key for key in BREWING_TIME_OF_DAY_KEYS})
+    recipes = {
+        key: count
+        for key, count in _brewing_rows(reported.get("Recipes"), "ID").items()
+        if type(key) is int and 0 <= key <= _MAX_RECIPE_ID
+    }
+    clusters = _nonnegative_integers(_brewing_rows(reported.get("Clusters"), "Name"), BREWING_CLUSTER_KEYS)
+    return BrewingStatistics(counters, buckets, recipes, clusters)
+
+
+def _brewing_rows(rows: Any, field: str) -> dict[int | str, int]:
+    """Read keyed brew counts, withholding keys with conflicting valid rows."""
+    if not isinstance(rows, list):
+        return {}
+    counts: dict[int | str, int] = {}
+    conflicts: set[int | str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key, count = row.get(field), row.get("Brew")
+        if type(key) not in (int, str) or type(count) is not int or count < 0:
+            continue
+        if key in counts and counts[key] != count:
+            conflicts.add(key)
+        counts[key] = count
+    return {key: count for key, count in counts.items() if key not in conflicts}
 
 
 @dataclass(slots=True)

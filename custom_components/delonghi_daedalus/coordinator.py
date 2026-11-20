@@ -69,6 +69,12 @@ _LOGGER = get_logger(__name__)
 _LAN_CONNECT_TIMEOUT = 35
 _LAN_MAX_RETRY_SECONDS = 300
 _CLOUD_MAX_AGE = CLOUD_POLL_SECONDS + CLOUD_FETCH_TIMEOUT_SECONDS + DEFAULT_UPDATE_INTERVAL_SECONDS
+_BREWING_STATISTICS_PROJECTIONS = {
+    "brewing_statistics": "counters",
+    "brewing_hours": "time_of_day",
+    "recipe_brew_counts": "recipes",
+    "cluster_brew_counts": "clusters",
+}
 
 
 class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -450,7 +456,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if key in previous:
                     cloud_data[key] = previous[key]
         if previous and previous.get("machine_name") == thing:
-            for key in ("brewing_statistics", "brewing_hours"):
+            for key in _BREWING_STATISTICS_PROJECTIONS:
                 if key in previous:
                     cloud_data[key] = previous[key]
             if self.entry.data.get(CONF_DRINK_VISIBILITY) and "visible_drinks_count" in previous:
@@ -475,7 +481,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_update_machine_settings(thing, jwt, self._cloud_data, credentials[1:])
 
     async def _async_update_brewing_statistics(self, thing: str, jwt: str, cloud_data: dict[str, Any]) -> None:
-        statistics = BrewingStatistics({}, {})
+        statistics = BrewingStatistics()
         try:
             async with asyncio.timeout(BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS):
                 statistics = await fetch_brewing_statistics_snapshot(self._api.http_session, thing_name=thing, jwt=jwt)
@@ -484,17 +490,10 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self._cloud_data is not cloud_data:
             return  # The original snapshot expired while statistics were pending.
-        interval = (
-            BREWING_STATISTICS_POLL_SECONDS
-            if statistics.counters or statistics.time_of_day
-            else BREWING_STATISTICS_RETRY_SECONDS
-        )
+        projections = {key: getattr(statistics, field) for key, field in _BREWING_STATISTICS_PROJECTIONS.items()}
+        interval = BREWING_STATISTICS_POLL_SECONDS if any(projections.values()) else BREWING_STATISTICS_RETRY_SECONDS
         self._brewing_statistics_due_at = time.monotonic() + interval
-        updates = {
-            key: value
-            for key, value in (("brewing_statistics", statistics.counters), ("brewing_hours", statistics.time_of_day))
-            if value != cloud_data.get(key, {})
-        }
+        updates = {key: value for key, value in projections.items() if value != cloud_data.get(key, {})}
         if updates:
             self._cloud_data = {**cloud_data, **updates}
             self._publish_snapshot()

@@ -231,6 +231,33 @@
       "brew_count": {
         "name": "Nombre de préparations"
       },
+      "hot_brew_count": {
+        "name": "Nombre de préparations chaudes"
+      },
+      "cold_brew_count": {
+        "name": "Nombre de préparations froides"
+      },
+      "recipe_brew_count": {
+        "name": "Nombre de préparations de la recette {recipe_id}"
+      },
+      "recipe_cappuccino_brew_count": {
+        "name": "Nombre de cappuccinos"
+      },
+      "recipe_latte_macchiato_brew_count": {
+        "name": "Nombre de latte macchiatos"
+      },
+      "recipe_cafe_con_leche_brew_count": {
+        "name": "Nombre de cafés con leche"
+      },
+      "recipe_caffe_crema_brew_count": {
+        "name": "Nombre de caffè crema"
+      },
+      "recipe_black_eye_brew_count": {
+        "name": "Nombre de Black Eye"
+      },
+      "recipe_iced_latte_macchiato_brew_count": {
+        "name": "Nombre de latte macchiatos glacés"
+      },
       "stopped_brew_count": {
         "name": "Nombre de préparations arrêtées"
       },
