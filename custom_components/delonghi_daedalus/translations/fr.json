@@ -76,6 +76,9 @@
   },
   "entity": {
     "binary_sensor": {
+      "water_filter_installed": {
+        "name": "Filtre à eau installé"
+      },
       "connected": {
         "name": "Connectée"
       },
@@ -209,6 +212,18 @@
       },
       "water_filter_registration_count": {
         "name": "Nombre d’enregistrements de filtres à eau"
+      },
+      "descale_progress": {
+        "name": "Progression du tartre"
+      },
+      "water_filter_usage": {
+        "name": "Utilisation du filtre à eau"
+      },
+      "grounds_container_fill": {
+        "name": "Remplissage du bac à marc"
+      },
+      "auto_off_delay": {
+        "name": "Délai d’arrêt automatique"
       },
       "lan_ip": {
         "name": "Adresse IP locale"

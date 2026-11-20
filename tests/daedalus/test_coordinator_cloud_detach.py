@@ -22,7 +22,7 @@ from custom_components.delonghi_daedalus.api import (
     DaedalusLanIdentityError,
     DaedalusLanSerialMismatchError,
 )
-from custom_components.delonghi_daedalus.cloud import CloudState, CloudTelemetryError
+from custom_components.delonghi_daedalus.cloud import CloudState, CloudTelemetryError, MachineSettingsTelemetry
 from custom_components.delonghi_daedalus.const import (
     BREWING_STATISTICS_POLL_SECONDS,
     BREWING_STATISTICS_RETRY_SECONDS,
@@ -37,8 +37,8 @@ from custom_components.delonghi_daedalus.const import (
     CONF_SESSION_TOKEN,
     DRINK_VISIBILITY_POLL_SECONDS,
     DRINK_VISIBILITY_RETRY_SECONDS,
-    MAINTENANCE_COUNTERS_POLL_SECONDS,
-    MAINTENANCE_COUNTERS_RETRY_SECONDS,
+    MACHINE_SETTINGS_POLL_SECONDS,
+    MACHINE_SETTINGS_RETRY_SECONDS,
 )
 from custom_components.delonghi_daedalus.coordinator import DaedalusCoordinator
 
@@ -54,8 +54,11 @@ def _mock_statistics():
 
 
 @pytest.fixture(autouse=True)
-def _mock_maintenance_counters():
-    with patch("custom_components.delonghi_daedalus.coordinator.fetch_maintenance_counters", return_value={}) as mocked:
+def _mock_machine_settings():
+    with patch(
+        "custom_components.delonghi_daedalus.coordinator.fetch_machine_settings",
+        return_value=MachineSettingsTelemetry(),
+    ) as mocked:
         yield mocked
 
 
@@ -525,28 +528,29 @@ def test_lan_listener_detects_disconnect_and_reconnects_without_commands():
     asyncio.run(_go())
 
 
-def test_maintenance_counters_back_off_without_delaying_regular_shadows(_mock_maintenance_counters, _mock_statistics):
+def test_machine_settings_back_off_without_delaying_regular_shadows(_mock_machine_settings, _mock_statistics):
     async def _go():
         coord = _make_coordinator()
         coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
         started = asyncio.Event()
         totals = {"descale_count": 1, "water_filter_registration_count": 0}
+        settings = {"descale_progress": 72, "auto_off_delay": 30, "water_filter_installed": False}
 
-        async def _maintenance(_session, *, thing_name, jwt):
+        async def _settings(_session, *, thing_name, jwt):
             assert thing_name == "thing-1"
             assert jwt == "jwt"
-            if _mock_maintenance_counters.await_count == 1:
+            if _mock_machine_settings.await_count == 1:
                 started.set()
                 await asyncio.Event().wait()
-            if _mock_maintenance_counters.await_count == 3:
+            if _mock_machine_settings.await_count == 3:
                 raise CloudTelemetryError("settings shadow not found")
-            return totals
+            return MachineSettingsTelemetry(totals, settings)
 
-        _mock_maintenance_counters.side_effect = _maintenance
+        _mock_machine_settings.side_effect = _settings
         _mock_statistics.return_value = {"brew_count": 12}
         with (
             patch(_PATCH, return_value=_CLOUD_STATE) as regular_fetch,
-            patch("custom_components.delonghi_daedalus.coordinator.MAINTENANCE_COUNTERS_FETCH_TIMEOUT_SECONDS", 0.05),
+            patch("custom_components.delonghi_daedalus.coordinator.MACHINE_SETTINGS_FETCH_TIMEOUT_SECONDS", 0.05),
         ):
             await coord._async_update_data()
             await asyncio.wait_for(started.wait(), timeout=2)
@@ -555,32 +559,36 @@ def test_maintenance_counters_back_off_without_delaying_regular_shadows(_mock_ma
             assert data["cloud"]["status_flat"] == {"a": 1}
             assert data["cloud"]["brewing_statistics"] == {"brew_count": 12}
             assert "maintenance_counters" not in data["cloud"]
+            assert "machine_settings" not in data["cloud"]
             await asyncio.wait_for(coord._cloud_task, timeout=2)
-            assert coord._maintenance_counters_due_at > time.monotonic() + MAINTENANCE_COUNTERS_RETRY_SECONDS - 1
+            assert coord._machine_settings_due_at > time.monotonic() + MACHINE_SETTINGS_RETRY_SECONDS - 1
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
             await coord._async_update_data()
             await coord._cloud_task
-            _mock_maintenance_counters.assert_awaited_once()
+            _mock_machine_settings.assert_awaited_once()
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
-            coord._maintenance_counters_due_at = 0
-            await coord._async_update_data()
-            await coord._cloud_task
-            assert coord.data["cloud"]["maintenance_counters"] == totals
-            assert coord._maintenance_counters_due_at > time.monotonic() + MAINTENANCE_COUNTERS_POLL_SECONDS - 1
-
-            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._machine_settings_due_at = 0
             await coord._async_update_data()
             await coord._cloud_task
             assert coord.data["cloud"]["maintenance_counters"] == totals
-            assert _mock_maintenance_counters.await_count == 2
+            assert coord.data["cloud"]["machine_settings"] == settings
+            assert coord._machine_settings_due_at > time.monotonic() + MACHINE_SETTINGS_POLL_SECONDS - 1
 
             coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
-            coord._maintenance_counters_due_at = 0
+            await coord._async_update_data()
+            await coord._cloud_task
+            assert coord.data["cloud"]["maintenance_counters"] == totals
+            assert coord.data["cloud"]["machine_settings"] == settings
+            assert _mock_machine_settings.await_count == 2
+
+            coord._cloud_fetched_at -= CLOUD_POLL_SECONDS
+            coord._machine_settings_due_at = 0
             await coord._async_update_data()
             await coord._cloud_task
             assert coord.data["cloud"]["maintenance_counters"] == {}
+            assert coord.data["cloud"]["machine_settings"] == {}
             assert coord.data["cloud"]["brewing_statistics"] == {"brew_count": 12}
             assert "cloud_error" not in coord.data
             assert regular_fetch.await_count == 5
@@ -588,7 +596,7 @@ def test_maintenance_counters_back_off_without_delaying_regular_shadows(_mock_ma
     asyncio.run(_go())
 
 
-def test_offline_machine_clears_maintenance_counters_until_next_due_read(_mock_maintenance_counters):
+def test_offline_machine_clears_settings_and_counters_until_next_due_read(_mock_machine_settings):
     async def _go():
         coord = _make_coordinator()
         coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
@@ -597,44 +605,51 @@ def test_offline_machine_clears_maintenance_counters_until_next_due_read(_mock_m
             "thing-1",
             status_error="Device directory reports the machine offline",
         )
-        _mock_maintenance_counters.side_effect = [{"descale_count": 1}, {"descale_count": 2}]
+        _mock_machine_settings.side_effect = [
+            MachineSettingsTelemetry({"descale_count": 1}, {"descale_progress": 95}),
+            MachineSettingsTelemetry({"descale_count": 2}, {"descale_progress": 0}),
+        ]
         with patch(_PATCH, side_effect=[_CLOUD_STATE, offline, _CLOUD_STATE, _CLOUD_STATE]):
             await coord._async_cloud_fetch()
             assert coord.data["cloud"]["maintenance_counters"] == {"descale_count": 1}
-            due_at = coord._maintenance_counters_due_at
+            assert coord.data["cloud"]["machine_settings"] == {"descale_progress": 95}
+            due_at = coord._machine_settings_due_at
 
             await coord._async_cloud_fetch()
             assert coord.data["cloud"]["capabilities_flat"]
             assert "status_flat" not in coord.data["cloud"]
             assert "maintenance_counters" not in coord.data["cloud"]
+            assert "machine_settings" not in coord.data["cloud"]
 
             await coord._async_cloud_fetch()
             assert coord.data["cloud"]["status_flat"] == {"a": 1}
             assert "maintenance_counters" not in coord.data["cloud"]
-            assert coord._maintenance_counters_due_at == due_at
-            _mock_maintenance_counters.assert_awaited_once()
+            assert "machine_settings" not in coord.data["cloud"]
+            assert coord._machine_settings_due_at == due_at
+            _mock_machine_settings.assert_awaited_once()
 
-            coord._maintenance_counters_due_at = 0
+            coord._machine_settings_due_at = 0
             await coord._async_cloud_fetch()
             assert coord.data["cloud"]["maintenance_counters"] == {"descale_count": 2}
+            assert coord.data["cloud"]["machine_settings"] == {"descale_progress": 0}
 
     asyncio.run(_go())
 
 
 @pytest.mark.parametrize("invalidate", ["cloud expiry", "account change"])
-def test_pending_maintenance_counters_do_not_restore_an_obsolete_report(_mock_maintenance_counters, invalidate):
+def test_pending_machine_settings_do_not_restore_an_obsolete_report(_mock_machine_settings, invalidate):
     async def _go():
         coord = _make_coordinator()
         coord.entry.data[CONF_MACHINE_NAME] = "thing-1"
         started = asyncio.Event()
         release = asyncio.Event()
 
-        async def _maintenance(*_args, **_kwargs):
+        async def _settings(*_args, **_kwargs):
             started.set()
             await release.wait()
-            return {"descale_count": 1}
+            return MachineSettingsTelemetry({"descale_count": 1}, {"water_filter_installed": True})
 
-        _mock_maintenance_counters.side_effect = _maintenance
+        _mock_machine_settings.side_effect = _settings
         with patch(_PATCH, return_value=_CLOUD_STATE):
             await coord._async_update_data()
             await asyncio.wait_for(started.wait(), timeout=2)
@@ -646,7 +661,8 @@ def test_pending_maintenance_counters_do_not_restore_an_obsolete_report(_mock_ma
             release.set()
             await asyncio.wait_for(coord._cloud_task, timeout=2)
             assert "maintenance_counters" not in coord.data.get("cloud", {})
-            assert coord._maintenance_counters_due_at == 0
+            assert "machine_settings" not in coord.data.get("cloud", {})
+            assert coord._machine_settings_due_at == 0
 
     asyncio.run(_go())
 
@@ -655,8 +671,8 @@ def test_pending_maintenance_counters_do_not_restore_an_obsolete_report(_mock_ma
     ("updated_key", "expected"),
     [(CONF_SESSION_TOKEN, {}), (CONF_JWT, {"descale_count": 1})],
 )
-def test_maintenance_read_keeps_original_account_identity(
-    _mock_statistics, _mock_maintenance_counters, updated_key, expected
+def test_machine_settings_read_keeps_original_account_identity(
+    _mock_statistics, _mock_machine_settings, updated_key, expected
 ):
     async def _go():
         coord = _make_coordinator()
@@ -670,7 +686,7 @@ def test_maintenance_read_keeps_original_account_identity(
             return {"brew_count": 12}
 
         _mock_statistics.side_effect = _statistics
-        _mock_maintenance_counters.return_value = {"descale_count": 1}
+        _mock_machine_settings.return_value = MachineSettingsTelemetry({"descale_count": 1})
         with patch(_PATCH, return_value=_CLOUD_STATE):
             await coord._async_update_data()
             await asyncio.wait_for(started.wait(), timeout=2)
@@ -680,7 +696,7 @@ def test_maintenance_read_keeps_original_account_identity(
 
         assert coord.data["cloud"]["brewing_statistics"] == {"brew_count": 12}
         assert coord.data["cloud"].get("maintenance_counters", {}) == expected
-        assert _mock_maintenance_counters.await_count == int(bool(expected))
+        assert _mock_machine_settings.await_count == int(bool(expected))
 
     asyncio.run(_go())
 

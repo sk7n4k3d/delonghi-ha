@@ -12,7 +12,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .cloud_keys import KIND_ALARM, CloudEntityDiscovery, CloudKey, coerce_bool
-from .const import CONF_CLOUD_TELEMETRY, DOMAIN
+from .const import CONF_CLOUD_TELEMETRY, DOMAIN, WATER_FILTER_INSTALLED
 from .coordinator import DaedalusCoordinator
 from .entity import DaedalusCloudEntity, DaedalusEntity
 
@@ -27,13 +27,19 @@ async def async_setup_entry(
     if not entry.data.get(CONF_CLOUD_TELEMETRY):
         return
     discovery = CloudEntityDiscovery(want_binary=True)
+    added_filter_installation = False
 
     def _add_cloud_binary_sensors() -> None:
-        new = [
+        nonlocal added_filter_installation
+        cloud = (coordinator.data or {}).get("cloud")
+        new: list[BinarySensorEntity] = [
             DaedalusCloudBinarySensor(coordinator, source, key, meta)
-            for source, key, meta in discovery.discover((coordinator.data or {}).get("cloud"))
+            for source, key, meta in discovery.discover(cloud)
             if meta is not None
         ]
+        if not added_filter_installation and WATER_FILTER_INSTALLED in (cloud or {}).get("machine_settings", {}):
+            added_filter_installation = True
+            new.append(DaedalusWaterFilterInstalledSensor(coordinator))
         if new:
             async_add_entities(new)
 
@@ -58,6 +64,25 @@ class DaedalusConnectedSensor(DaedalusEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         data = self.coordinator.data or {}
         return bool(data.get("connected"))
+
+
+class DaedalusWaterFilterInstalledSensor(DaedalusEntity, BinarySensorEntity):
+    """The installation setting reported by the machine."""
+
+    _attr_translation_key = WATER_FILTER_INSTALLED
+    _attr_icon = "mdi:water-pump"
+
+    def __init__(self, coordinator: DaedalusCoordinator) -> None:
+        super().__init__(coordinator, key=WATER_FILTER_INSTALLED)
+
+    @property
+    def is_on(self) -> bool | None:
+        cloud = (self.coordinator.data or {}).get("cloud") or {}
+        return cloud.get("machine_settings", {}).get(WATER_FILTER_INSTALLED)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.is_on is not None
 
 
 class DaedalusCloudBinarySensor(DaedalusCloudEntity, BinarySensorEntity):

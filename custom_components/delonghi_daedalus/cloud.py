@@ -38,12 +38,13 @@ import json
 import re
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
 
 from .const import (
+    AUTO_OFF_DELAY,
     AWS_IOT_AUTHORIZER_PROD,
     AWS_IOT_BROKER_PROD,
     AWS_REST_BASE_URL_LEGACY_PROD,
@@ -52,6 +53,8 @@ from .const import (
     BREWING_STATISTICS_KEYS,
     CLOUD_POLL_SECONDS,
     MAINTENANCE_COUNTER_KEYS,
+    MAINTENANCE_PERCENTAGE_KEYS,
+    WATER_FILTER_INSTALLED,
 )
 from .lan_protocol import LanProtocolError, validate_lan_host
 from .redact import get_logger, mask_serial, sanitize_text
@@ -964,30 +967,54 @@ async def fetch_brewing_statistics(session: aiohttp.ClientSession, *, thing_name
     documents = await client.fetch(shadows=(_BREWING_STATISTICS_SHADOW,), timeout=5)
     state = documents[_BREWING_STATISTICS_SHADOW].get("state")
     reported = state.get("reported") if isinstance(state, dict) else None
-    return _nonnegative_counters(reported, BREWING_STATISTICS_KEYS)
+    return _nonnegative_integers(reported, BREWING_STATISTICS_KEYS)
 
 
-async def fetch_maintenance_counters(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> dict[str, int]:
-    """Read descaling and water filter registrations from the MachineSettings shadow."""
+@dataclass(slots=True)
+class MachineSettingsTelemetry:
+    """Verified read-only lifetime counters and settings from one shadow."""
+
+    maintenance_counters: dict[str, int] = field(default_factory=dict)
+    machine_settings: dict[str, int | bool] = field(default_factory=dict)
+
+
+async def fetch_machine_settings(
+    session: aiohttp.ClientSession, *, thing_name: str, jwt: str
+) -> MachineSettingsTelemetry:
+    """Read only verified fields from the reported MachineSettings shadow."""
     if not _THING_NAME_RE.fullmatch(thing_name):
         raise CloudTelemetryError("Invalid cloud thing name")
     client = ShadowClient(session, thing_name=thing_name, jwt=jwt)
     documents = await client.fetch(shadows=(_MACHINE_SETTINGS_SHADOW,), timeout=5)
     state = documents.get(_MACHINE_SETTINGS_SHADOW, {}).get("state")
     reported = state.get("reported") if isinstance(state, dict) else None
-    settings = reported.get("NotEditable") if isinstance(reported, dict) else None
-    return _nonnegative_counters(settings, MAINTENANCE_COUNTER_KEYS)
+    if not isinstance(reported, dict):
+        return MachineSettingsTelemetry()
+
+    read_only = reported.get("NotEditable")
+    counters = _nonnegative_integers(read_only, MAINTENANCE_COUNTER_KEYS)
+    percentages = _nonnegative_integers(read_only, MAINTENANCE_PERCENTAGE_KEYS)
+    settings: dict[str, int | bool] = {key: value for key, value in percentages.items() if value <= 100}
+    editable = reported.get("Editable")
+    if isinstance(editable, dict):
+        settings.update(_nonnegative_integers(editable, {"AutoTurnOffTimeInMin": AUTO_OFF_DELAY}))
+        user_config = editable.get("UserConf")
+        if isinstance(user_config, dict) and type(installed := user_config.get("FilterInstall")) is bool:
+            settings[WATER_FILTER_INSTALLED] = installed
+            if not installed:
+                settings.pop(MAINTENANCE_PERCENTAGE_KEYS["FilterUsagePerc"], None)
+    return MachineSettingsTelemetry(counters, settings)
 
 
-def _nonnegative_counters(reported: Any, keys: dict[str, str]) -> dict[str, int]:
+def _nonnegative_integers(reported: Any, keys: dict[str, str]) -> dict[str, int]:
     if not isinstance(reported, dict):
         return {}
-    counters: dict[str, int] = {}
-    for field, key in keys.items():
-        value = reported.get(field)
+    values: dict[str, int] = {}
+    for source_key, key in keys.items():
+        value = reported.get(source_key)
         if type(value) is int and value >= 0:
-            counters[key] = value
-    return counters
+            values[key] = value
+    return values
 
 
 async def fetch_visible_drinks_count(session: aiohttp.ClientSession, *, thing_name: str, jwt: str) -> int | None:

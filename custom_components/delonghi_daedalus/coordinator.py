@@ -23,9 +23,10 @@ from .api import (
 )
 from .cloud import (
     CloudTelemetryError,
+    MachineSettingsTelemetry,
     fetch_brewing_statistics,
     fetch_cloud_state,
-    fetch_maintenance_counters,
+    fetch_machine_settings,
     fetch_visible_drinks_count,
     flatten_shadow,
 )
@@ -53,9 +54,9 @@ from .const import (
     DRINK_VISIBILITY_RETRY_SECONDS,
     GIGYA_API_KEYS,
     GIGYA_POOL_EU,
-    MAINTENANCE_COUNTERS_FETCH_TIMEOUT_SECONDS,
-    MAINTENANCE_COUNTERS_POLL_SECONDS,
-    MAINTENANCE_COUNTERS_RETRY_SECONDS,
+    MACHINE_SETTINGS_FETCH_TIMEOUT_SECONDS,
+    MACHINE_SETTINGS_POLL_SECONDS,
+    MACHINE_SETTINGS_RETRY_SECONDS,
 )
 from .device import DaedalusDevice
 from .gigya_auth import jwt_expiry
@@ -106,7 +107,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cloud_auth_failed_for: tuple[str | None, ...] | None = None
         self._cloud_expiry: asyncio.TimerHandle | None = None
         self._cloud_task: asyncio.Task | None = None
-        self._maintenance_counters_due_at = 0.0
+        self._machine_settings_due_at = 0.0
         self._brewing_statistics_due_at = 0.0
         self._drink_visibility_due_at = 0.0
         self._stopping = False
@@ -345,24 +346,34 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._drink_visibility_due_at = 0.0
         self._cloud_data = None
 
-    async def _async_update_maintenance_counters(
+    async def _async_update_machine_settings(
         self, thing: str, jwt: str, cloud_data: dict[str, Any], session: tuple[str | None, ...]
     ) -> None:
         if self._credentials()[1:] != session:
             return
-        counters: dict[str, int] = {}
+        settings = MachineSettingsTelemetry()
         try:
-            async with asyncio.timeout(MAINTENANCE_COUNTERS_FETCH_TIMEOUT_SECONDS):
-                counters = await fetch_maintenance_counters(self._api.http_session, thing_name=thing, jwt=jwt)
+            async with asyncio.timeout(MACHINE_SETTINGS_FETCH_TIMEOUT_SECONDS):
+                settings = await fetch_machine_settings(self._api.http_session, thing_name=thing, jwt=jwt)
         except Exception as exc:  # noqa: BLE001 — optional shadow, separate from cloud health
-            _LOGGER.debug("Daedalus cloud: maintenance counters unavailable (%s)", type(exc).__name__)
+            _LOGGER.debug("Daedalus cloud: machine settings unavailable (%s)", type(exc).__name__)
 
         if self._cloud_data is not cloud_data or self._credentials()[1:] != session:
             return
-        interval = MAINTENANCE_COUNTERS_POLL_SECONDS if counters else MAINTENANCE_COUNTERS_RETRY_SECONDS
-        self._maintenance_counters_due_at = time.monotonic() + interval
-        if counters != cloud_data.get("maintenance_counters", {}):
-            self._cloud_data = {**cloud_data, "maintenance_counters": counters}
+        interval = (
+            MACHINE_SETTINGS_POLL_SECONDS
+            if settings.maintenance_counters or settings.machine_settings
+            else MACHINE_SETTINGS_RETRY_SECONDS
+        )
+        self._machine_settings_due_at = time.monotonic() + interval
+        if settings.maintenance_counters != cloud_data.get(
+            "maintenance_counters", {}
+        ) or settings.machine_settings != cloud_data.get("machine_settings", {}):
+            self._cloud_data = {
+                **cloud_data,
+                "maintenance_counters": settings.maintenance_counters,
+                "machine_settings": settings.machine_settings,
+            }
             self._publish_snapshot()
 
     async def _async_cloud_fetch(self) -> None:
@@ -425,7 +436,7 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_MACHINE_NAME: thing})
             self._brewing_statistics_due_at = 0.0
             self._drink_visibility_due_at = 0.0
-            self._maintenance_counters_due_at = 0.0
+            self._machine_settings_due_at = 0.0
         previous = self._cloud_data
         status_available = "status_flat" in cloud_data and cloud_state.status_error is None
         if (
@@ -433,9 +444,10 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and self._credentials()[1:] == credentials[1:]
             and previous
             and previous.get("machine_name") == thing
-            and "maintenance_counters" in previous
         ):
-            cloud_data["maintenance_counters"] = previous["maintenance_counters"]
+            for key in ("maintenance_counters", "machine_settings"):
+                if key in previous:
+                    cloud_data[key] = previous[key]
         if previous and previous.get("machine_name") == thing:
             if "brewing_statistics" in previous:
                 cloud_data["brewing_statistics"] = previous["brewing_statistics"]
@@ -457,8 +469,8 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and time.monotonic() >= self._drink_visibility_due_at
         ):
             await self._async_update_drink_visibility(thing, jwt, current)
-        if status_available and self._cloud_data is not None and time.monotonic() >= self._maintenance_counters_due_at:
-            await self._async_update_maintenance_counters(thing, jwt, self._cloud_data, credentials[1:])
+        if status_available and self._cloud_data is not None and time.monotonic() >= self._machine_settings_due_at:
+            await self._async_update_machine_settings(thing, jwt, self._cloud_data, credentials[1:])
 
     async def _async_update_brewing_statistics(self, thing: str, jwt: str, cloud_data: dict[str, Any]) -> None:
         counters: dict[str, int] = {}

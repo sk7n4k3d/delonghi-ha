@@ -76,6 +76,9 @@
   },
   "entity": {
     "binary_sensor": {
+      "water_filter_installed": {
+        "name": "Water filter installed"
+      },
       "connected": {
         "name": "Connected"
       },
@@ -209,6 +212,18 @@
       },
       "water_filter_registration_count": {
         "name": "Water filter registration count"
+      },
+      "descale_progress": {
+        "name": "Descale progress"
+      },
+      "water_filter_usage": {
+        "name": "Water filter usage"
+      },
+      "grounds_container_fill": {
+        "name": "Grounds container fill"
+      },
+      "auto_off_delay": {
+        "name": "Auto-off delay"
       },
       "lan_ip": {
         "name": "LAN IP address"
