@@ -1,5 +1,15 @@
 # My Coffee Lounge in Home Assistant
 
+## Before setting up Home Assistant
+
+Set up your account and add your machine in De’Longhi’s **My Coffee Lounge** app. If your machine already appears there, continue to [Install in Home Assistant](#install-in-home-assistant).
+
+If first-time registration is unusually slow or stalls, try selecting **Italy** as the country in the app. One PrimaDonna Aromatic owner reported that setup appeared to stall with **Romania** selected and completed after the switch to Italy. The owner may also have used Italian temporarily during setup.
+
+Owners of other De’Longhi machines have also reported using Italy during setup. [PrimaDonna Soul in Coffee Link](https://www.reddit.com/r/superautomatic/comments/18gfbo1/comment/kghku2w/), [Eletta Explore](https://www.reddit.com/r/DeLonghi/comments/1j96l51/comment/p435f0m/).
+
+## Install in Home Assistant
+
 Install **De’Longhi My Coffee Lounge** from the [distribution repository](https://github.com/sk7n4k3d/delonghi-daedalus-ha).
 
 - On Home Assistant **2026.11 and later**, open **Settings → Marketplace → Add from link** and add the distribution repository. The Marketplace requires a connected GitHub account for custom repositories and prompts you to connect if needed. Open the repository in Marketplace and select **Install**. [Home Assistant Marketplace documentation](https://www.home-assistant.io/integrations/marketplace/#custom-repositories)
