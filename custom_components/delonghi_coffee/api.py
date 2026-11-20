@@ -1649,7 +1649,11 @@ class DeLonghiApi:
         is_iced = beverage_key.startswith(("i_", "mi_", "over_ice", "mug_i_")) or beverage_key == "brew_over_ice"
         is_cold_brew = "_cb_" in beverage_key
         brew_cmd = self._recipe_to_brew_command(
-            recipe_data, is_iced=is_iced, is_cold_brew=is_cold_brew, profile=profile
+            recipe_data,
+            is_iced=is_iced,
+            is_cold_brew=is_cold_brew,
+            profile=profile,
+            action_byte=self._brew_action_byte(),
         )
         _LOGGER.info(
             "Brew command built for %s (profile=%d, iced=%s, cold=%s): %s",
@@ -1691,6 +1695,18 @@ class DeLonghiApi:
         "hot_milk": 2,
         "cortado": 2,
     }
+
+    def _brew_action_byte(self) -> int:
+        """Action byte for a brew command, scoped to the confirmed firmware.
+
+        Issue #50 / PR #76: the DL-millcore firmware (PrimaDonna Soul, e.g.
+        ECAM610.75.MB) ignores the historical ``0x03`` action byte and only
+        brews on ``0x01`` — field-validated by ZickzackBob with Coffee Link
+        closed. We have NO evidence yet for the Ayla families, so the default
+        stays ``0x03`` everywhere else rather than flipping globally (numanx11
+        #50). Widen this only with hardware evidence from another family.
+        """
+        return 0x01 if self._oem_model.startswith("DL-millcore") else 0x03
 
     def brew_custom(
         self,
@@ -1750,7 +1766,11 @@ class DeLonghiApi:
         brew_params += bytearray([39, 1])
 
         total = 6 + len(brew_params) + 1 + 2
-        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03]) + bytes(brew_params) + bytes([(profile << 2) | 2])
+        body = (
+            bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, self._brew_action_byte()])
+            + bytes(brew_params)
+            + bytes([(profile << 2) | 2])
+        )
         brew_cmd = body + self._crc16(body)
 
         # Pre-brew check (build a fake recipe for accessory check)
@@ -2068,6 +2088,7 @@ class DeLonghiApi:
         is_cold_brew: bool = False,
         intensity: int = 1,
         profile: int = 2,
+        action_byte: int = 0x03,
     ) -> bytes:
         """Convert stored recipe (0xD0/0xA6) to brew command (0x0D/0x83).
 
@@ -2119,7 +2140,9 @@ class DeLonghiApi:
         brew_params += bytearray([39, 1])  # RINSE=1
 
         total = 6 + len(brew_params) + 1 + 2
-        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03]) + bytes(brew_params) + bytes([(profile << 2) | 2])
+        body = (
+            bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, action_byte]) + bytes(brew_params) + bytes([(profile << 2) | 2])
+        )
         return body + cls._crc16(body)
 
     def get_profiles(self, dsn: str) -> dict[str, Any]:
