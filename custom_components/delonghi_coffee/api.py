@@ -1750,7 +1750,7 @@ class DeLonghiApi:
         brew_params += bytearray([39, 1])
 
         total = 6 + len(brew_params) + 1 + 2
-        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03]) + bytes(brew_params) + bytes([(profile << 2) | 2])
+        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x01]) + bytes(brew_params) + bytes([(profile << 2) | 2])
         brew_cmd = body + self._crc16(body)
 
         # Pre-brew check (build a fake recipe for accessory check)
@@ -2119,7 +2119,7 @@ class DeLonghiApi:
         brew_params += bytearray([39, 1])  # RINSE=1
 
         total = 6 + len(brew_params) + 1 + 2
-        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x03]) + bytes(brew_params) + bytes([(profile << 2) | 2])
+        body = bytes([0x0D, total - 1, 0x83, 0xF0, bev_id, 0x01]) + bytes(brew_params) + bytes([(profile << 2) | 2])
         return body + cls._crc16(body)
 
     def get_profiles(self, dsn: str) -> dict[str, Any]:
