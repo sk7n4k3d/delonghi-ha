@@ -1552,6 +1552,20 @@ class TestProfileTracking:
         coord._last_full_refresh = monotonic()
         coord._last_keepalive = monotonic()
 
+    def _status_active(self, api, active):
+        """Make the per-poll status advertise a fresh cloud ``active_profile``."""
+        api.get_status = MagicMock(
+            return_value={
+                "machine_state": "Off",
+                "profile": 0,
+                "monitor_raw": None,
+                "status": "RUN",
+                "alarms": [],
+                "alarm_word": None,
+                "active_profile": active,
+            }
+        )
+
     def test_mark_profile_selection_stamps(self):
         coord, _, _ = _make_coord()
         coord.mark_profile_selection(4)
@@ -1563,10 +1577,10 @@ class TestProfileTracking:
         hijack the restored/explicit HA choice. Replaces the old F-COORD-01
         'follow on first differing read' assertion, which was wrong for the Eletta
         where d286 is stuck."""
-        coord, _, _ = _make_coord()
+        coord, _, api = _make_coord()
+        self._status_active(api, 3)  # fresh cloud advertises 3
         coord.selected_profile = 2
         coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
-        coord._cached_profiles = {"active": 3, "profiles": {}}  # first sight of 3
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 2  # first sighting only sets the baseline
@@ -1578,19 +1592,19 @@ class TestProfileTracking:
         """A real in-session change of the cloud profile id (baseline 2 → 3)
         outside the grace window still updates the target (touchscreen tracking
         on models that publish changes)."""
-        coord, _, _ = _make_coord()
+        coord, _, api = _make_coord()
+        self._status_active(api, 3)  # fresh cloud moved 2 → 3
         coord.selected_profile = 2
         coord._last_d286 = 2  # baseline already established at 2
         coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
-        coord._cached_profiles = {"active": 3, "profiles": {}}  # changed 2 → 3
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 3
 
     def test_grace_window_absorbs_own_command_echo(self):
-        coord, _, _ = _make_coord()
+        coord, _, api = _make_coord()
         coord.mark_profile_selection(3)
-        coord._cached_profiles = {"active": 2, "profiles": {}}  # stale echo of our own command
+        self._status_active(api, 2)  # stale echo of our own command
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 3
@@ -1603,6 +1617,19 @@ class TestProfileTracking:
         self._settle(coord)
         asyncio.run(coord._async_update_data())
         assert coord.selected_profile == 2
+
+    def test_stale_cached_value_is_not_a_transition(self):
+        """coderabbit #79: when the per-poll status omits active_profile, an older
+        full-refresh cached value must NOT be mistaken for a touchscreen change."""
+        coord, _, _ = _make_coord()  # default status has no active_profile (fresh=None)
+        coord.selected_profile = 2
+        coord._last_d286 = 2
+        coord._selected_profile_set_at = monotonic() - coord_mod.PROFILE_TRACK_GRACE_SECONDS - 1
+        coord._cached_profiles = {"active": 1, "profiles": {}}  # stale cache, differs
+        self._settle(coord)
+        asyncio.run(coord._async_update_data())
+        assert coord.selected_profile == 2  # not hijacked to the stale 1
+        assert coord._last_d286 == 2  # baseline unmoved by the cache
 
     def test_mark_profile_selection_persists_to_entry(self):
         """Issue #78: an explicit selection is written to the config entry so it

@@ -516,27 +516,30 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # of our own command; outside it, a differing cloud value means
             # the user moved on the touchscreen and the select must follow.
             monitor_profile = status.get("profile", 0)
-            # Fresh per-poll cloud value first (60 s), full-refresh cache as
-            # fallback for firmwares that do not expose d286.
-            machine_profile = status.get("active_profile") or self._cached_profiles.get("active")
+            # Only a FRESH per-poll cloud value is evidence of a touchscreen
+            # switch. The full-refresh cache is NOT a transition signal: a stale
+            # cached value (older than the current selection) must never be
+            # mistaken for a new change (coderabbit review #79). Firmwares that
+            # do not expose a per-poll d286 simply do not auto-follow — which is
+            # the safe side of the #78 "never hijack the HA choice" rule.
+            fresh = status.get("active_profile")
+            fresh_ok = isinstance(fresh, int) and fresh > 0
             if self.selected_profile is None and monitor_profile > 0:
                 # No explicit choice yet: seed from the monitor so the dropdown
                 # starts on the machine's truth (issue #78: the cloud d286 can be
                 # frozen and must not be the seed).
                 self.selected_profile = monitor_profile
-            elif self.selected_profile is not None:
-                # Only a genuine in-session CHANGE of the cloud profile id is
-                # evidence of a touchscreen switch. A frozen d286 (observed on the
-                # Eletta Explore: stuck at 3 across panel changes — issue #78), a
-                # first sighting, a cache reread, or a post-downtime re-read must
-                # NOT hijack the HA selection. First sighting only sets the baseline.
-                changed = (
-                    isinstance(machine_profile, int) and machine_profile > 0 and machine_profile != self._last_d286
-                )
+            elif self.selected_profile is not None and fresh_ok:
+                # Only a genuine in-session CHANGE of the fresh cloud profile id
+                # counts. A frozen d286 (observed on the Eletta Explore: stuck at
+                # 3 across panel changes — issue #78), a first sighting, or a
+                # post-downtime re-read must NOT hijack the HA selection. First
+                # sighting only sets the baseline.
+                changed = fresh != self._last_d286
                 if (
                     changed
                     and self._last_d286 is not None
-                    and machine_profile != self.selected_profile
+                    and fresh != self.selected_profile
                     and (
                         self._selected_profile_set_at is None
                         or (now - self._selected_profile_set_at) > PROFILE_TRACK_GRACE_SECONDS
@@ -544,13 +547,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ):
                     _LOGGER.info(
                         "Profile %d seen from machine (cloud changed from %s), was %d in HA — following",
-                        machine_profile,
+                        fresh,
                         self._last_d286,
                         self.selected_profile,
                     )
-                    self.selected_profile = machine_profile
-            if isinstance(machine_profile, int) and machine_profile > 0:
-                self._last_d286 = machine_profile
+                    self.selected_profile = fresh
+            if fresh_ok:
+                self._last_d286 = fresh
 
             # MQTT keepalive — ping every 4 min to prevent cloud session expiry.
             # Without this, the MQTT session dies after ~5 min and commands
