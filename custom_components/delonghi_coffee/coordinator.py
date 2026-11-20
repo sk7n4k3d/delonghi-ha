@@ -516,7 +516,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         _LOGGER.info("MQTT keepalive recovered after %d failures", self._keepalive_failures)
                     self._keepalive_failures = 0
                     _LOGGER.debug("MQTT keepalive sent")
-                except (DeLonghiApiError, DeLonghiAuthError) as err:
+                except (DeLonghiApiError, DeLonghiAuthError, requests.RequestException) as err:
+                    # requests.RequestException (e.g. a raw Ayla ReadTimeout from the
+                    # ping POST) is best-effort here, not fatal: the status was already
+                    # read this cycle, so a slow keepalive ping must not blank the
+                    # entities (issue #73 — observed ~4/day, last log frame
+                    # "ping_connected: trying …"). Counted as a keepalive miss below.
                     self._keepalive_failures += 1
                     # Ramp the log level once the cloud has stopped answering for a while.
                     # Single miss = debug (cloud wobbles happen); 3 in a row = warning
@@ -543,12 +548,16 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 # Force the machine to push ALL properties (not just monitor).
                 # ping_connected on supported models, request_monitor as universal fallback.
+                wake_ok = False
                 try:
                     ping_ok = await self.hass.async_add_executor_job(self.api.ping_connected, self.dsn)
                     if not ping_ok:
                         _LOGGER.debug("ping_connected unsupported, falling back to request_monitor")
                         await self.hass.async_add_executor_job(self.api.request_monitor, self.dsn)
-                except (DeLonghiApiError, DeLonghiAuthError):
+                    wake_ok = True
+                except (DeLonghiApiError, DeLonghiAuthError, requests.RequestException):
+                    # Same as the keepalive path: a ping transport timeout is best-effort,
+                    # the properties fetch below still runs (issue #73).
                     _LOGGER.debug("Refresh wake failed, continuing with cached data")
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
@@ -593,13 +602,19 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self._load_contentstack()
 
                 self._last_full_refresh = now
-                self._last_keepalive = now  # full refresh counts as keepalive
-                if self._keepalive_failures:
-                    _LOGGER.info(
-                        "MQTT keepalive recovered via full refresh after %d failures",
-                        self._keepalive_failures,
-                    )
-                self._keepalive_failures = 0
+                # Only a wake that actually reached the machine counts as a keepalive.
+                # A timed-out wake must NOT reset the heartbeat freshness, or the next
+                # poll skips an overdue keepalive (issue #73 review, numanx11).
+                if wake_ok:
+                    self._last_keepalive = now
+                    if self._keepalive_failures:
+                        _LOGGER.info(
+                            "MQTT keepalive recovered via full refresh after %d failures",
+                            self._keepalive_failures,
+                        )
+                    self._keepalive_failures = 0
+                else:
+                    self._keepalive_failures += 1
 
             # Track monitor staleness — if raw data never changes,
             # alarms from this data are unreliable

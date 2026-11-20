@@ -1097,6 +1097,65 @@ class TestTransientRetry:
             _run(coord._async_update_data())
         assert api.get_properties.call_count == 1
 
+    def test_keepalive_ping_timeout_is_not_fatal(self):
+        """Issue #73: a raw Ayla ReadTimeout from the keepalive ping must not raise
+        UpdateFailed. The status was already read this cycle; the ping is best-effort.
+        This is the literal shape from the reporter's log (last frame
+        'ping_connected: trying …' then 'Unexpected error during coordinator refresh')."""
+        coord, _, api = _make_coord()
+        coord._last_full_refresh = monotonic()  # fresh → not a full refresh
+        coord._last_keepalive = -coord_mod.MQTT_KEEPALIVE_INTERVAL - 1  # keepalive due
+        api.get_status.return_value = {
+            "machine_state": "Ready",
+            "profile": 1,
+            "monitor_raw": "abc",
+            "status": "RUN",
+            "alarms": [],
+            "alarm_word": None,
+        }
+        api.ping_connected.side_effect = requests.ReadTimeout("HTTPSConnectionPool read timeout")
+        result = _run(coord._async_update_data())  # must NOT raise
+        assert result["machine_state"] == "Ready"  # status preserved despite ping timeout
+        assert coord._keepalive_failures == 1  # counted as a keepalive miss, not fatal
+
+    def test_full_refresh_wake_ping_timeout_still_fetches_properties(self):
+        """On the full-refresh wake path a ping timeout must not abort the cycle:
+        the all-properties GET still runs and the refresh succeeds."""
+        coord, _, api = _make_coord()
+        self._full_refresh(coord)
+        api.ping_connected.side_effect = requests.ReadTimeout("HTTPSConnectionPool read timeout")
+        api.get_properties.return_value = {"d270_serialnumber": {"value": "ECAM61075MBXYZ"}}
+        result = _run(coord._async_update_data())  # must NOT raise
+        assert api.get_properties.call_count >= 1  # properties fetch still happened
+        assert result is not None
+
+    def test_full_refresh_wake_timeout_does_not_reset_keepalive_freshness(self):
+        """Issue #73 review (numanx11): a full refresh whose wake ping times out must
+        NOT mark the heartbeat fresh. Otherwise the next poll skips an overdue
+        keepalive. The successful properties GET still publishes, but the missed wake
+        is counted and `_last_keepalive` is left where it was."""
+        coord, _, api = _make_coord()
+        self._full_refresh(coord)
+        coord._keepalive_failures = 2
+        ka_before = coord._last_keepalive
+        api.ping_connected.side_effect = requests.ReadTimeout("HTTPSConnectionPool read timeout")
+        api.get_properties.return_value = {"d270_serialnumber": {"value": "ECAM61075MBXYZ"}}
+        _run(coord._async_update_data())
+        assert coord._keepalive_failures == 3  # missed wake counted, not cleared by the GET
+        assert coord._last_keepalive == ka_before  # heartbeat NOT advanced on a failed wake
+
+    def test_full_refresh_wake_success_clears_keepalive(self):
+        """Companion: when the wake ping succeeds, the full refresh does count as a
+        keepalive — misses cleared and freshness advanced."""
+        coord, _, api = _make_coord()
+        self._full_refresh(coord)
+        coord._keepalive_failures = 2
+        api.ping_connected.return_value = True
+        api.get_properties.return_value = {"d270_serialnumber": {"value": "ECAM61075MBXYZ"}}
+        _run(coord._async_update_data())
+        assert coord._keepalive_failures == 0
+        assert coord._last_keepalive > 0
+
     def test_properties_recovers_on_retry(self):
         """Full-refresh get_properties gets the same single retry."""
         coord, _, api = _make_coord()
