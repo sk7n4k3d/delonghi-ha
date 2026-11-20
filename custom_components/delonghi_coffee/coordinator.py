@@ -516,7 +516,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         _LOGGER.info("MQTT keepalive recovered after %d failures", self._keepalive_failures)
                     self._keepalive_failures = 0
                     _LOGGER.debug("MQTT keepalive sent")
-                except (DeLonghiApiError, DeLonghiAuthError) as err:
+                except (DeLonghiApiError, DeLonghiAuthError, requests.RequestException) as err:
+                    # requests.RequestException (e.g. a raw Ayla ReadTimeout from the
+                    # ping POST) is best-effort here, not fatal: the status was already
+                    # read this cycle, so a slow keepalive ping must not blank the
+                    # entities (issue #73 — observed ~4/day, last log frame
+                    # "ping_connected: trying …"). Counted as a keepalive miss below.
                     self._keepalive_failures += 1
                     # Ramp the log level once the cloud has stopped answering for a while.
                     # Single miss = debug (cloud wobbles happen); 3 in a row = warning
@@ -548,7 +553,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if not ping_ok:
                         _LOGGER.debug("ping_connected unsupported, falling back to request_monitor")
                         await self.hass.async_add_executor_job(self.api.request_monitor, self.dsn)
-                except (DeLonghiApiError, DeLonghiAuthError):
+                except (DeLonghiApiError, DeLonghiAuthError, requests.RequestException):
+                    # Same as the keepalive path: a ping transport timeout is best-effort,
+                    # the properties fetch below still runs (issue #73).
                     _LOGGER.debug("Refresh wake failed, continuing with cached data")
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
