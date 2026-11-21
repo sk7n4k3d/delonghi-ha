@@ -30,6 +30,7 @@ from .cloud import (
     fetch_machine_settings,
     fetch_visible_drinks_count,
     flatten_shadow,
+    reported_field_timestamp,
 )
 from .const import (
     BREWING_STATISTICS_FETCH_TIMEOUT_SECONDS,
@@ -55,6 +56,7 @@ from .const import (
     DRINK_VISIBILITY_RETRY_SECONDS,
     GIGYA_API_KEYS,
     GIGYA_POOL_EU,
+    HOT_CARAFE_RINSE_EVIDENCE_FIELDS,
     MACHINE_SETTINGS_FETCH_TIMEOUT_SECONDS,
     MACHINE_SETTINGS_POLL_SECONDS,
     MACHINE_SETTINGS_RETRY_SECONDS,
@@ -403,6 +405,8 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             thing = cloud_state.machine_name
             cloud_data = {"machine_name": thing, "fetched_at": time.time()}
             for name, key in (("MachineStatus", "status_flat"), ("MachineCapabilities", "capabilities_flat")):
+                if name == "MachineStatus" and cloud_state.status_error is not None:
+                    continue
                 document = cloud_state.shadows.get(name)
                 state = document.get("state") if isinstance(document, dict) else None
                 if isinstance(state, dict) and isinstance(state.get("reported"), dict):
@@ -413,6 +417,15 @@ class DaedalusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     else:
                         if flat:
                             cloud_data[key] = flat
+                            if name == "MachineStatus":
+                                timestamps = {
+                                    field: timestamp
+                                    for field in HOT_CARAFE_RINSE_EVIDENCE_FIELDS
+                                    if field in flat
+                                    and (timestamp := reported_field_timestamp(document, field)) is not None
+                                }
+                                if timestamps:
+                                    cloud_data["status_reported_at"] = timestamps
             if "status_flat" not in cloud_data:
                 status_error = cloud_state.status_error or "MachineStatus shadow has no usable reported data"
                 if "capabilities_flat" not in cloud_data:

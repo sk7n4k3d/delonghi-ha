@@ -181,6 +181,12 @@
       "cloud_clean_hot": {
         "name": "Cycle de nettoyage à chaud"
       },
+      "cloud_hot_carafe_clean_selector": {
+        "name": "Sélecteur CLEAN de la carafe à lait chaud"
+      },
+      "hot_milk_carafe_rinse_in_progress": {
+        "name": "Rinçage de la carafe à lait chaud en cours"
+      },
       "cloud_idf_cold": {
         "name": "Carafe lait froid (IDF)"
       },
@@ -239,6 +245,12 @@
       },
       "recipe_brew_count": {
         "name": "Nombre de préparations de la recette {recipe_id}"
+      },
+      "recipe_espresso_brew_count": {
+        "name": "Nombre d’espressos"
+      },
+      "recipe_cappuccino_mix_brew_count": {
+        "name": "Nombre de préparations de Cappuccino Mix"
       },
       "recipe_cappuccino_brew_count": {
         "name": "Nombre de cappuccinos"

@@ -10,6 +10,15 @@ With read-only cloud telemetry enabled, Home Assistant can show how many times y
 
 ![Home Assistant showing three recipe counters and both temperature totals with sample counts](images/daedalus-drink-statistics.png)
 
+## PrimaDonna Aromatic ECAM630.70
+
+| Recipe ID | Verified drink |
+| ---: | --- |
+| 1 | Espresso |
+| 15 | Cappuccino Mix |
+
+One preparation of each drink increased its recipe counter by one. The Cappuccino Mix test also increased the machine’s hot brew total by one.
+
 ## Reading the counters
 
 On the Eletta Ultra ECAM470.75.TXB, the owner verified the names Cappuccino, Latte Macchiato, Café con Leche, Caffè Crema, Black Eye and Iced Latte Macchiato. Home Assistant uses these labels when it recognizes the product model. For other models, unmapped drinks, or older installations reporting only a numeric display-board identifier, the sensor shows the recipe ID, such as **Recipe 42 brew count**. [Eletta Ultra observations](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8)

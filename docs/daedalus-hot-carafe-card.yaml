@@ -1,0 +1,19 @@
+type: entities
+title: Hot milk carafe
+show_header_toggle: false
+entities:
+  - entity: sensor.example_operating_state
+    name: Operating state
+  - entity: sensor.example_step_description
+    name: Step description
+  - entity: binary_sensor.example_cleaning_required
+    name: Cleaning required
+  - entity: binary_sensor.example_hot_milk_jug
+    name: Hot milk jug
+  - entity: binary_sensor.example_hot_cleaning_cycle
+    name: Hot milk carafe CLEAN selector
+  - entity: binary_sensor.example_hot_milk_carafe_rinse_in_progress
+    name: Hot milk carafe rinse in progress
+  - type: divider
+  - entity: sensor.example_recipe_15_brew_count
+    name: Cappuccino Mix brew count

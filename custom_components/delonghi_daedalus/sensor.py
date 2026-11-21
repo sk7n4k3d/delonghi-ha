@@ -12,7 +12,6 @@ from homeassistant.helpers import entity_registry
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .cloud import machine_model_code
 from .cloud_keys import KIND_CAPABILITY, CloudEntityDiscovery, CloudKey, cloud_key_display, lookup_cloud_key
 from .const import (
     AUTO_OFF_DELAY,
@@ -20,16 +19,14 @@ from .const import (
     BREWING_STATISTICS_KEYS,
     CONF_CLOUD_TELEMETRY,
     CONF_DRINK_VISIBILITY,
-    CONF_MODEL,
     DOMAIN,
     MAINTENANCE_COUNTER_KEYS,
     MAINTENANCE_PERCENTAGE_KEYS,
 )
 from .coordinator import DaedalusCoordinator
-from .entity import DaedalusCloudEntity, DaedalusEntity
+from .entity import DaedalusCloudEntity, DaedalusEntity, telemetry_model_code
 
 _MAX_RECIPE_SENSORS = 256
-_ELETTA_ULTRA_MODELS = frozenset({"ECAM47075", "ECAM47075TXB"})
 # Verified on an Eletta Ultra ECAM470.75.TXB by the reporter of issue #8.
 _ELETTA_ULTRA_RECIPE_NAMES = {
     7: "recipe_cappuccino_brew_count",
@@ -38,6 +35,17 @@ _ELETTA_ULTRA_RECIPE_NAMES = {
     33: "recipe_caffe_crema_brew_count",
     35: "recipe_black_eye_brew_count",
     52: "recipe_iced_latte_macchiato_brew_count",
+}
+
+# Verified on a PrimaDonna Aromatic ECAM630.70.
+_PRIMADONNA_AROMATIC_RECIPE_NAMES = {
+    1: "recipe_espresso_brew_count",
+    15: "recipe_cappuccino_mix_brew_count",
+}
+_RECIPE_NAMES_BY_MODEL = {
+    "ECAM47075": _ELETTA_ULTRA_RECIPE_NAMES,
+    "ECAM47075TXB": _ELETTA_ULTRA_RECIPE_NAMES,
+    "ECAM63070": _PRIMADONNA_AROMATIC_RECIPE_NAMES,
 }
 
 
@@ -217,22 +225,8 @@ class DaedalusRecipeBrewCountSensor(_DaedalusCloudCounterSensor):
         self._value_key = recipe_id
         self._attr_extra_state_attributes = {"recipe_id": recipe_id}
 
-        configured_model = coordinator.entry.data.get(CONF_MODEL)
-        model = machine_model_code(configured_model)
-        if configured_model is None:
-            cloud = (coordinator.data or {}).get("cloud") or {}
-            reported_models = {
-                code.replace(".", "")
-                for key, value in cloud.get("capabilities_flat", {}).items()
-                if (meta := lookup_cloud_key(key)) is not None
-                and meta.key == "machine_model"
-                and (code := machine_model_code(value)) is not None
-            }
-            if len(reported_models) == 1:
-                model = reported_models.pop()
-        name_key = None
-        if model is not None and model.replace(".", "") in _ELETTA_ULTRA_MODELS:
-            name_key = _ELETTA_ULTRA_RECIPE_NAMES.get(recipe_id)
+        recipe_names = _RECIPE_NAMES_BY_MODEL.get(telemetry_model_code(coordinator) or "", {})
+        name_key = recipe_names.get(recipe_id)
         self._attr_translation_key = name_key or "recipe_brew_count"
         if name_key is None:
             self._attr_translation_placeholders = {"recipe_id": str(recipe_id)}

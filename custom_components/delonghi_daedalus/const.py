@@ -74,6 +74,8 @@ CONF_FAVORITE_DRINK: Final = "favorite_drink"
 CONF_AROMATIC_WARMUP: Final = "aromatic_warmup"
 CONF_AROMATIC_WARMUP_PENDING: Final = "aromatic_warmup_pending"
 
+HOT_CARAFE_RINSE_EVIDENCE_FIELDS: Final = ("Status", "CurrMode", "accessories.CleanHot")
+
 DEFAULT_UPDATE_INTERVAL_SECONDS: Final = 30
 # Cloud shadows change slowly and every fetch is a full MQTT session;
 # 120 s matches the cadence mimasek71 validated on the Eletta Ultra.

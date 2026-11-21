@@ -27,12 +27,13 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 > on a Home Assistant dashboard if your machine reports lifetime brewing statistics.
 > [Show brewing counts by time of day](docs/daedalus-brewing-hours.md) if your machine reports the optional buckets.
 > [Track individual drinks and hot or cold preparations](docs/daedalus-drink-statistics.md) on machines that report recipe statistics.
+> [See hot milk carafe and rinse readings](docs/daedalus-hot-carafe.md) on the PrimaDonna Aromatic ECAM630.70.
 >
 > Import the [Daedalus maintenance notification blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fsk7n4k3d%2Fdelonghi-ha%2Fblob%2Fmaster%2Fblueprints%2Fautomation%2Fdaedalus-maintenance-notifications.yaml)
 > to get Home Assistant Companion app alerts for low water, empty beans, full grounds, descaling,
-> brew unit cleaning and water filter replacement. Enable cloud telemetry, then select your
-> Companion app phone and the corresponding sensors that your machine exposes. Leave unsupported
-> alerts empty. An alert is sent when a selected sensor changes from off to on.
+> general cleaning requests, brew unit cleaning and water filter replacement. Enable cloud telemetry,
+> then select your Companion app phone and the corresponding sensors that your machine exposes.
+> Leave unsupported alerts empty. An alert is sent when a selected sensor changes from off to on.
 > [Show coffee machine care readings and set an early warning](docs/daedalus-care-dashboard.md)
 > for descaling or filter replacement on machines that report maintenance percentages.
 > [Keep an observed maintenance history](docs/daedalus-observed-maintenance.md) when your machine

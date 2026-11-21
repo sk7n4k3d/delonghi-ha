@@ -9,6 +9,7 @@ content: |-
     ('urgent', 'Refill the bean hopper', 'binary_sensor.machine_no_coffee_beans'),
     ('urgent', 'Empty the grounds container', 'binary_sensor.machine_grounds_container_full'),
     ('advisory', 'Descale the machine', 'binary_sensor.machine_descaling_required'),
+    ('advisory', 'Check the machine for cleaning instructions', 'binary_sensor.machine_cleaning_required'),
     ('advisory', 'Clean the brew unit', 'binary_sensor.machine_brew_unit_cleaning_required'),
     ('advisory', 'Replace the water filter', 'binary_sensor.machine_replace_water_filter')
   ] %}
