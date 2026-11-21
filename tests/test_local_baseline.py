@@ -9,7 +9,9 @@ backwards compatibility that keeps existing users' baselines on disk.
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from custom_components.delonghi_coffee.local_baseline import (
     _SET_AT_KEY,
@@ -99,10 +101,10 @@ class TestDatedPayload:
 
     def test_unparsable_date_reports_undatable(self):
         store = _store()
-        _seed(store, {"espresso": 1476, _SET_AT_KEY: {"espresso": "14 mai, environ"}})
+        _seed(store, {"espresso": 30, _SET_AT_KEY: {"espresso": "not-a-date"}})
         asyncio.run(store.async_load())
         assert store.age_days("espresso") is None
-        assert store.get_set_at("espresso") == "14 mai, environ"
+        assert store.get_set_at("espresso") == UNKNOWN_DATE
 
     def test_age_is_computed_from_the_stored_date(self):
         store = _store()
@@ -151,6 +153,46 @@ class TestClearing:
         before = dict(store._store._data)
         assert asyncio.run(store.async_clear(["nope"])) == []
         assert store._store._data == before
+
+
+class TestConcurrentEdits:
+    def test_readd_waits_for_pending_clear_to_commit(self):
+        async def exercise():
+            store = _store()
+            await store.async_set_many({"espresso": 30})
+            started = asyncio.Event()
+            unblock = asyncio.Event()
+            remove = store._store.async_remove
+
+            async def delayed_remove():
+                started.set()
+                await unblock.wait()
+                await remove()
+
+            store._store.async_remove = delayed_remove
+            clearing = asyncio.create_task(store.async_clear())
+            await started.wait()
+            readding = asyncio.create_task(store.async_set_many({"espresso": 31}))
+            await asyncio.sleep(0)
+            try:
+                assert not readding.done()
+                assert store.get("espresso") == 30
+            finally:
+                unblock.set()
+                await asyncio.gather(clearing, readding)
+            assert store.get("espresso") == store._store._data["espresso"] == 31
+
+        asyncio.run(exercise())
+
+    def test_failed_set_leaves_previous_baseline(self):
+        store = _store()
+        asyncio.run(store.async_set_many({"espresso": 30}))
+        stored = store._store._data
+        store._store.async_save = AsyncMock(side_effect=OSError("disk write failed"))
+        with pytest.raises(OSError, match="disk write failed"):
+            asyncio.run(store.async_set_many({"espresso": 31}))
+        assert store.get("espresso") == stored["espresso"] == 30
+        assert store.get_set_at("espresso") == stored[_SET_AT_KEY]["espresso"]
 
 
 class TestMergeUnchanged:
