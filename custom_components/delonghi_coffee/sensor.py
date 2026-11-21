@@ -14,9 +14,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DeLonghiApi
-from .const import BLOCKING_ALARM_BITS, DOMAIN
+from .const import BASELINE_MASK_ALERT_REFRESHES, BLOCKING_ALARM_BITS, DOMAIN
 from .coordinator import DeLonghiCoordinator
-from .local_baseline import LocalBaselineStore
+from .local_baseline import UNKNOWN_DATE, LocalBaselineStore
 from .logger import get_logger
 
 _LOGGER = get_logger(__name__)
@@ -433,10 +433,23 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         except TypeError:
             baseline_wins = True
         source = "baseline" if (cloud_val is None or baseline_wins) else "cloud"
+        # Issue #90: a baseline is a number somebody read off a screen on some
+        # date, not a measurement with a live age. Say when it was entered and
+        # how long the cloud has been under it, so a frozen 1476 can never be
+        # mistaken for a count that is merely slow to update.
+        streak = 0
+        masking = self.coordinator.data.get("baseline_masking")
+        if isinstance(masking, dict):
+            streak = masking.get(self._counter_key, 0)
+        age = baseline_store.age_days(self._counter_key)
         return {
             "cloud_value": cloud_display,
             "baseline_value": baseline_display,
             "source": source,
+            "baseline_set_at": baseline_store.get_set_at(self._counter_key),
+            "baseline_age_days": age if age is not None else UNKNOWN_DATE,
+            "cloud_below_baseline_refreshes": streak,
+            "baseline_stale": streak >= BASELINE_MASK_ALERT_REFRESHES,
         }
 
 

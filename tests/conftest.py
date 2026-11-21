@@ -53,6 +53,17 @@ sys.modules["homeassistant.core"].callback = lambda func: func
 sys.modules["homeassistant.const"].MAX_LENGTH_STATE_STATE = 255
 
 
+class _ServiceValidationError(Exception):
+    """Real exception stand-in for HA's ServiceValidationError.
+
+    A MagicMock cannot be raised, and service handlers must raise something
+    HA turns into a friendly UI error rather than a stack trace.
+    """
+
+
+sys.modules["homeassistant.exceptions"].ServiceValidationError = _ServiceValidationError
+
+
 class _MockStore:
     """In-memory stand-in for homeassistant.helpers.storage.Store.
 

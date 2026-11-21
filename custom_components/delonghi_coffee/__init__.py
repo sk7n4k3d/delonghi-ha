@@ -299,9 +299,26 @@ def _register_services(hass: HomeAssistant) -> None:
         await coord.async_request_refresh()
 
     async def handle_reset_local_baseline(call) -> None:  # noqa: ANN001
+        from homeassistant.exceptions import ServiceValidationError
+
         _api, coord, _dsn = _resolve_target(hass, call)
-        await coord.local_baseline.async_clear()
+        store = coord.local_baseline
+        await store.async_load()
+        if call.data.get("confirm") is not True:
+            # A bare click must not silently discard every manual counter —
+            # each one is a number somebody read off the machine's screen.
+            # Without confirm this call is a preview: it lists what would go,
+            # with its capture date, and changes nothing (issue #90).
+            stored = sorted(store.all_keys())
+            detail = ", ".join(f"{k}={store.get(k)} (entered {store.get_set_at(k)})" for k in stored) or "none"
+            raise ServiceValidationError(
+                f"No baseline was dropped. Currently stored: {detail}. "
+                "Re-run with confirm=true to discard them and revert the "
+                "sensors to whatever the cloud reports."
+            )
+        removed = await store.async_clear()
         await coord.async_request_refresh()
+        _LOGGER.info("Reset %d counter baseline(s): %s", len(removed), removed)
 
     hass.services.async_register(DOMAIN, "brew_custom", handle_brew_custom)
     hass.services.async_register(DOMAIN, "cancel_brew", handle_cancel_brew)

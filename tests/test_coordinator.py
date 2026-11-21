@@ -538,6 +538,9 @@ class TestAsyncUpdateDataFullRefresh:
         assert coord._contentstack_loaded is True
         assert coord._last_full_refresh > 0
         assert coord._last_keepalive > 0
+        # Issue #90: the masking streak rides the published payload, not just
+        # the coordinator attribute — the sensor reads it from data.
+        assert "baseline_masking" in result
         assert result["counters"] == {"total_coffees": 12}
         assert result["beverages"] == ["espresso"]
         assert result["active_profile"] == 1

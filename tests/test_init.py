@@ -8,6 +8,7 @@ from homeassistant.exceptions import (  # noqa: E402
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
     HomeAssistantError,
+    ServiceValidationError,
 )
 
 import custom_components.delonghi_coffee as init_mod  # noqa: E402
@@ -745,6 +746,63 @@ class TestAsyncUnloadEntry:
         # Data NOT popped, services NOT removed
         assert "e1" in hass.data[DOMAIN]
         hass.services.async_remove.assert_not_called()
+
+
+class TestResetLocalBaselineService:
+    """Issue #90: dropping every manual counter needs a deliberate confirm.
+
+    Each baseline is a number somebody read off the machine's screen; losing
+    one silently means a sensor silently reverts to a frozen cloud value.
+    """
+
+    def _setup(self, baselines=None):
+        from custom_components.delonghi_coffee.local_baseline import LocalBaselineStore
+
+        hass = _make_hass()
+        entry = _make_entry()
+        coord = _make_fake_coord()
+        # _make_fake_coord leaves async_request_refresh a plain MagicMock;
+        # the handler awaits it, so this service needs the awaitable twin.
+        coord.async_request_refresh = AsyncMock()
+        store = LocalBaselineStore(hass, "DSN-ABC")
+        if baselines:
+            _run(store.async_set_many(baselines))
+        coord.local_baseline = store
+        _run_setup_entry(hass, entry, _make_fake_api(), coord)
+        return _collect_services(hass)["reset_local_baseline"], store, coord
+
+    def test_without_confirm_nothing_is_dropped(self):
+        handler, store, _ = self._setup({"espresso": 1476, "tea": 35})
+        with pytest.raises(ServiceValidationError, match="No baseline was dropped"):
+            _run(handler(MagicMock(data={})))
+        assert store.get("espresso") == 1476
+        assert store.get("tea") == 35
+
+    def test_preview_lists_what_would_be_lost(self):
+        handler, store, _ = self._setup({"espresso": 1476})
+        stamp = store.get_set_at("espresso")
+        with pytest.raises(ServiceValidationError) as exc:
+            _run(handler(MagicMock(data={})))
+        assert "espresso=1476" in str(exc.value)
+        assert stamp in str(exc.value)
+
+    def test_string_true_is_not_a_confirmation(self):
+        """HA selectors hand back a bool, but a templated call can send "true"."""
+        handler, store, _ = self._setup({"espresso": 1476})
+        with pytest.raises(ServiceValidationError):
+            _run(handler(MagicMock(data={"confirm": "true"})))
+        assert store.get("espresso") == 1476
+
+    def test_confirm_drops_everything_and_refreshes(self):
+        handler, store, coord = self._setup({"espresso": 1476, "tea": 35})
+        _run(handler(MagicMock(data={"confirm": True})))
+        assert store.all_keys() == []
+        coord.async_request_refresh.assert_called_once()
+
+    def test_empty_store_reports_none_instead_of_crashing(self):
+        handler, _, _ = self._setup()
+        with pytest.raises(ServiceValidationError, match="none"):
+            _run(handler(MagicMock(data={})))
 
 
 # ---------------------------------------------------------------------------
