@@ -80,14 +80,17 @@ class TestSensorAttributes:
         coord.data = {"counters": counters, "baseline_masking": streak}
         return coord
 
-    def test_undated_baseline_reports_unknown_age(self):
+    def test_undated_baseline_is_unknown_text_but_a_real_none_age(self):
+        """Two shapes on purpose: the date field is prose ("unknown" reads fine
+        on the card), the age field is numeric, so it must be a real None for
+        templates to stay `is none` rather than compare a magic string."""
         coord, store = _make_coord({"espresso": 1476})
         # Simulate a pre-dating entry: value present, no capture date.
         store._set_at = {}
         self._coord_with_data(coord, {"espresso": 1406}, {"espresso": 5})
         attrs = _make_sensor(coord, "espresso").extra_state_attributes
         assert attrs["baseline_set_at"] == UNKNOWN_DATE
-        assert attrs["baseline_age_days"] == UNKNOWN_DATE
+        assert attrs["baseline_age_days"] is None
         assert attrs["source"] == "baseline"
 
     def test_stale_flag_flips_at_the_threshold(self):

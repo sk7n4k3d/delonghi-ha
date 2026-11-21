@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import DeLonghiApi
 from .const import BASELINE_MASK_ALERT_REFRESHES, BLOCKING_ALARM_BITS, DOMAIN
 from .coordinator import DeLonghiCoordinator
-from .local_baseline import UNKNOWN_DATE, LocalBaselineStore
+from .local_baseline import LocalBaselineStore
 from .logger import get_logger
 
 _LOGGER = get_logger(__name__)
@@ -437,6 +437,10 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
         # date, not a measurement with a live age. Say when it was entered and
         # how long the cloud has been under it, so a frozen 1476 can never be
         # mistaken for a count that is merely slow to update.
+        # Two shapes on purpose: `baseline_set_at` is prose on the card, so an
+        # undated entry reads "unknown"; `baseline_age_days` is numeric, so an
+        # undated entry is a real None and templates stay `is none` instead of
+        # comparing against a magic string.
         streak = 0
         masking = self.coordinator.data.get("baseline_masking")
         if isinstance(masking, dict):
@@ -447,7 +451,7 @@ class DeLonghiCounterSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity
             "baseline_value": baseline_display,
             "source": source,
             "baseline_set_at": baseline_store.get_set_at(self._counter_key),
-            "baseline_age_days": age if age is not None else UNKNOWN_DATE,
+            "baseline_age_days": age,
             "cloud_below_baseline_refreshes": streak,
             "baseline_stale": streak >= BASELINE_MASK_ALERT_REFRESHES,
         }
