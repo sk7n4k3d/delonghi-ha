@@ -5,6 +5,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.9] — 2026-11-21
+
+### Breaking changes
+
+- **`reset_local_baseline` exige `confirm=true` (#90).** Le service supprimait
+  d'un seul clic, sans avertissement, tous les baselines enregistrés localement.
+  Sans `confirm`, l'appel ne modifie plus rien et renvoie à la place la liste des
+  compteurs stockés avec leur date de saisie — le premier appel sert donc de
+  prévisualisation. Les automatisations qui appelaient le service sans ce champ
+  échoueront volontairement : chaque baseline est un nombre relevé sur l'écran de
+  la machine, et le perdre en silence fait retomber le capteur sur une valeur cloud
+  que le firmware ne met plus à jour.
+
+### Added
+
+- **Chaque baseline garde sa date de saisie (#90).** `set_baseline_from_screen`
+  horodate désormais clé par clé. Les dates sont rangées dans une clé de
+  métadonnées du même fichier de `.storage`, sans changement de
+  `STORAGE_VERSION` : Home Assistant refuse un fichier dont il ne connaît pas la
+  version, ce qui aurait effacé en silence les baselines déjà enregistrés. Une
+  entrée antérieure à ce changement, ou dont la date est illisible, est annoncée
+  `unknown` — jamais comme récente.
+- **Le capteur dit ce qu'il masque (#90).** Quand un compteur est tenu par un
+  baseline, ses attributs exposent `baseline_set_at`, `baseline_age_days`,
+  `cloud_below_baseline_refreshes` et `baseline_stale`. Ce dernier passe à `true`
+  après trois refresh complets (~30 min) pendant lesquels le cloud reste sous le
+  baseline : un ou deux refresh sous une saisie manuelle est normal, puisque la
+  saisie démarre volontairement devant le cloud ; ce qui ne l'est pas, c'est que
+  le cloud ne rattrape jamais.
+
+### Fixed
+
+- **Un nombre saisi il y a des mois ne ressemble plus à une mesure à jour (#90).**
+  Le firmware de l'Eletta Explore ne pousse les compteurs `d5XX`/`d7XX` au cloud
+  que sur des événements rares (constaté sur le terrain : dernier push spontané le
+  2026-04-08, ~140 boissons plus tôt). Le baseline manuel qui compense cela
+  s'affichait sans ancienneté, si bien qu'un compteur figé depuis mai passait pour
+  un compteur lent à se rafraîchir. La valeur affichée reste
+  `max(cloud, baseline)` — le cloud reprend la main dès qu'il rattrape — mais elle
+  est maintenant datée, et le capteur signale explicitement qu'il montre une saisie.
+
 ## [1.9.8] — 2026-11-21
 
 ### Fixed
