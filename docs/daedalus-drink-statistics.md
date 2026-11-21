@@ -32,6 +32,8 @@ Home Assistant registers up to 256 distinct recipe counters per machine. Previou
 | Eletta Ultra ECAM470.75.TXB | 35 | Black Eye |
 | Eletta Ultra ECAM470.75.TXB | 52 | Iced Latte Macchiato |
 
+The labels above also apply when Home Assistant shows **ECAM47070**. The owner of the verified ECAM470.75.TXB unit reported this product code after reconfiguring and confirmed that one Cappuccino advanced recipe 7 by one. [Owner’s observation](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8#issuecomment-7060227554)
+
 To help verify another Eletta Ultra drink, claim an unmapped drink in the issue. Compare the counts in `BrewingStatisticsTotals` → `Recipes` before and after one normal brew. Report the product model, drink name, and recipe ID whose count increased by one. [Eletta Ultra recipe mapping discussion](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8#issuecomment-7051487885)
 
 Add verified recipe names for another product model in a separate map alongside the Eletta Ultra map in the Daedalus sensor platform. Match the map to the product model code and test that the names only appear for that model. [Daedalus sensor platform](../custom_components/delonghi_daedalus/sensor.py)

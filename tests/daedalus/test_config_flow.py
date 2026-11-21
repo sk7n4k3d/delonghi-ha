@@ -325,19 +325,20 @@ def test_warmup_option_and_cloud_only_reconfigure_preserve_a_transport(setup_flo
 
 
 @pytest.mark.parametrize(
-    ("current_title", "expected_title"),
+    ("directory_model", "current_title", "expected_title"),
     [
-        ("My Coffee Lounge (OLD-SN)", "PrimaDonna Aromatic"),
-        ("Kitchen Coffee", "Kitchen Coffee"),
+        ("ECAM63070", "My Coffee Lounge (OLD-SN)", "PrimaDonna Aromatic"),
+        ("ECAM63070", "Kitchen Coffee", "Kitchen Coffee"),
+        ("ECAM47070", "My Coffee Lounge (OLD-SN)", "ECAM47070"),
     ],
 )
 def test_reconfigure_enriches_legacy_metadata_without_changing_serial_or_custom_title(
-    setup_flow, current_title, expected_title
+    setup_flow, directory_model, current_title, expected_title
 ):
     flow, api, directory, _ = setup_flow
     entry = _reconfigure_entry(flow, pin=_PIN)
     entry.title = current_title
-    directory.return_value = [DirectoryMachine("old-sn", "existing-thing", "ECAM63070")]
+    directory.return_value = [DirectoryMachine("old-sn", "existing-thing", directory_model)]
 
     async def run():
         await flow.async_step_reconfigure()
@@ -345,7 +346,7 @@ def test_reconfigure_enriches_legacy_metadata_without_changing_serial_or_custom_
         assert result["reason"] == "reconfigure_successful"
         update = flow.hass.config_entries.async_update_entry.call_args.kwargs
         assert update["title"] == expected_title
-        assert update["data"][CONF_MODEL] == "ECAM63070"
+        assert update["data"][CONF_MODEL] == directory_model
         assert update["data"][CONF_MACHINE_NAME] == "existing-thing"
         assert update["data"][CONF_SERIAL_NUMBER] == "OLD-SN"
         directory.assert_awaited_once_with(api.http_session, jwt="existing-jwt")

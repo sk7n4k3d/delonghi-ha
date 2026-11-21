@@ -526,6 +526,10 @@ def test_drink_counters_depend_on_cloud_telemetry() -> None:
     ("model", "capabilities", "named"),
     [
         ("ECAM47075", {}, True),
+        ("ECAM47070", {"MachineModelUI": "206.3"}, True),
+        (None, {"MachineModelUI": "ecam470.70"}, True),
+        ("ECAM470.70.B", {}, False),
+        ("ECAM47071", {}, False),
         (" ecam470.75.txb ", {}, True),
         (None, {"MachineModelUi": "ECAM470.75TXB"}, True),
         (None, {"MachineModelUI": "ECAM470.75TXB"}, True),
@@ -557,6 +561,7 @@ def test_recipe_mapping_uses_verified_model_without_changing_entity_identity(mod
     ("model", "translation_key"),
     [
         ("ECAM470.75.TXB", "recipe_mild_filter_brew_count"),
+        ("ECAM47070", "recipe_mild_filter_brew_count"),
         ("ECAM470.75.B", "recipe_brew_count"),
         ("ECAM63070", "recipe_brew_count"),
     ],
@@ -577,7 +582,7 @@ def test_recipe_32_name_is_model_scoped_and_identity_is_numeric(model, translati
     assert recipe.native_value == 1
 
 
-@pytest.mark.parametrize("directory_code", ["ECAM470.75.TXB", "ECAM47075", "ECAM47075TXB"])
+@pytest.mark.parametrize("directory_code", ["ECAM470.75.TXB", "ECAM47075", "ECAM47075TXB", "ECAM47070", "ECAM470.70"])
 def test_verified_directory_product_codes_reach_recipe_names(directory_code):
     (machine,) = _directory_machines([{"serialNumber": "SN-TEST", "machineModel": directory_code}])
     assert machine.model == directory_code
@@ -586,6 +591,13 @@ def test_verified_directory_product_codes_reach_recipe_names(directory_code):
     asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
     (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
     assert recipe._attr_translation_key == "recipe_cappuccino_brew_count"
+    assert recipe._attr_unique_id == "SN-TEST_recipe_7_brew_count"
+    assert recipe.suggested_object_id == "recipe_7_brew_count"
+    assert recipe.native_value == 1
+
+    coord.update(_cloud(recipe_brew_counts={7: 2}))
+    assert [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)] == [recipe]
+    assert recipe.native_value == 2
 
 
 def test_recipe_limit_keeps_existing_registry_entries_and_high_ids(monkeypatch):
