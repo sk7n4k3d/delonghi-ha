@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.11] — 2026-11-21
+
+### Added
+
+- **Le service dit ce qu'il vient de stocker pour rien (#92).** Un baseline égal
+  ou inférieur à la valeur cloud de **sa propre clé** est inerte par
+  construction : les capteurs exposent `max(cloud, baseline)`, l'entrée est donc
+  enregistrée, horodatée, puis ignorée à chaque rafraîchissement. C'est
+  exactement ce qui a laissé six mois un chiffre recopié sur le mauvais compteur
+  (voir #90). La saisie reste **acceptée** — le cloud peut être gelé ou muet,
+  c'est précisément le cas où le baseline sert — mais elle est désormais signalée
+  dans le log (`warning`, la clé et les deux nombres) et dans le **retour de
+  service** : `stored`, `effective`, `inert`, `not_checked`, `notes`. Le service
+  est déclaré `SupportsResponse.OPTIONAL`, donc les appels qui ne demandent de
+  retour (automatisations existantes) ne changent pas de comportement.
+  Quand aucune valeur cloud n'est comparable — firmware qui n'expose pas la clé,
+  cloud muet, ou valeur non numérique — **rien n'est revendiqué** : pas
+  d'avertissement, et la note dit que le contrôle n'a pas pu être fait. Un faux
+  « c'est inerte » aurait été pire que le silence qu'il remplace.
+- **`espresso` et `total_espressos` ont enfin une aide qui les distingue.**
+  `espresso` est le compteur d'**une** boisson (`d705_tot_id1_espr`),
+  `total_espressos` le total de **toutes** les boissons espresso
+  (`d704_tot_bev_espressi`). La phrase « set the same UI number here » ne peut
+  plus se lire comme une invitation à remplir plusieurs champs avec le même
+  chiffre : elle ne vise plus que le cas `total_beverages` ↔ `total_espressos`,
+  et dit explicitement de ne pas y recopier le compteur d'une boisson.
+
 ## [1.9.10] — 2026-11-21
 
 ### Fixed

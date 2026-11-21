@@ -817,13 +817,17 @@ def test_baseline_services_invalidate_changed_streaks_before_refresh():
     coord = DeLonghiCoordinator(hass, api, "test")
     coord.async_config_entry_first_refresh = AsyncMock()
     coord.async_request_refresh = AsyncMock()
+    coord.data = None
     _run_setup_entry(hass, entry, api, coord)
     services = _collect_services(hass)
-    _run(services["set_baseline_from_screen"](MagicMock(data={"espresso": 30, "tea": 15})))
+    response = _run(services["set_baseline_from_screen"](MagicMock(data={"espresso": 30, "tea": 15})))
+    assert response["not_checked"] == ["espresso", "tea"]
     coord._baseline_mask_streak = {"espresso": 3, "tea": 2}
     coord.data = {"counters": {"espresso": 20, "tea": 1}, "baseline_masking": {"espresso": 3, "tea": 2}}
 
-    _run(services["set_baseline_from_screen"](MagicMock(data={"espresso": 10, "tea": 15})))
+    response = _run(services["set_baseline_from_screen"](MagicMock(data={"espresso": 10, "tea": 15})))
+    assert response["inert"] == [{"counter": "espresso", "entered": 10, "cloud": 20}]
+    assert response["effective"] == ["tea"]
     assert coord.local_baseline.get("espresso") == 10
     assert coord._baseline_mask_streak == coord.data["baseline_masking"] == {"tea": 2}
 
@@ -831,6 +835,97 @@ def test_baseline_services_invalidate_changed_streaks_before_refresh():
     assert coord._baseline_mask_streak == coord.data["baseline_masking"] == {}
     assert coord.local_baseline.all_keys() == []
     assert coord.async_request_refresh.await_count == 3
+
+
+class TestSetBaselineFromScreenInertness:
+    """Issue #92: an entry the cloud already beats is stored, dated and then
+    ignored forever by max(cloud, baseline). It must be accepted — a frozen or
+    missing cloud is exactly when a baseline earns its keep — but said out loud.
+    """
+
+    def _setup(self, counters):
+        from custom_components.delonghi_coffee.local_baseline import LocalBaselineStore
+
+        hass = _make_hass()
+        entry = _make_entry()
+        coord = _make_fake_coord()
+        coord.async_request_refresh = AsyncMock()
+        coord.local_baseline = LocalBaselineStore(hass, "DSN-ABC")
+        coord.data = {"counters": counters}
+        _run_setup_entry(hass, entry, _make_fake_api(), coord)
+        return hass, _collect_services(hass)["set_baseline_from_screen"], coord.local_baseline
+
+    def test_inert_entry_is_stored_and_reported(self, caplog):
+        import logging
+
+        _, handler, store = self._setup({"total_espressos": 2472})
+        with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_coffee"):
+            resp = _run(handler(MagicMock(data={"total_espressos": 1476})))
+        # Accepted, not refused — that is the whole point of the issue.
+        assert store.get("total_espressos") == 1476
+        assert resp["inert"] == [{"counter": "total_espressos", "entered": 1476, "cloud": 2472}]
+        assert resp["effective"] == []
+        assert any("total_espressos=1476" in r.getMessage() and "2472" in r.getMessage() for r in caplog.records)
+        assert any("inert" in n.lower() for n in resp["notes"])
+
+    def test_entry_above_the_cloud_is_silent(self, caplog):
+        import logging
+
+        _, handler, store = self._setup({"espresso": 1406})
+        with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_coffee"):
+            resp = _run(handler(MagicMock(data={"espresso": 1500})))
+        assert store.get("espresso") == 1500
+        assert resp["inert"] == []
+        assert resp["effective"] == ["espresso"]
+        assert resp["not_checked"] == []
+        assert resp["notes"] == ["All stored values are above the cloud value and will be used."]
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    @pytest.mark.parametrize("counters", [{}, {"espresso": None}])
+    def test_unknown_cloud_value_is_not_claimed_either_way(self, caplog, counters):
+        """No cloud number to compare against is not evidence of inertness."""
+        import logging
+
+        _, handler, store = self._setup(counters)
+        with caplog.at_level(logging.WARNING, logger="custom_components.delonghi_coffee"):
+            resp = _run(handler(MagicMock(data={"espresso": 1476})))
+        assert store.get("espresso") == 1476
+        assert resp["inert"] == []
+        assert resp["not_checked"] == ["espresso"]
+        assert any("Not checked" in n for n in resp["notes"])
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_mixed_call_flags_only_the_dead_key(self):
+        _, handler, store = self._setup({"total_espressos": 2472, "espresso": 1406})
+        resp = _run(handler(MagicMock(data={"total_espressos": 1476, "espresso": 1500})))
+        assert [i["counter"] for i in resp["inert"]] == ["total_espressos"]
+        assert resp["effective"] == ["espresso"]
+        # Both are written; the live key is not held hostage by the dead one.
+        assert store.get("total_espressos") == 1476
+        assert store.get("espresso") == 1500
+
+    def test_equal_to_the_cloud_counts_as_inert(self):
+        """max() keeps the cloud value at equality too, so ≤ is the right test."""
+        _, handler, _ = self._setup({"espresso": 1476})
+        resp = _run(handler(MagicMock(data={"espresso": 1476})))
+        assert [i["counter"] for i in resp["inert"]] == ["espresso"]
+
+    def test_non_numeric_cloud_is_not_compared(self):
+        """parse_counters keeps unparsable values as raw strings — comparing
+        one would raise, and the entry must still be stored."""
+        _, handler, store = self._setup({"espresso": "beaucoup"})
+        resp = _run(handler(MagicMock(data={"espresso": 1476})))
+        assert store.get("espresso") == 1476
+        assert resp["not_checked"] == ["espresso"]
+
+    def test_service_declares_an_optional_response(self):
+        """OPTIONAL keeps callers that never ask for a response working."""
+        from homeassistant.core import SupportsResponse
+
+        hass = _make_hass()
+        _run_setup_entry(hass, _make_entry(), _make_fake_api(), _make_fake_coord())
+        calls = [c for c in hass.services.async_register.call_args_list if c[0][1] == "set_baseline_from_screen"]
+        assert calls and calls[0].kwargs.get("supports_response") is SupportsResponse.OPTIONAL
 
 
 # ---------------------------------------------------------------------------

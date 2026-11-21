@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import contextlib
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError
@@ -270,7 +271,7 @@ def _register_services(hass: HomeAssistant) -> None:
         "total_water_liters": ("total_water_ml", 1000.0),
     }
 
-    async def handle_set_baseline_from_screen(call) -> None:  # noqa: ANN001
+    async def handle_set_baseline_from_screen(call) -> dict[str, Any]:  # noqa: ANN001
         _api, coord, _dsn = _resolve_target(hass, call)
         await coord.local_baseline.async_load()
         updates: dict[str, int] = {}
@@ -293,10 +294,66 @@ def _register_services(hass: HomeAssistant) -> None:
             _LOGGER.warning("set_baseline_from_screen ignored unknown fields: %s", unknown)
         if not updates:
             raise HAError("No valid baseline fields provided")
+        # Issue #92: a baseline at or under the cloud value is inert by
+        # construction — sensors expose max(cloud, baseline), so the entry is
+        # stored, dated and then ignored forever. Issue #90 is exactly that:
+        # one screen number copied onto two counters, where it acted on
+        # `espresso` and cancelled itself on `total_espressos`. Accept it (the
+        # cloud may be frozen or missing, which is what the baseline is for)
+        # but say so, in the log and in the response the UI shows.
+        counters = (coord.data or {}).get("counters", {})
+        inert: list[dict[str, Any]] = []
+        effective: list[str] = []
+        unchecked: list[str] = []
+        for key, value in updates.items():
+            cloud = counters.get(key)
+            if not isinstance(cloud, (int, float)) or isinstance(cloud, bool):
+                # No comparable cloud value: the firmware does not expose this
+                # counter, or the cloud did not answer. Claiming "inert" here
+                # would be worse than the silence this issue replaces.
+                unchecked.append(key)
+                continue
+            if value <= cloud:
+                inert.append({"counter": key, "entered": value, "cloud": cloud})
+                _LOGGER.warning(
+                    "set_baseline_from_screen: %s=%s is at or under the cloud value %s, so "
+                    "max(cloud, baseline) will ignore it. Wrong counter? Enter the right "
+                    "one; reset_local_baseline clears every stored baseline at once, not "
+                    "just this one.",
+                    key,
+                    value,
+                    cloud,
+                )
+            else:
+                effective.append(key)
+
         await coord.local_baseline.async_set_many(updates)
         # Trigger a coordinator refresh so sensors pick up the new values
         # immediately instead of waiting for the next 60s poll.
         await coord.async_request_refresh()
+
+        notes: list[str] = []
+        if inert:
+            notes.append(
+                "Stored but inert: "
+                + ", ".join(f"{i['counter']} (entered {i['entered']}, cloud {i['cloud']})" for i in inert)
+                + ". The cloud value is higher, so these entries change nothing."
+            )
+        if unchecked:
+            notes.append(
+                "Not checked — no cloud value available for "
+                + ", ".join(sorted(unchecked))
+                + ", so whether they will be used is unknown."
+            )
+        if not notes:
+            notes.append("All stored values are above the cloud value and will be used.")
+        return {
+            "stored": sorted(updates),
+            "effective": sorted(effective),
+            "inert": inert,
+            "not_checked": sorted(unchecked),
+            "notes": notes,
+        }
 
     async def handle_reset_local_baseline(call) -> None:  # noqa: ANN001
         from homeassistant.exceptions import ServiceValidationError
@@ -325,7 +382,14 @@ def _register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "sync_recipes", handle_sync_recipes)
     hass.services.async_register(DOMAIN, "select_bean_profile", handle_select_bean_profile)
     hass.services.async_register(DOMAIN, "write_bean_profile", handle_write_bean_profile)
-    hass.services.async_register(DOMAIN, "set_baseline_from_screen", handle_set_baseline_from_screen)
+    # OPTIONAL, not ONLY: callers that do not ask for a response keep working
+    # exactly as before; the UI, which does ask, gets the inertness report.
+    hass.services.async_register(
+        DOMAIN,
+        "set_baseline_from_screen",
+        handle_set_baseline_from_screen,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     hass.services.async_register(DOMAIN, "reset_local_baseline", handle_reset_local_baseline)
 
 
