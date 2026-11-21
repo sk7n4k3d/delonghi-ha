@@ -546,6 +546,81 @@ class TestAsyncUpdateDataFullRefresh:
         assert result["active_profile"] == 1
         assert result["lan_config"] == {"ip": "10.0.0.1"}
 
+    @pytest.mark.parametrize("failure", ["lan_config", "result_build"])
+    def test_failed_full_refresh_does_not_commit_counter_observation(self, failure):
+        from homeassistant.helpers.update_coordinator import UpdateFailed
+
+        coord, _, api = _make_coord()
+        coord._contentstack_loaded = True
+        _run(coord.local_baseline.async_set_many({"espresso": 30}))
+        due = -FULL_REFRESH_INTERVAL - 1
+        coord._last_full_refresh = due
+        coord._cached_counters = {"espresso": 20}
+        api.parse_counters.return_value = {"espresso": 21}
+        tracker = api.rate_tracker
+        if failure == "lan_config":
+            api.get_lan_config.side_effect = AttributeError("invalid response")
+        else:
+            api.rate_tracker = None
+
+        for _ in range(3):
+            with pytest.raises(UpdateFailed, match="Unexpected error"):
+                _run(coord._async_update_data())
+            assert coord._last_full_refresh == due
+            assert coord._cached_counters == {"espresso": 20}
+            assert coord._baseline_mask_streak == {}
+
+        api.get_lan_config.side_effect = None
+        api.rate_tracker = tracker
+        result = _run(coord._async_update_data())
+        assert result["counters"] == {"espresso": 21}
+        assert result["baseline_masking"] == {"espresso": 1}
+        assert coord._last_full_refresh > due
+        assert _run(coord._async_update_data())["baseline_masking"] == {"espresso": 1}
+
+    @pytest.mark.parametrize("clear_then_readd", [False, True])
+    def test_in_flight_full_refresh_does_not_age_an_edited_baseline(self, clear_then_readd):
+        async def exercise():
+            coord, _, api = _make_coord()
+            due = -FULL_REFRESH_INTERVAL - 1
+            coord._last_full_refresh = due
+            coord._contentstack_loaded = True
+            await coord.local_baseline.async_set_many({"espresso": 30, "tea": 15})
+            api.parse_counters.return_value = {"espresso": 20, "tea": 1}
+            coord.data = await coord._async_update_data()
+            assert coord.data["baseline_masking"] == {"espresso": 1, "tea": 1}
+
+            # Pause the next refresh after parsing its cloud observation.
+            coord._last_full_refresh = due
+            coord._contentstack_loaded = False
+            sampled = asyncio.Event()
+            finish = asyncio.Event()
+
+            async def pause():
+                sampled.set()
+                await finish.wait()
+
+            coord._load_contentstack = pause
+            refreshing = asyncio.create_task(coord._async_update_data())
+            await sampled.wait()
+            try:
+                if clear_then_readd:
+                    await coord.local_baseline.async_clear(["espresso"])
+                    await coord.local_baseline.async_set_many({"espresso": 30})
+                else:
+                    await coord.local_baseline.async_set_many({"espresso": 31})
+                assert coord.data["baseline_masking"] == {"tea": 1}
+            finally:
+                finish.set()
+                coord.data = await refreshing
+            assert coord.data["baseline_masking"] == {"tea": 2}
+
+            coord._last_full_refresh = due
+            coord.data = await coord._async_update_data()
+            assert coord.data["baseline_masking"] == {"espresso": 1, "tea": 3}
+
+        _run(exercise())
+
     def test_full_refresh_wake_ping_unsupported_falls_back(self):
         """Full refresh: when ping returns False, request_monitor is called."""
         coord, _, api = _make_coord()

@@ -141,6 +141,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # local baseline, per counter key (issue #90). Keys that catch up, or
         # whose baseline was removed, simply disappear from this dict.
         self._baseline_mask_streak: dict[str, int] = {}
+        self._baseline_revisions: dict[str, int] = {}
         self._cached_profiles: dict[str, Any] = {}
         self._cached_beans: list[dict[str, Any]] = []
         self._cached_bean_system_par: dict[str, Any] = {}
@@ -230,7 +231,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # User-supplied counter baselines persisted in .storage. Used to
         # mask cloud counters that the firmware silently stops pushing.
         # See local_baseline.py docstring for the full diagnostic trail.
-        self.local_baseline: LocalBaselineStore = LocalBaselineStore(hass, dsn)
+        self.local_baseline = LocalBaselineStore(hass, dsn, on_change=self._invalidate_baseline_masking)
         self._baseline_loaded: bool = False
 
     def request_fast_poll(self, duration_s: float = 60.0, interval_s: float = 5.0) -> None:
@@ -557,7 +558,17 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return self._auto_profile
         return None
 
-    def _track_baseline_masking(self) -> None:
+    def _invalidate_baseline_masking(self, changed: set[str]) -> None:
+        """Discard streaks tied to edited or removed baselines."""
+        data = getattr(self, "data", None)
+        published = data.get("baseline_masking") if isinstance(data, dict) else None
+        for key in changed:
+            self._baseline_revisions[key] = self._baseline_revisions.get(key, 0) + 1
+            self._baseline_mask_streak.pop(key, None)
+            if isinstance(published, dict):
+                published.pop(key, None)
+
+    def _track_baseline_masking(self, counters: dict[str, Any], observed_revisions: dict[str, int]) -> None:
         """Count full refreshes where the cloud stays under a local baseline.
 
         Being under a baseline is normal at first — the baseline is a manual
@@ -567,15 +578,17 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (issue #90). Only full refreshes parse counters, so one tick here is
         one ``FULL_REFRESH_INTERVAL``.
 
-        A key drops out of the dict as soon as the cloud reaches the baseline
-        or the baseline is removed, which resets its streak to zero.
+        A key drops out as soon as the cloud reaches the baseline. A sample
+        requested before a baseline edit cannot count toward its new streak.
         """
         fresh: dict[str, int] = {}
         for key in self.local_baseline.all_keys():
+            if observed_revisions.get(key) != self._baseline_revisions.get(key):
+                continue
             baseline = self.local_baseline.get(key)
             if baseline is None:
                 continue
-            cloud = self._cached_counters.get(key)
+            cloud = counters.get(key)
             # Non-numeric cloud values (parse_counters keeps raw strings)
             # cannot be compared — treat them as masked, same as merge().
             masked = not isinstance(cloud, (int, float)) or isinstance(cloud, bool) or cloud < baseline
@@ -626,6 +639,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
 
             need_full = (now - self._last_full_refresh) >= FULL_REFRESH_INTERVAL
+            counters = self._cached_counters
 
             # Read status (monitor property from cloud cache), then overlay
             # the monitor the machine pushes on the LAN socket when that
@@ -755,14 +769,14 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.debug("Refresh wake failed, continuing with cached data")
 
                 # Single fetch of ALL properties — shared by counters, profiles, beans, beverages
+                observed_baseline_revisions = self._baseline_revisions.copy()
                 all_props: dict[str, Any] = await self._async_fetch_with_retry(
                     "get_properties", self.api.get_properties, self.dsn
                 )
                 self._last_all_props = all_props
 
                 # Parse everything from the single fetch
-                self._cached_counters = self.api.parse_counters(all_props)
-                self._track_baseline_masking()
+                counters = self.api.parse_counters(all_props)
 
                 if not self.beverages:
                     self.beverages = self.api.parse_available_beverages(all_props)
@@ -796,7 +810,6 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not self._contentstack_loaded and now >= self._cs_next_retry:
                     await self._load_contentstack()
 
-                self._last_full_refresh = now
                 # Only a wake that actually reached the machine counts as a keepalive.
                 # A timed-out wake must NOT reset the heartbeat freshness, or the next
                 # poll skips an overdue keepalive (issue #73 review, numanx11).
@@ -885,7 +898,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Build diagnostic dump if enabled
             if self.diagnostic_mode and self._last_all_props:
-                self._last_diagnostic = get_diagnostic_dump(self._last_all_props, self._cached_counters, status)
+                self._last_diagnostic = get_diagnostic_dump(self._last_all_props, counters, status)
 
             # Commit the automatic target only now that the whole refresh has
             # succeeded (numanx11 #79 r3): a poll that raised earlier leaves the
@@ -903,7 +916,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 cached_active = self._cached_profiles.get("active")
                 published_active = cached_active if _valid_slot(cached_active) else None
 
-            return {
+            result = {
                 "status": status.get("status", "UNKNOWN"),
                 "machine_state": machine_state,
                 "monitor_action": status.get("action"),
@@ -922,8 +935,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "monitor_raw": status.get("monitor_raw"),
                 "monitor_ts": status.get("monitor_ts"),
                 "profile": status.get("profile", 0),
-                "counters": self._cached_counters,
-                "baseline_masking": dict(self._baseline_mask_streak),
+                "counters": counters,
                 "beverages": self.beverages,
                 "active_profile": published_active,
                 "profiles": self._cached_profiles.get("profiles", {}),
@@ -937,6 +949,14 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "bean_adapt": self.bean_adapt or {},
                 "coffee_beans_count": len(self.coffee_beans),
             }
+            # Commit the counter observation only after the full refresh has
+            # built a publishable result. A failed attempt leaves it due.
+            if need_full:
+                self._track_baseline_masking(counters, observed_baseline_revisions)
+                self._cached_counters = counters
+                self._last_full_refresh = now
+            result["baseline_masking"] = dict(self._baseline_mask_streak)
+            return result
         except DeLonghiAuthError as err:
             # Drop the profile baseline so the next successful read re-establishes
             # it as a first sighting instead of comparing against a pre-outage

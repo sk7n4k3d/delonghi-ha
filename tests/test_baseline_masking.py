@@ -21,11 +21,14 @@ from custom_components.delonghi_coffee.sensor import COUNTER_SENSORS, DeLonghiCo
 
 def _make_coord(baselines: dict[str, int]):
     coord = DeLonghiCoordinator(MagicMock(), MagicMock(), "DSN-1")
-    store = LocalBaselineStore(MagicMock(), "DSN-1")
+    store = coord.local_baseline
     asyncio.run(store.async_set_many(baselines))
-    coord.local_baseline = store
     coord._baseline_loaded = True
     return coord, store
+
+
+def _observe(coord, counters):
+    coord._track_baseline_masking(counters, coord._baseline_revisions.copy())
 
 
 def _make_sensor(coord, key: str):
@@ -34,40 +37,39 @@ def _make_sensor(coord, key: str):
 
 class TestStreak:
     def test_counts_one_per_full_refresh_while_masked(self):
-        coord, _ = _make_coord({"espresso": 1476})
-        coord._cached_counters = {"espresso": 1406}
+        coord, _ = _make_coord({"espresso": 30})
         for expected in range(1, 5):
-            coord._track_baseline_masking()
+            _observe(coord, {"espresso": 20})
             assert coord._baseline_mask_streak == {"espresso": expected}
 
     def test_catch_up_resets_the_streak(self):
-        coord, _ = _make_coord({"espresso": 1476})
-        coord._cached_counters = {"espresso": 1406}
-        coord._track_baseline_masking()
-        coord._track_baseline_masking()
-        coord._cached_counters = {"espresso": 1500}
-        coord._track_baseline_masking()
+        coord, _ = _make_coord({"espresso": 30})
+        _observe(coord, {"espresso": 20})
+        _observe(coord, {"espresso": 20})
+        _observe(coord, {"espresso": 31})
         assert coord._baseline_mask_streak == {}
 
     def test_missing_cloud_value_counts_as_masked(self):
         """parse_counters can leave a key out or keep a raw string; neither is
         a catch-up, and merge() would keep showing the baseline."""
-        coord, _ = _make_coord({"espresso": 1476})
-        coord._cached_counters = {}
-        coord._track_baseline_masking()
+        coord, _ = _make_coord({"espresso": 30})
+        _observe(coord, {})
         assert coord._baseline_mask_streak == {"espresso": 1}
 
-        coord._cached_counters = {"espresso": "1406"}
-        coord._track_baseline_masking()
+        _observe(coord, {"espresso": "20"})
         assert coord._baseline_mask_streak == {"espresso": 2}
 
     def test_baseline_removed_drops_the_key(self):
-        coord, store = _make_coord({"espresso": 1476, "tea": 35})
-        coord._cached_counters = {"espresso": 1406, "tea": 1}
-        coord._track_baseline_masking()
+        coord, store = _make_coord({"espresso": 30, "tea": 15})
+        cloud = {"espresso": 20, "tea": 1}
+        _observe(coord, cloud)
+        coord.data = {"counters": cloud, "baseline_masking": coord._baseline_mask_streak.copy()}
         asyncio.run(store.async_clear(["tea"]))
-        coord._track_baseline_masking()
-        assert coord._baseline_mask_streak == {"espresso": 2}
+        assert coord.data["baseline_masking"] == coord._baseline_mask_streak == {"espresso": 1}
+        asyncio.run(store.async_set_many({"tea": 15}))
+        assert _make_sensor(coord, "tea").extra_state_attributes["cloud_below_baseline_refreshes"] == 0
+        _observe(coord, cloud)
+        assert coord._baseline_mask_streak == {"espresso": 2, "tea": 1}
 
     def test_threshold_is_three_refreshes(self):
         """3 × FULL_REFRESH_INTERVAL ≈ 30 min: past the transient window, and

@@ -33,6 +33,8 @@ switch back to cloud.
 
 from __future__ import annotations
 
+from asyncio import Lock
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -70,43 +72,52 @@ class LocalBaselineStore:
     (ml for water_ml counters, raw integer for cup counters).
     """
 
-    def __init__(self, hass: HomeAssistant, dsn: str) -> None:
+    def __init__(self, hass: HomeAssistant, dsn: str, *, on_change: Callable[[set[str]], None] | None = None) -> None:
         self._hass = hass
         self._dsn = dsn
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"delonghi_coffee_baseline_{dsn}")
         self._values: dict[str, int] = {}
         self._set_at: dict[str, str] = {}
         self._loaded = False
+        self._lock = Lock()
+        self._on_change = on_change
 
     async def async_load(self) -> None:
         """Load persisted baselines. Idempotent."""
-        if self._loaded:
-            return
-        data = await self._store.async_load()
-        if isinstance(data, dict):
-            # Capture dates first: they sit in a dict under _SET_AT_KEY, so
-            # the int-only filter below never mistakes them for a counter.
-            raw_dates = data.get(_SET_AT_KEY)
-            self._set_at = {}
-            if isinstance(raw_dates, dict):
-                self._set_at = {k: v for k, v in raw_dates.items() if isinstance(k, str) and isinstance(v, str)}
-            # Filter to int-only values; we never store anything else.
-            self._values = {k: int(v) for k, v in data.items() if isinstance(v, (int, float))}
-            undated = sorted(k for k in self._values if k not in self._set_at)
-            _LOGGER.info(
-                "LocalBaselineStore[%s] loaded %d entries: %s%s",
-                self._dsn,
-                len(self._values),
-                sorted(self._values.keys()),
-                f" — no capture date for {undated}" if undated else "",
-            )
-        self._loaded = True
+        async with self._lock:
+            if self._loaded:
+                return
+            data = await self._store.async_load()
+            if isinstance(data, dict):
+                # Dates sit under _SET_AT_KEY, so the numeric filter skips them.
+                raw_dates = data.get(_SET_AT_KEY)
+                self._set_at = {}
+                if isinstance(raw_dates, dict):
+                    self._set_at = {k: v for k, v in raw_dates.items() if isinstance(k, str) and isinstance(v, str)}
+                self._values = {k: int(v) for k, v in data.items() if isinstance(v, (int, float))}
+                undated = sorted(k for k in self._values if k not in self._set_at)
+                _LOGGER.info(
+                    "LocalBaselineStore[%s] loaded %d entries: %s%s",
+                    self._dsn,
+                    len(self._values),
+                    sorted(self._values.keys()),
+                    f" — no capture date for {undated}" if undated else "",
+                )
+            self._loaded = True
 
-    async def async_save(self) -> None:
-        payload: dict[str, Any] = dict(self._values)
-        if self._set_at:
-            payload[_SET_AT_KEY] = dict(self._set_at)
-        await self._store.async_save(payload)
+    async def _async_commit(self, values: dict[str, int], dates: dict[str, str], changed: set[str]) -> None:
+        """Persist the edit before publishing the new baseline and invalidating its streak."""
+        if values:
+            payload: dict[str, Any] = dict(values)
+            if dates:
+                payload[_SET_AT_KEY] = dates
+            await self._store.async_save(payload)
+        else:
+            await self._store.async_remove()
+        self._values = values
+        self._set_at = dates
+        if changed and self._on_change is not None:
+            self._on_change(changed)
 
     def get(self, counter_key: str) -> int | None:
         """Return baseline for a counter key, or None if not set."""
@@ -119,10 +130,15 @@ class LocalBaselineStore:
         reported as unknown, never as fresh — a number of unknown age is the
         exact failure mode issue #90 is about.
         """
-        return self._set_at.get(counter_key, UNKNOWN_DATE)
+        return self._set_at[counter_key] if self._capture_date(counter_key) is not None else UNKNOWN_DATE
 
     def age_days(self, counter_key: str) -> int | None:
         """Days since the baseline was entered, or None when undatable."""
+        stamp = self._capture_date(counter_key)
+        return max(0, (datetime.now(UTC) - stamp).days) if stamp is not None else None
+
+    def _capture_date(self, counter_key: str) -> datetime | None:
+        """Read the stored ISO timestamp, interpreting naive dates as UTC."""
         raw = self._set_at.get(counter_key)
         if not raw:
             return None
@@ -130,15 +146,14 @@ class LocalBaselineStore:
             stamp = datetime.fromisoformat(raw)
         except ValueError:
             _LOGGER.debug(
-                "LocalBaselineStore[%s] unparsable capture date for %s: %r",
+                "LocalBaselineStore[%s] unparsable capture date for %s",
                 self._dsn,
                 counter_key,
-                raw,
             )
             return None
         if stamp.tzinfo is None:
             stamp = stamp.replace(tzinfo=UTC)
-        return max(0, (datetime.now(UTC) - stamp).days)
+        return stamp
 
     def all_keys(self) -> list[str]:
         return list(self._values.keys())
@@ -162,13 +177,11 @@ class LocalBaselineStore:
                 )
         if not accepted:
             return
-        self._values.update(accepted)
-        # Every accepted key gets a fresh capture date: the number was just
-        # read off the screen, so its age is known from now on.
-        stamp = datetime.now(UTC).isoformat(timespec="seconds")
-        for key in accepted:
-            self._set_at[key] = stamp
-        await self.async_save()
+        async with self._lock:
+            changed = {key for key, value in accepted.items() if self._values.get(key) != value}
+            # Re-entering an unchanged value still records a new capture date.
+            stamp = datetime.now(UTC).isoformat(timespec="seconds")
+            await self._async_commit(self._values | accepted, self._set_at | dict.fromkeys(accepted, stamp), changed)
         _LOGGER.info("LocalBaselineStore[%s] updated: %s", self._dsn, accepted)
 
     async def async_clear(self, keys: list[str] | None = None) -> list[str]:
@@ -178,27 +191,20 @@ class LocalBaselineStore:
         (the original behaviour). With a key list only those entries go, so a
         wrong single value can be fixed without discarding the rest.
         """
-        if keys is None:
-            removed = sorted(self._values)
-            self._values = {}
-            self._set_at = {}
-            await self._store.async_remove()
-            _LOGGER.info("LocalBaselineStore[%s] cleared", self._dsn)
+        async with self._lock:
+            if keys is None:
+                removed = sorted(self._values)
+                await self._async_commit({}, {}, set(removed))
+            else:
+                removed = [k for k in keys if k in self._values]
+                if not removed:
+                    return []
+                changed = set(removed)
+                values = {key: value for key, value in self._values.items() if key not in changed}
+                dates = {key: stamp for key, stamp in self._set_at.items() if key not in changed}
+                await self._async_commit(values, dates if values else {}, changed)
+            _LOGGER.info("LocalBaselineStore[%s] cleared %s", self._dsn, removed)
             return removed
-
-        removed = [k for k in keys if k in self._values]
-        for key in removed:
-            self._values.pop(key, None)
-            self._set_at.pop(key, None)
-        if not removed:
-            return []
-        if self._values:
-            await self.async_save()
-        else:
-            # Last entry gone — leave no empty file behind.
-            await self._store.async_remove()
-        _LOGGER.info("LocalBaselineStore[%s] cleared %s", self._dsn, removed)
-        return removed
 
     def merge(self, counter_key: str, cloud_value: int | float | None) -> int | float | None:
         """Return the value a sensor should expose.

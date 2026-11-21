@@ -17,6 +17,7 @@ from custom_components.delonghi_coffee.api import (  # noqa: E402
     DeLonghiAuthError,
 )
 from custom_components.delonghi_coffee.const import DOMAIN, MODEL_NAMES  # noqa: E402
+from custom_components.delonghi_coffee.coordinator import DeLonghiCoordinator  # noqa: E402
 
 
 def _run(coro):
@@ -786,6 +787,12 @@ class TestResetLocalBaselineService:
         assert "espresso=1476" in str(exc.value)
         assert stamp in str(exc.value)
 
+    def test_preview_labels_an_invalid_capture_date_unknown(self):
+        handler, store, _ = self._setup({"espresso": 30})
+        store._set_at["espresso"] = "not-a-date"
+        with pytest.raises(ServiceValidationError, match=r"espresso=30 \(entered unknown\)"):
+            _run(handler(MagicMock(data={})))
+
     def test_string_true_is_not_a_confirmation(self):
         """HA selectors hand back a bool, but a templated call can send "true"."""
         handler, store, _ = self._setup({"espresso": 1476})
@@ -803,6 +810,27 @@ class TestResetLocalBaselineService:
         handler, _, _ = self._setup()
         with pytest.raises(ServiceValidationError, match="none"):
             _run(handler(MagicMock(data={})))
+
+
+def test_baseline_services_invalidate_changed_streaks_before_refresh():
+    hass, entry, api = _make_hass(), _make_entry(), _make_fake_api()
+    coord = DeLonghiCoordinator(hass, api, "test")
+    coord.async_config_entry_first_refresh = AsyncMock()
+    coord.async_request_refresh = AsyncMock()
+    _run_setup_entry(hass, entry, api, coord)
+    services = _collect_services(hass)
+    _run(services["set_baseline_from_screen"](MagicMock(data={"espresso": 30, "tea": 15})))
+    coord._baseline_mask_streak = {"espresso": 3, "tea": 2}
+    coord.data = {"counters": {"espresso": 20, "tea": 1}, "baseline_masking": {"espresso": 3, "tea": 2}}
+
+    _run(services["set_baseline_from_screen"](MagicMock(data={"espresso": 10, "tea": 15})))
+    assert coord.local_baseline.get("espresso") == 10
+    assert coord._baseline_mask_streak == coord.data["baseline_masking"] == {"tea": 2}
+
+    _run(services["reset_local_baseline"](MagicMock(data={"confirm": True})))
+    assert coord._baseline_mask_streak == coord.data["baseline_masking"] == {}
+    assert coord.local_baseline.all_keys() == []
+    assert coord.async_request_refresh.await_count == 3
 
 
 # ---------------------------------------------------------------------------
