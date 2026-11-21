@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.6] — 2026-11-21
+
+### Added
+
+- **Le brew se relance tout seul s'il est ignoré (#84).** Après une période
+  d'inactivité, la machine avale parfois la première commande passée par le
+  cloud : le 201 de l'API ne prouve que l'acceptation par le cloud, pas
+  l'exécution (même pattern que #47 pour l'allumage — vérifié sur le terrain
+  le 21/11, l'expresso n'est parti qu'à la deuxième pression). Après chaque
+  envoi, l'intégration surveille désormais le moniteur brut pendant ~15 s :
+  dès qu'un octet bouge, la commande est arrivée (pendant l'extraction les
+  octets de progression avancent même si l'octet d'état reste à Ready, #83).
+  Si rien ne bouge, la commande identique est renvoyée exactement une fois.
+  Sans moniteur de référence, pas de verdict : jamais de renvoi à l'aveugle
+  qui risquerait un double brew.
+
 ## [1.9.5] — 2026-11-21
 
 ### Fixed
