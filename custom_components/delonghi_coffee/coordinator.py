@@ -21,6 +21,8 @@ from .api import DeLonghiApi, DeLonghiApiError, DeLonghiAuthError, DeLonghiUnsup
 from .const import (
     ACTIVE_MACHINE_STATES,
     ACTIVE_SCAN_INTERVAL_SECONDS,
+    BREW_ACK_POLL,
+    BREW_ACK_TIMEOUT,
     CONF_SELECTED_PROFILE,
     CONTENTSTACK_RETRY_MAX,
     DOMAIN,
@@ -152,6 +154,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Instance attribute (not just the module constant) so tests can
         # collapse the wait to 0 without patching asyncio.sleep.
         self._transient_retry_delay: float = TRANSIENT_RETRY_DELAY_SECONDS
+        # Issue #84 — background verify-and-retry task for the last brew send.
+        # A new brew cancels a pending one so two verifiers never race.
+        # The two waits are instance attributes (like _transient_retry_delay)
+        # so tests can collapse them without patching asyncio.sleep.
+        self._brew_ack_task: asyncio.Task | None = None
+        self._brew_ack_timeout: float = BREW_ACK_TIMEOUT
+        self._brew_ack_poll: float = BREW_ACK_POLL
         # Issue #78 / PR #79 review — two separate things, never conflated:
         #
         # ``selected_profile`` is the user's EXPLICIT choice only: restored from
@@ -436,7 +445,61 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         brew_cmd = await self.hass.async_add_executor_job(
             self.api.build_brew_command, self.dsn, beverage_key, profile, status
         )
-        return await self.async_send_brew_command(brew_cmd)
+        sent = await self.async_send_brew_command(brew_cmd)
+        if sent:
+            self._schedule_brew_ack(brew_cmd)
+        return sent
+
+    def _schedule_brew_ack(self, brew_cmd: bytes) -> None:
+        """Arm the #84 verify-and-retry watcher for a freshly sent brew.
+
+        A new brew cancels a verifier still pending from a previous press,
+        so two resend timers can never race against the machine.
+        """
+        if self._brew_ack_task is not None and not self._brew_ack_task.done():
+            self._brew_ack_task.cancel()
+        self._brew_ack_task = self.hass.async_create_background_task(
+            self._async_verify_brew_ack(brew_cmd),
+            name=f"delonghi_brew_ack_{self.dsn}",
+        )
+
+    async def _async_verify_brew_ack(self, brew_cmd: bytes) -> None:
+        """Resend a brew once if the machine never acknowledged it (issue #84).
+
+        The cloud answers 201 as soon as it accepts the frame, but after
+        idle the machine sometimes swallows the first command outright —
+        the #47 pattern on the brew path. The raw monitor is the witness:
+        during extraction its progress bytes move even while the state
+        byte stays Ready (#83), so *any* change proves the machine took
+        the command. If not one byte moves within the timeout, the frame
+        was swallowed: resend the identical command exactly once.
+
+        Without a baseline monitor there is no witness — stay silent
+        rather than risk a double brew on an unverifiable send.
+        """
+        baseline = (getattr(self, "data", None) or {}).get("monitor_raw")
+        if not baseline:
+            _LOGGER.debug("Brew ack verify skipped: no monitor baseline to compare against")
+            return
+        # Do not depend on the caller having armed fast polling: the verdict
+        # needs the cloud pushes to actually reach self.data.
+        self.request_fast_poll(
+            duration_s=self._brew_ack_timeout + 2 * self._brew_ack_poll,
+            interval_s=self._brew_ack_poll,
+        )
+        deadline = monotonic() + self._brew_ack_timeout
+        while monotonic() < deadline:
+            await asyncio.sleep(self._brew_ack_poll)
+            if (getattr(self, "data", None) or {}).get("monitor_raw") != baseline:
+                return  # monitor moved — the machine took the command
+        _LOGGER.warning(
+            "Machine did not acknowledge brew (monitor static for %.0fs) — resending once (issue #84)",
+            self._brew_ack_timeout,
+        )
+        try:
+            await self.async_send_brew_command(brew_cmd)
+        except (DeLonghiApiError, DeLonghiAuthError) as err:
+            _LOGGER.warning("Brew resend failed: %s", sanitize(err))
 
     def mark_profile_selection(self, pid: int) -> None:
         """Record an HA-side profile selection (called by select.py).

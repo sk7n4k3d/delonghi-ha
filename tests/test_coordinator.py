@@ -38,7 +38,14 @@ def _make_hass():
     async def _run_executor(func, *args, **kwargs):
         return func(*args, **kwargs)
 
+    def _create_task(coro, *_args, **_kwargs):
+        return asyncio.ensure_future(coro)
+
     hass.async_add_executor_job = _run_executor
+    # Issue #84: the brew path arms a background verify task. Schedule it for
+    # real so its coroutine is awaited (and cancelled when the loop closes)
+    # instead of leaking an "never awaited" warning.
+    hass.async_create_background_task = _create_task
     return hass
 
 
@@ -1539,6 +1546,96 @@ class TestBrewDelivery:
     def test_send_brew_command_lan_true_short_circuits(self):
         coord, api = self._brew_coord(True)
         assert _run(coord.async_send_brew_command(b"\x01")) is True
+        api.send_command.assert_not_called()
+
+
+class TestBrewAck:
+    """Issue #84: a brew swallowed by the machine must be resent exactly once.
+
+    The cloud answers 201 on acceptance, but after idle the machine sometimes
+    never executes the first frame (#47 pattern on the brew path). The raw
+    monitor is the witness — any byte movement proves delivery.
+    """
+
+    def _ack_coord(self, monitor_raw="AQID"):
+        coord, _, api = _make_coord()
+        api.build_brew_command = MagicMock(return_value=b"\x0d\x0f\x83\xf0")
+        api.send_command = MagicMock(return_value=True)
+        coord.send_command_lan = AsyncMock(return_value=False)
+        coord.data = {"monitor_raw": monitor_raw}
+        # Collapse the 15 s / 3 s waits so the verifier runs in milliseconds.
+        coord._brew_ack_timeout = 0.05
+        coord._brew_ack_poll = 0.01
+        return coord, api
+
+    def test_static_monitor_resends_once(self):
+        coord, api = self._ack_coord()
+        _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0"))
+        api.send_command.assert_called_once_with("DSN-1", b"\x0d\x0f\x83\xf0")
+
+    def test_moving_monitor_no_resend(self):
+        coord, api = self._ack_coord()
+        coord._brew_ack_timeout = 0.1
+
+        async def main():
+            async def move():
+                await asyncio.sleep(0.03)
+                coord.data["monitor_raw"] = "BQI"
+
+            task = asyncio.ensure_future(move())
+            await coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0")
+            await task
+
+        _run(main())
+        api.send_command.assert_not_called()
+
+    def test_no_baseline_no_resend(self):
+        """Without a witness, never risk a double brew on an unverifiable send."""
+        coord, api = self._ack_coord(monitor_raw=None)
+        _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0"))
+        api.send_command.assert_not_called()
+
+    def test_resend_follows_lan_first_path(self):
+        coord, api = self._ack_coord()
+        coord.send_command_lan = AsyncMock(return_value=True)
+        _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0"))
+        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0")
+        api.send_command.assert_not_called()
+
+    def test_resend_error_is_swallowed(self):
+        coord, api = self._ack_coord()
+        api.send_command = MagicMock(side_effect=DeLonghiApiError("boom"))
+        _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0"))  # must not raise
+
+    def test_async_brew_arms_verifier(self):
+        coord, api = self._ack_coord()
+        coord._schedule_brew_ack = MagicMock()
+        assert _run(coord.async_brew("espresso", 2)) is True
+        coord._schedule_brew_ack.assert_called_once_with(b"\x0d\x0f\x83\xf0")
+
+    def test_failed_send_does_not_arm_verifier(self):
+        coord, api = self._ack_coord()
+        api.send_command = MagicMock(return_value=False)
+        coord._schedule_brew_ack = MagicMock()
+        assert _run(coord.async_brew("espresso", 2)) is False
+        coord._schedule_brew_ack.assert_not_called()
+
+    def test_new_brew_cancels_pending_verifier(self):
+        coord, api = self._ack_coord()
+        coord._brew_ack_timeout = 30.0
+        coord._brew_ack_poll = 1.0
+
+        async def main():
+            coord._schedule_brew_ack(b"\x01")
+            first = coord._brew_ack_task
+            await asyncio.sleep(0.01)  # verifier now parked in its poll sleep
+            coord._schedule_brew_ack(b"\x02")
+            second = coord._brew_ack_task
+            await asyncio.sleep(0.01)
+            assert first.cancelled()
+            second.cancel()
+
+        _run(main())
         api.send_command.assert_not_called()
 
 
