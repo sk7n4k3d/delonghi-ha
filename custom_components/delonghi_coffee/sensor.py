@@ -25,9 +25,17 @@ _LOGGER = get_logger(__name__)
 # Progress is zero during early preparation and can reach 100 before the
 # action clears. Action 4 (grinding) opens the cycle while the state byte
 # still reads Ready, so leaving it out showed Ready for the first ~5 s of
-# every brew (#89). Non-brew operations are not swept in by it: a rinse, a
-# descale or a hot-water dispense report their own state code (8, 5, 11) and
-# the inference below only ever applies to a frame whose state byte is Ready.
+# every brew (#89).
+#
+# That 4 is an *action*, not to be read as the state 4: MACHINE_STATES maps
+# state code 4 to "Error", a different byte in a different table. An Error
+# frame can never reach the inference, which returns early unless the parsed
+# state is Ready.
+#
+# Known gap: one captured espresso does not rule out a non-brew routine that
+# grinds (action 4) while still reporting Ready — such a cycle would display
+# as Brewing. Rinse, descale and hot water are excluded because each reports
+# its own state code (8, 5, 11), but no second capture exists yet to close it.
 _ELETTA_ESPRESSO_ACTIONS = frozenset({4, 6, 7, 10, 11, 13, 14})
 # Allow a regular 60 s poll plus clock skew. Reject older snapshots and
 # frames too far ahead of Home Assistant's clock.
