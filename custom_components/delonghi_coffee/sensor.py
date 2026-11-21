@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from binascii import crc_hqx
+from time import time
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -11,12 +13,20 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .api import DeLonghiApi
 from .const import BLOCKING_ALARM_BITS, DOMAIN
 from .coordinator import DeLonghiCoordinator
 from .local_baseline import LocalBaselineStore
 from .logger import get_logger
 
 _LOGGER = get_logger(__name__)
+
+# Espresso actions observed on the Eletta Explore in issue #83. Progress is
+# zero during early preparation and can reach 100 before the action clears.
+_ELETTA_ESPRESSO_ACTIONS = frozenset({6, 7, 10, 11, 13, 14})
+# Allow a regular 60 s poll plus clock skew. Reject older snapshots and
+# frames too far ahead of Home Assistant's clock.
+_ELETTA_BREW_MONITOR_TIME_TOLERANCE = 90
 
 COUNTER_SENSORS: dict[str, dict[str, Any]] = {
     # Core counters
@@ -102,7 +112,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entities: list[SensorEntity] = []
 
     # Status sensor
-    entities.append(DeLonghiStatusSensor(coordinator, dsn, model, device_name, sw_version))
+    entities.append(
+        DeLonghiStatusSensor(coordinator, dsn, model, device_name, sw_version, oem_model=entry.data.get("model"))
+    )
 
     # Profile sensor
     entities.append(DeLonghiProfileSensor(coordinator, dsn, model, device_name, sw_version))
@@ -134,9 +146,12 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
         model: str,
         device_name: str,
         sw_version: str | None,
+        *,
+        oem_model: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._dsn = dsn
+        self._eletta_brew_display = oem_model == "DL-striker-cb"
         self._attr_unique_id = f"{dsn}_status"
         self._attr_has_entity_name = True
         self._attr_translation_key = "machine_status"
@@ -146,7 +161,41 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
     @property
     def native_value(self) -> str:
         """Return current machine state."""
-        return self.coordinator.data.get("machine_state", "Unknown")
+        data = self.coordinator.data
+        state = data.get("machine_state", "Unknown")
+        if state != "Ready" or not self._eletta_brew_display:
+            return state
+
+        # Apply the inference to the display only. The observed hot-water
+        # cycle shared action 6 but had an explicit machine state.
+        action = data.get("monitor_action")
+        progress = data.get("monitor_progress")
+        timestamp = data.get("monitor_ts")
+        if (
+            data.get("monitor_source") != "cloud"
+            or data.get("monitor_stale") is not False
+            or type(action) is not int
+            or action not in _ELETTA_ESPRESSO_ACTIONS
+            or type(progress) is not int
+            or not 0 <= progress <= 100
+            or type(timestamp) is not int
+            or abs(time() - timestamp) > _ELETTA_BREW_MONITOR_TIME_TOLERANCE
+        ):
+            return state
+
+        # Require the full frame observed on this firmware and confirm that
+        # its state, action and progress all came from the same sample.
+        frame = DeLonghiApi.decode_monitor_payload(data.get("monitor_raw"))
+        if (
+            frame is not None
+            and len(frame) == 23
+            and frame.startswith(b"\xd0\x12\x75\x0f")
+            and frame[9:12] == bytes((7, action, progress))
+            and DeLonghiApi.monitor_timestamp(frame) == timestamp
+            and crc_hqx(frame[:-6], 0x1D0F) == int.from_bytes(frame[-6:-4], "big")  # CRC-16/SPI-FUJITSU
+        ):
+            return "Brewing"
+        return state
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
