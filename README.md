@@ -94,6 +94,7 @@ This integration connects to Wi-Fi-enabled machines through the **De'Longhi Coff
 
 - **Eletta Explore (ECAM450.xx)** — primary development and testing machine
 - **PrimaDonna Soul (ECAM610.xx)** — confirmed working by community
+- **Dinamica Plus (ECAM370.xx)** — known to the model table; the note below applies to the Bluetooth-only variant
 - PrimaDonna Class, PrimaDonna Elite, PrimaDonna S
 - Maestosa
 
