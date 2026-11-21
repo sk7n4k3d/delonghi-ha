@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.10] — 2026-11-21
+
+### Fixed
+
+- **`baseline_age_days` rend un vrai `null` (#90).** En 1.9.9, un baseline sans
+  date de saisie publiait la chaîne `"unknown"` dans `baseline_age_days`, un
+  champ numérique. Un template qui teste `is none` tombait donc à l'envers : la
+  chaîne est « vraie » en Jinja, et une comparaison arithmétique sur `"unknown"`
+  lève une erreur au lieu de s'abstenir. Le champ vaut désormais `null` quand la
+  date manque.
+  `baseline_set_at` garde `"unknown"` : lui est lu sur la carte, c'est du texte.
+  Le contraste des deux formes est maintenant commenté dans le code pour qu'on ne
+  les « unifie » pas par réflexe.
+
 ## [1.9.9] — 2026-11-21
 
 ### Breaking changes
