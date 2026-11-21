@@ -29,12 +29,13 @@ from .coordinator import DaedalusCoordinator
 from .entity import DaedalusCloudEntity, DaedalusEntity
 
 _MAX_RECIPE_SENSORS = 256
-_ELETTA_ULTRA_MODELS = frozenset({"ECAM47075", "ECAM47075TXB"})
+_ELETTA_ULTRA_MODELS = frozenset({"ECAM47070", "ECAM47075", "ECAM47075TXB"})
 # Verified on an Eletta Ultra ECAM470.75.TXB by the reporter of issue #8.
 _ELETTA_ULTRA_RECIPE_NAMES = {
     7: "recipe_cappuccino_brew_count",
     8: "recipe_latte_macchiato_brew_count",
     29: "recipe_cafe_con_leche_brew_count",
+    32: "recipe_mild_filter_brew_count",
     33: "recipe_caffe_crema_brew_count",
     35: "recipe_black_eye_brew_count",
     52: "recipe_iced_latte_macchiato_brew_count",

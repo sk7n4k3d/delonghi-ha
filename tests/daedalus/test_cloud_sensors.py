@@ -526,6 +526,10 @@ def test_drink_counters_depend_on_cloud_telemetry() -> None:
     ("model", "capabilities", "named"),
     [
         ("ECAM47075", {}, True),
+        ("ECAM47070", {"MachineModelUI": "206.3"}, True),
+        (None, {"MachineModelUI": "ecam470.70"}, True),
+        ("ECAM470.70.B", {}, False),
+        ("ECAM47071", {}, False),
         (" ecam470.75.txb ", {}, True),
         (None, {"MachineModelUi": "ECAM470.75TXB"}, True),
         (None, {"MachineModelUI": "ECAM470.75TXB"}, True),
@@ -553,7 +557,32 @@ def test_recipe_mapping_uses_verified_model_without_changing_entity_identity(mod
     assert other_recipe._attr_unique_id == "SN-SECOND_recipe_7_brew_count"
 
 
-@pytest.mark.parametrize("directory_code", ["ECAM470.75.TXB", "ECAM47075", "ECAM47075TXB"])
+@pytest.mark.parametrize(
+    ("model", "translation_key"),
+    [
+        ("ECAM470.75.TXB", "recipe_mild_filter_brew_count"),
+        ("ECAM47070", "recipe_mild_filter_brew_count"),
+        ("ECAM470.75.B", "recipe_brew_count"),
+        ("ECAM63070", "recipe_brew_count"),
+    ],
+)
+def test_recipe_32_name_is_model_scoped_and_identity_is_numeric(model, translation_key):
+    coord = _FakeCoordinator(_cloud(recipe_brew_counts={32: 0}), model=model)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
+
+    assert recipe._attr_translation_key == translation_key
+    assert recipe._attr_unique_id == "SN-TEST_recipe_32_brew_count"
+    assert recipe.suggested_object_id == "recipe_32_brew_count"
+    assert recipe.native_value == 0
+
+    coord.update(_cloud(recipe_brew_counts={32: 1}))
+    assert [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)] == [recipe]
+    assert recipe.native_value == 1
+
+
+@pytest.mark.parametrize("directory_code", ["ECAM470.75.TXB", "ECAM47075", "ECAM47075TXB", "ECAM47070", "ECAM470.70"])
 def test_verified_directory_product_codes_reach_recipe_names(directory_code):
     (machine,) = _directory_machines([{"serialNumber": "SN-TEST", "machineModel": directory_code}])
     assert machine.model == directory_code
@@ -562,6 +591,13 @@ def test_verified_directory_product_codes_reach_recipe_names(directory_code):
     asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
     (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
     assert recipe._attr_translation_key == "recipe_cappuccino_brew_count"
+    assert recipe._attr_unique_id == "SN-TEST_recipe_7_brew_count"
+    assert recipe.suggested_object_id == "recipe_7_brew_count"
+    assert recipe.native_value == 1
+
+    coord.update(_cloud(recipe_brew_counts={7: 2}))
+    assert [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)] == [recipe]
+    assert recipe.native_value == 2
 
 
 def test_recipe_limit_keeps_existing_registry_entries_and_high_ids(monkeypatch):
@@ -605,15 +641,25 @@ def test_recipe_limit_keeps_existing_registry_entries_and_high_ids(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("translation_file", "generic_name", "cold_name"),
+    ("translation_file", "generic_name", "cold_name", "mild_filter_name"),
     [
-        ("strings.json", "Recipe 42 brew count", "Cold brew count"),
-        ("translations/en.json", "Recipe 42 brew count", "Cold brew count"),
-        ("translations/fr.json", "Nombre de préparations de la recette 42", "Nombre de préparations froides"),
-        ("translations/ro.json", "Număr de preparări pentru rețeta 42", "Număr de preparări reci"),
+        ("strings.json", "Recipe 42 brew count", "Cold brew count", "Mild Filter brew count"),
+        ("translations/en.json", "Recipe 42 brew count", "Cold brew count", "Mild Filter brew count"),
+        (
+            "translations/fr.json",
+            "Nombre de préparations de la recette 42",
+            "Nombre de préparations froides",
+            "Nombre de préparations de Mild Filter",
+        ),
+        (
+            "translations/ro.json",
+            "Număr de preparări pentru rețeta 42",
+            "Număr de preparări reci",
+            "Număr de preparări de Mild Filter",
+        ),
     ],
 )
-def test_drink_counter_translations(translation_file, generic_name, cold_name):
+def test_drink_counter_translations(translation_file, generic_name, cold_name, mild_filter_name):
     translations = json.loads((Path(sp.__file__).parent / translation_file).read_text(encoding="utf-8"))
     names = translations["entity"]["sensor"]
     coord = _FakeCoordinator(_CLOUD, model="ECAM47075")
@@ -621,10 +667,12 @@ def test_drink_counter_translations(translation_file, generic_name, cold_name):
     assert names[generic._attr_translation_key]["name"].format(**generic._attr_translation_placeholders) == generic_name
     assert names["hot_brew_count"]["name"]
     assert names["cold_brew_count"]["name"] == cold_name
+    assert names["recipe_mild_filter_brew_count"]["name"] == mild_filter_name
     for recipe_id, translation_key in {
         7: "recipe_cappuccino_brew_count",
         8: "recipe_latte_macchiato_brew_count",
         29: "recipe_cafe_con_leche_brew_count",
+        32: "recipe_mild_filter_brew_count",
         33: "recipe_caffe_crema_brew_count",
         35: "recipe_black_eye_brew_count",
         52: "recipe_iced_latte_macchiato_brew_count",
