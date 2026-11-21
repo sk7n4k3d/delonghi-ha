@@ -255,6 +255,9 @@ class TestElettaBrewDisplay:
 
     NOW = 0x6B00E156
     IDLE = "d012750f0101000800070000010000000070af6b00df2c"
+    # Real capture from issue #89: the grinding step that opens an espresso
+    # cycle on the Eletta Explore, state byte still 7 (Ready).
+    GRIND = "d012750f01010008000704000100000000b1696b01c065"
 
     @pytest.fixture(autouse=True)
     def freeze_clock(self, monkeypatch):
@@ -314,9 +317,19 @@ class TestElettaBrewDisplay:
 
     def test_espresso_completion_and_quiet_rinse_observation(self):
         sensor = self._sensor({})
-        for action, progress in ((6, 0), (10, 5), (11, 45), (13, 100), (14, 100), (0, 0), (0, 0)):
+        for action, progress in ((4, 0), (6, 0), (10, 5), (11, 45), (13, 100), (14, 100), (0, 0), (0, 0)):
             sensor.coordinator.data = self._data(self._monitor(7, action, progress))
             assert sensor.native_value == ("Brewing" if action else "Ready")
+
+    def test_grinding_frame_from_issue_89_reports_brewing(self, monkeypatch):
+        """The cycle opens with action 4; the clock is frozen at the capture."""
+        monkeypatch.setattr(sensor_mod, "time", lambda: 0x6B01C065)
+        sensor = self._sensor(self._data(self.GRIND))
+        assert sensor.native_value == "Brewing"
+
+    def test_grinding_frame_outside_the_freshness_window_leaves_ready(self):
+        data = self._data(self.GRIND)
+        assert self._sensor(data).native_value == "Ready"
 
     def test_hot_water_keeps_the_explicit_state_in_shared_action_phase(self):
         sensor = self._sensor({})

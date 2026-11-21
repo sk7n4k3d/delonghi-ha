@@ -21,9 +21,14 @@ from .logger import get_logger
 
 _LOGGER = get_logger(__name__)
 
-# Espresso actions observed on the Eletta Explore in issue #83. Progress is
-# zero during early preparation and can reach 100 before the action clears.
-_ELETTA_ESPRESSO_ACTIONS = frozenset({6, 7, 10, 11, 13, 14})
+# Espresso actions observed on the Eletta Explore in issues #83 and #89.
+# Progress is zero during early preparation and can reach 100 before the
+# action clears. Action 4 (grinding) opens the cycle while the state byte
+# still reads Ready, so leaving it out showed Ready for the first ~5 s of
+# every brew (#89). Non-brew operations are not swept in by it: a rinse, a
+# descale or a hot-water dispense report their own state code (8, 5, 11) and
+# the inference below only ever applies to a frame whose state byte is Ready.
+_ELETTA_ESPRESSO_ACTIONS = frozenset({4, 6, 7, 10, 11, 13, 14})
 # Allow a regular 60 s poll plus clock skew. Reject older snapshots and
 # frames too far ahead of Home Assistant's clock.
 _ELETTA_BREW_MONITOR_TIME_TOLERANCE = 90
