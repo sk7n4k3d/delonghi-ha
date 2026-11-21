@@ -591,6 +591,12 @@ class TestAsyncUpdateDataFullRefresh:
             assert coord.data["baseline_masking"] == {"espresso": 1, "tea": 1}
 
             # Pause the next refresh after parsing its cloud observation.
+            # The setup refresh above already called the parser once, so the
+            # mock is reset here and asserted below: without that, the test
+            # would only prove the interleaving while the contentstack happens
+            # to stay after the counter parse — reorder the two and it would
+            # pass silently instead of failing (numanx11, #94 review).
+            api.parse_counters.reset_mock()
             coord._last_full_refresh = due
             coord._contentstack_loaded = False
             sampled = asyncio.Event()
@@ -603,6 +609,9 @@ class TestAsyncUpdateDataFullRefresh:
             coord._load_contentstack = pause
             refreshing = asyncio.create_task(coord._async_update_data())
             await sampled.wait()
+            # The paused refresh has read its cloud counters: the edit below
+            # really lands mid-refresh, not before or after it.
+            api.parse_counters.assert_called_once()
             try:
                 if clear_then_readd:
                     await coord.local_baseline.async_clear(["espresso"])
