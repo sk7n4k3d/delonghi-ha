@@ -51,6 +51,18 @@ blueprint:
             - integration: delonghi_daedalus
               domain: binary_sensor
           multiple: true
+    cleaning:
+      name: Cleaning required
+      description: >-
+        Select the general Cleaning required sensor. Use the separate brew unit input for
+        Brew unit cleaning required.
+      default: []
+      selector:
+        entity:
+          filter:
+            - integration: delonghi_daedalus
+              domain: binary_sensor
+          multiple: true
     brew_unit_cleaning:
       name: Brew unit cleaning required
       default: []
@@ -92,6 +104,11 @@ triggers:
     to: "on"
     id: descale
   - trigger: state
+    entity_id: !input cleaning
+    from: "off"
+    to: "on"
+    id: cleaning
+  - trigger: state
     entity_id: !input brew_unit_cleaning
     from: "off"
     to: "on"
@@ -111,6 +128,7 @@ actions:
         no_coffee_beans: Refill the bean hopper with coffee beans.
         grounds_container: Empty and reinsert the grounds container.
         descale: Follow the machine's on-screen descaling instructions.
+        cleaning: Check the machine's display for cleaning instructions.
         brew_unit_cleaning: Follow the machine's instructions to clean the brew unit.
         water_filter: Replace the water filter and follow the machine's setup instructions.
   - device_id: !input phone

@@ -724,3 +724,98 @@ def test_time_buckets_are_an_opt_in_diagnostic_with_real_zero_attributes() -> No
     coord.update(_cloud(brewing_hours={"Time0_2": 0}))
     assert histogram.available
     assert histogram.extra_state_attributes == {"Time0_2": 0}
+
+
+@pytest.mark.parametrize(
+    ("model", "capabilities", "named"),
+    [
+        ("ECAM63070", {"MachineModelUI": "ECAM470.75.TXB"}, True),
+        (" ecam630.70 ", {}, True),
+        (None, {"MachineModelUi": "ECAM630.70"}, True),
+        (None, {"MachineModelUI": "ECAM63070"}, True),
+        (None, {"MachineModelUi": "ECAM630.70", "MachineModelUI": "ECAM63070"}, True),
+        (None, {"MachineModelUi": "ECAM630.70", "MachineModelUI": "ECAM470.75.TXB"}, False),
+        (None, {"MachineModelUI": "206.3"}, False),
+        (None, {"OtherModelUI": "ECAM63070"}, False),
+        ("206.3", {"MachineModelUI": "ECAM63070"}, False),
+        ("PrimaDonna Aromatic ECAM630.70", {"MachineModelUI": "ECAM63070"}, False),
+        ("ECAM470.75.TXB", {"MachineModelUI": "ECAM63070"}, False),
+        ("ECAM630.70.TB", {}, False),
+        ("ECAM630.75", {}, False),
+    ],
+)
+def test_aromatic_recipe_labels_require_verified_product_code(model, capabilities, named):
+    report = _cloud(recipe_brew_counts={1: 3, 15: 7, 42: 0}, capabilities_flat=capabilities)
+    coord = _FakeCoordinator(report, model=model)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    recipes = {
+        entity._attr_extra_state_attributes["recipe_id"]: entity
+        for entity in added
+        if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)
+    }
+
+    assert recipes.keys() == {1, 15, 42}
+    for recipe_id, name_key in {
+        1: "recipe_espresso_brew_count",
+        15: "recipe_cappuccino_mix_brew_count",
+        42: None,
+    }.items():
+        recipe = recipes[recipe_id]
+        assert recipe._attr_unique_id == f"SN-TEST_recipe_{recipe_id}_brew_count"
+        assert recipe.suggested_object_id == f"recipe_{recipe_id}_brew_count"
+        if named and name_key is not None:
+            assert recipe._attr_translation_key == name_key
+            assert not getattr(recipe, "_attr_translation_placeholders", None)
+        else:
+            assert recipe._attr_translation_key == "recipe_brew_count"
+            assert recipe._attr_translation_placeholders == {"recipe_id": str(recipe_id)}
+
+
+def test_aromatic_label_keeps_earlier_recipe_registry_identity(monkeypatch):
+    generic = sp.DaedalusRecipeBrewCountSensor(_FakeCoordinator(_CLOUD), recipe_id=15)
+    assert generic._attr_translation_key == "recipe_brew_count"
+    record = SimpleNamespace(
+        unique_id=generic._attr_unique_id,
+        domain="sensor",
+        platform=DOMAIN,
+        entity_id="sensor.breakfast_preparations",
+        name="Breakfast preparations",
+        disabled_by="user",
+    )
+    registry = SimpleNamespace(async_get=lambda _hass: None, async_entries_for_config_entry=lambda *_: [record])
+    monkeypatch.setattr(sp, "entity_registry", registry)
+    monkeypatch.setattr(sp, "_MAX_RECIPE_SENSORS", 1)
+
+    coord = _FakeCoordinator(_cloud(recipe_brew_counts={1: 8, 15: 13}), model="ECAM63070")
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    (named,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
+
+    assert named._attr_translation_key == "recipe_cappuccino_mix_brew_count"
+    assert named._attr_unique_id == record.unique_id
+    assert named.suggested_object_id == generic.suggested_object_id
+    assert named._attr_state_class == generic._attr_state_class == SensorStateClass.TOTAL_INCREASING
+    assert named.native_value == 13
+
+    coord.update(_cloud(recipe_brew_counts={1: 8, 15: 14}))
+    assert [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)] == [named]
+    assert named.native_value == 14
+
+
+@pytest.mark.parametrize(
+    ("translation_file", "espresso", "cappuccino_mix"),
+    [
+        ("strings.json", "Espresso brew count", "Cappuccino Mix brew count"),
+        ("translations/en.json", "Espresso brew count", "Cappuccino Mix brew count"),
+        ("translations/fr.json", "Nombre d’espressos", "Nombre de préparations de Cappuccino Mix"),
+        ("translations/ro.json", "Număr de preparări de espresso", "Număr de preparări de Cappuccino Mix"),
+    ],
+)
+def test_aromatic_recipe_count_translations(translation_file, espresso, cappuccino_mix):
+    translations = json.loads((Path(sp.__file__).parent / translation_file).read_text(encoding="utf-8"))
+    names = translations["entity"]["sensor"]
+    coord = _FakeCoordinator(_CLOUD, model="ECAM63070")
+    for recipe_id, expected in ((1, espresso), (15, cappuccino_mix)):
+        recipe = sp.DaedalusRecipeBrewCountSensor(coord, recipe_id=recipe_id)
+        assert names[recipe._attr_translation_key]["name"] == expected

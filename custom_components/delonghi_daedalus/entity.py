@@ -4,8 +4,28 @@ from __future__ import annotations
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .cloud_keys import cloud_key_display
+from .cloud import machine_model_code
+from .cloud_keys import cloud_key_display, lookup_cloud_key
+from .const import CONF_MODEL
 from .coordinator import DaedalusCoordinator
+
+
+def telemetry_model_code(coordinator: DaedalusCoordinator) -> str | None:
+    """Return the compact product code for model-scoped telemetry."""
+    configured_model = coordinator.entry.data.get(CONF_MODEL)
+    if configured_model is not None:
+        model = machine_model_code(configured_model)
+        return model.replace(".", "") if model is not None else None
+
+    cloud = (coordinator.data or {}).get("cloud") or {}
+    reported_models = {
+        code.replace(".", "")
+        for key, value in cloud.get("capabilities_flat", {}).items()
+        if (meta := lookup_cloud_key(key)) is not None
+        and meta.key == "machine_model"
+        and (code := machine_model_code(value)) is not None
+    }
+    return reported_models.pop() if len(reported_models) == 1 else None
 
 
 class DaedalusEntity(CoordinatorEntity[DaedalusCoordinator]):

@@ -1,7 +1,7 @@
 # Coffee machine attention card
 
 See current Daedalus alerts for one machine on a Home Assistant dashboard. The card groups
-water, beans and grounds under **Act now** and shows descaling, brew unit cleaning and water
+water, beans and grounds under **Act now** and shows descaling, cleaning requests and water
 filter replacement under **Maintenance reminders**. It uses Home Assistant's built-in Markdown
 card and reads the existing entity states without polling the machine.
 
@@ -24,12 +24,18 @@ card and reads the existing entity states without polling the machine.
 | Refill the bean hopper | No coffee beans |
 | Empty the grounds container | Grounds container full |
 | Descale the machine | Descaling required |
+| Check the machine for cleaning instructions | Cleaning required |
 | Clean the brew unit | Brew unit cleaning required |
 | Replace the water filter | Replace water filter |
 
 Use **Low water level** for refill and **Water tank missing** for reinsertion. The separate
 **Water tank level** and **Water tank present** entities report other signals.
-Use the specific **Brew unit cleaning required** sensor for the brew unit reminder.
+**Cleaning required** is a general request to check the machine's display. On the PrimaDonna
+Aromatic, it can appear when the hot milk carafe needs rinsing. The **Brew unit cleaning required**
+sensor has its own reminder for the brew unit. The maintenance notification blueprint has an
+optional input for each cleaning sensor. After updating the blueprint, edit your existing
+automation and select **Cleaning required** in the new input to receive that alert.
+[Maintenance notification blueprint](../blueprints/automation/daedalus-maintenance-notifications.yaml)
 
 An active sensor appears in its alert group. A configured sensor without a usable reading
 appears under **Status incomplete** as missing, unavailable or unknown, while available

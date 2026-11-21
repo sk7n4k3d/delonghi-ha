@@ -181,6 +181,12 @@
       "cloud_clean_hot": {
         "name": "Ciclu de curățare la cald"
       },
+      "cloud_hot_carafe_clean_selector": {
+        "name": "Selector CLEAN al carafei pentru lapte cald"
+      },
+      "hot_milk_carafe_rinse_in_progress": {
+        "name": "Clătirea carafei pentru lapte cald în curs"
+      },
       "cloud_idf_cold": {
         "name": "Carafă pentru lapte rece (IDF)"
       },
@@ -239,6 +245,12 @@
       },
       "recipe_brew_count": {
         "name": "Număr de preparări pentru rețeta {recipe_id}"
+      },
+      "recipe_espresso_brew_count": {
+        "name": "Număr de preparări de espresso"
+      },
+      "recipe_cappuccino_mix_brew_count": {
+        "name": "Număr de preparări de Cappuccino Mix"
       },
       "recipe_cappuccino_brew_count": {
         "name": "Număr de preparări de cappuccino"

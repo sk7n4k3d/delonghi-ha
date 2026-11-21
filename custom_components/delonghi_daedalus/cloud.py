@@ -1102,12 +1102,21 @@ async def fetch_reported_lan_ip(session: aiohttp.ClientSession, *, thing_name: s
     return None
 
 
-def _recent_reported_status(document: Any) -> bool:
-    """Allow one polling interval of age or clock skew on the Status change."""
-    for key in ("metadata", "reported", "Status", "timestamp"):
+def reported_field_timestamp(document: Any, field: str) -> int | float | None:
+    """Return the metadata timestamp of a canonical reported field."""
+    for key in ("metadata", "reported", *field.split("."), "timestamp"):
         if not isinstance(document, dict):
-            return False
+            return None
         document = document.get(key)
+    return document if type(document) in (int, float) else None
+
+
+def reported_timestamp_is_recent(timestamp: int | float | None) -> bool:
+    """Allow one polling interval of age or clock skew on a reported change."""
     now = time.time()
     # The bounded comparison also excludes NaN and infinities.
-    return type(document) in (int, float) and now - CLOUD_POLL_SECONDS <= document <= now + CLOUD_POLL_SECONDS
+    return type(timestamp) in (int, float) and now - CLOUD_POLL_SECONDS <= timestamp <= now + CLOUD_POLL_SECONDS
+
+
+def _recent_reported_status(document: Any) -> bool:
+    return reported_timestamp_is_recent(reported_field_timestamp(document, "Status"))
