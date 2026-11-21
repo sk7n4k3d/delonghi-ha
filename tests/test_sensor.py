@@ -8,15 +8,18 @@ word for the relevant bit.
 """
 
 import asyncio
+from binascii import crc_hqx
 from unittest.mock import MagicMock
 
+import pytest
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.delonghi_coffee import binary_sensor as binary_sensor_mod
 from custom_components.delonghi_coffee import sensor as sensor_mod
+from custom_components.delonghi_coffee.api import DeLonghiApi
 from custom_components.delonghi_coffee.binary_sensor import DeLonghiAlarmSensor
-from custom_components.delonghi_coffee.const import ALARMS
+from custom_components.delonghi_coffee.const import ALARMS, DOMAIN
 from custom_components.delonghi_coffee.sensor import (
     COUNTER_SENSORS,
     DeLonghiApiUsageSensor,
@@ -245,6 +248,134 @@ class TestStatusSensor:
         first = dict(s.extra_state_attributes)
         coord.data.update({"api_rate": 49, "api_total_calls": 49})
         assert s.extra_state_attributes == first
+
+
+class TestElettaBrewDisplay:
+    """Issue #83: map confirmed espresso phases on the status sensor only."""
+
+    NOW = 0x6B00E156
+    IDLE = "d012750f0101000800070000010000000070af6b00df2c"
+
+    @pytest.fixture(autouse=True)
+    def freeze_clock(self, monkeypatch):
+        monkeypatch.setattr(sensor_mod, "time", lambda: self.NOW)
+
+    def _monitor(self, state, action, progress, timestamp=NOW):
+        """Build a checksummed frame for observations without raw capture."""
+        body = bytes.fromhex(self.IDLE)[:-6]
+        body = body[:9] + bytes((state, action, progress)) + body[12:]
+        return (body + crc_hqx(body, 0x1D0F).to_bytes(2, "big") + timestamp.to_bytes(4, "big")).hex()
+
+    def _data(self, frame):
+        parsed = DeLonghiApi.parse_monitor_hex(frame)
+        return {
+            "machine_state": parsed["machine_state"],
+            "monitor_source": "cloud",
+            "monitor_stale": False,
+            "monitor_raw": frame,
+            "monitor_ts": parsed["monitor_ts"],
+            "monitor_action": parsed["action"],
+            "monitor_progress": parsed["progress"],
+        }
+
+    def _sensor(self, data, oem_model="DL-striker-cb"):
+        hass = MagicMock()
+        entry = MagicMock(entry_id="eletta", data={"model": oem_model} if oem_model is not None else {})
+        coordinator = MagicMock(data=data)
+        hass.data = {
+            DOMAIN: {
+                entry.entry_id: {
+                    "coordinator": coordinator,
+                    "dsn": "test",
+                    "model": "Eletta Explore",
+                    "device_name": "Coffee",
+                }
+            }
+        }
+        add_entities = MagicMock()
+        asyncio.run(sensor_mod.async_setup_entry(hass, entry, add_entities))
+        return next(entity for entity in add_entities.call_args.args[0] if isinstance(entity, DeLonghiStatusSensor))
+
+    def test_replay_original_espresso_frames(self):
+        frames = [
+            (self.IDLE, "Ready", 0, 0),
+            ("d012750f0107000800070700010000000062d56b00e14b", "Brewing", 7, 0),
+            ("d012750f0107000800070a050100000000cbde6b00e14f", "Brewing", 10, 5),
+            ("d012750f0107000800070b4c0100000000514d6b00e156", "Brewing", 11, 76),
+        ]
+        sensor = self._sensor({})
+        for frame, expected_state, action, progress in frames:
+            sensor.coordinator.data = data = self._data(frame)
+            original = data.copy()
+            assert sensor.native_value == expected_state
+            assert sensor.extra_state_attributes["monitor_action"] == action
+            assert sensor.extra_state_attributes["monitor_progress"] == progress
+            assert data == original
+
+    def test_espresso_completion_and_quiet_rinse_observation(self):
+        sensor = self._sensor({})
+        for action, progress in ((6, 0), (10, 5), (11, 45), (13, 100), (14, 100), (0, 0), (0, 0)):
+            sensor.coordinator.data = self._data(self._monitor(7, action, progress))
+            assert sensor.native_value == ("Brewing" if action else "Ready")
+
+    def test_hot_water_keeps_the_explicit_state_in_shared_action_phase(self):
+        sensor = self._sensor({})
+        for state, action, progress, expected_state in (
+            (11, 3, 8, "Dispensing Hot Water"),
+            (11, 3, 85, "Dispensing Hot Water"),
+            (11, 6, 100, "Dispensing Hot Water"),
+            (7, 0, 0, "Ready"),
+        ):
+            sensor.coordinator.data = self._data(self._monitor(state, action, progress))
+            assert sensor.native_value == expected_state
+
+    @pytest.mark.parametrize("state", [0, 3, 5, 8, 10, 12, 29])
+    def test_other_explicit_states_are_preserved(self, state):
+        data = self._data(self._monitor(state, 6, 20))
+        assert self._sensor(data).native_value == data["machine_state"]
+
+    @pytest.mark.parametrize("oem_model", [None, "", "DL-striker-other", "DL-striker-best", "DL-millcore"])
+    def test_other_or_unknown_oem_ignores_espresso_signature(self, oem_model):
+        data = self._data(self._monitor(7, 10, 5))
+        assert self._sensor(data, oem_model).native_value == "Ready"
+
+    @pytest.mark.parametrize(("action", "progress"), [(3, 8), (12, 100), (10, 101)])
+    def test_unconfirmed_or_invalid_telemetry_leaves_ready(self, action, progress):
+        data = self._data(self._monitor(7, action, progress))
+        assert self._sensor(data).native_value == "Ready"
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"monitor_action": None},
+            {"monitor_action": "10"},
+            {"monitor_action": 10.0},
+            {"monitor_progress": None},
+            {"monitor_progress": True},
+            {"monitor_progress": 15},
+            {"monitor_raw": None},
+            {"monitor_raw": "invalid"},
+            {"monitor_source": "lan"},
+            {"monitor_source": None},
+            {"monitor_stale": True},
+            {"monitor_stale": None},
+            {"monitor_ts": None},
+            {"monitor_ts": NOW - 1},
+        ],
+    )
+    def test_incomplete_or_inconsistent_evidence_leaves_ready(self, changes):
+        data = self._data(self._monitor(7, 10, 5)) | changes
+        assert self._sensor(data).native_value == "Ready"
+
+    @pytest.mark.parametrize("delta", [-100, 100])
+    def test_old_or_future_frames_leave_ready(self, delta):
+        data = self._data(self._monitor(7, 10, 5, self.NOW + delta))
+        assert self._sensor(data).native_value == "Ready"
+
+    def test_invalid_crc_leaves_ready(self):
+        frame = self._monitor(7, 10, 5)
+        damaged_frame = frame[:-12] + "0000" + frame[-8:]
+        assert self._sensor(self._data(damaged_frame)).native_value == "Ready"
 
 
 class TestApiUsageSensor:
