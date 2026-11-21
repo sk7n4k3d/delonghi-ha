@@ -216,8 +216,14 @@ set_baseline_from_screen:
           step: 1
           unit_of_measurement: cups
     total_espressos:
-      name: Tot. espressos (alt naming)
-      description: Some firmwares expose total_espressos instead of total_beverages — set the same UI number here.
+      name: Tot. espressos (all espresso drinks)
+      description: >
+        Every espresso-family drink counted together (`d704_tot_bev_espressi`).
+        Some firmwares label this total "total_beverages" on the Statistics
+        screen — if yours does, that one screen number belongs in one of those
+        two fields, not both. Never copy a single-drink count into this field:
+        it is a total, and any value at or under what the cloud already reports
+        is stored but never used.
       example: 1476
       selector:
         number:
@@ -226,7 +232,13 @@ set_baseline_from_screen:
           step: 1
           unit_of_measurement: cups
     espresso:
-      name: Espressos
+      name: Espressos (this one drink)
+      description: >
+        The espresso drink on its own (`d705_tot_id1_espr`). This is not the
+        total of espresso-family drinks — that is the separate
+        `total_espressos` field, and the two numbers are different on every
+        machine. Enter the figure shown for this drink's own line; do not
+        repeat one number across several fields.
       example: 1303
       selector:
         number:
