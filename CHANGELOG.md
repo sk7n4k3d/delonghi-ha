@@ -5,6 +5,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+### Fixed
+
+- **Eletta Explore : l'état passe enfin à `Brewing` pendant l'extraction (#88, #83).**
+  Sur le cloud, l'octet d'état ne bouge pas pendant un cycle espresso : la machine
+  reste à `Ready` pendant que les octets de progression avancent. Le capteur d'état
+  déduit maintenant `Brewing`, **à l'affichage uniquement**, quand la frame cloud
+  complète valide le cycle : source cloud, fraîcheur ≤ 90 s, action dans le jeu
+  observé `{6, 7, 10, 11, 13, 14}`, progression entre 0 et 100, préfixe magic de la
+  frame, triple (état, action, progression) cohérent et CRC-16/SPI-FUJITSU vérifié.
+  L'eau chaude et le rinçage gardent leur état explicite, la frame partagée avec
+  l'action 6 étant départie par l'état machine. Périmètre assumé : `DL-striker-cb` ;
+  `DL-striker-best`, autre Eletta Explore, reste hors champ faute de frames capturées
+  sur ce firmware.
+
 ## [1.9.6] — 2026-11-21
 
 ### Added
@@ -54,6 +68,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 - Daedalus requires an approved TLS certificate for local access. Existing entries must open **Reconfigure** and approve the certificate on a trusted network. Cloud telemetry continues for entries with it enabled, including during reconfiguration. LAN-only entries need certificate approval to restore connectivity, or can enable cloud telemetry in the integration options and select **Use cloud telemetry only** in **Reconfigure**. Reconfiguration keeps the paired machine's serial number and existing entity IDs.
 - Previously registered cloud entities for private fields are removed, including the obsolete raw cloud LAN address sensor. Point any automations or dashboards that used that sensor to the dedicated **LAN IP address** diagnostic sensor.
 - Cloud entities no longer expose the My Coffee Lounge machine name in their attributes. The entity registry keeps cloud entities when telemetry is disabled or a field is temporarily absent, preserving entity IDs and user settings when the data returns.
+
+### Added
+
+- **Eletta Ultra ECAM47070 recognised, Mild Filter counter named (#86).** The machine
+  model gate was verified by running the real `machine_model_code`, not by reading it.
+  The per-drink counter for the Mild Filter brew now carries its drink name instead of
+  a bare slot number.
+- **Aromatic: per-drink counters and hot-milk carafe rinse activity (#87).** Drink
+  counters and the carafe rinse are now reported. The merged `is_on` property was
+  replayed against 12 scenarios and matches the documented table on all 12; the
+  `reported_field_timestamp` refactor does not regress `_recent_reported_status`.
+
+### Known gaps
+
+- The rinse sensor flips to `Unavailable` in the middle of a carafe rinse — a gap in
+  the state window, not a failure to report.
+- `CurrMode == 12` is still a bare magic number where the rest of the file uses named
+  constants.
+- #86 and #87 each introduced a drink-name table. They are folded into a single source
+  so the recipe documentation cannot drift apart.
 
 ## [1.9.4] — 2026-11-19
 
