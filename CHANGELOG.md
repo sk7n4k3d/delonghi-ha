@@ -5,6 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.8] — 2026-11-21
+
+### Fixed
+
+- **Eletta Explore : `Brewing` dès la mouture (#89).** Le cycle espresso
+  s'ouvre sur l'action 4 — la mouture — pendant que l'octet d'état est encore à
+  `Ready` : le capteur restait donc ~5 s à `Ready` avant de basculer, alors que
+  le café coulait. L'action 4 rejoint le jeu retenu par #88, qui devient
+  `{4, 6, 7, 10, 11, 13, 14}` ; toutes les gardes de #88 restent en place (source
+  cloud, fraîcheur ≤ 90 s, frame complète au bon préfixe magic, triple
+  (état, action, progression) cohérent, progression entre 0 et 100 et
+  CRC-16/SPI-FUJITSU vérifié), et le périmètre est toujours `DL-striker-cb`.
+  Ce 4 est une **action**, à ne pas lire comme l'état 4 : dans `MACHINE_STATES`,
+  le code d'état 4 est `Error`, et l'inférence ne s'applique qu'à une frame dont
+  l'état est `Ready` — une frame d'erreur ne peut pas l'atteindre. Limite
+  assumée : un seul expresso capturé n'écarte pas un cycle non-brew qui moudrait
+  en restant à `Ready` (il s'afficherait `Brewing`) ; rinçage, détartrage et eau
+  chaude sont bien exclus, chacun déclare son propre code d'état (8, 5, 11).
+
 ## [1.9.7] — 2026-11-21
 
 ### Fixed
