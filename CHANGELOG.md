@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.7] — 2026-11-21
+
 ### Fixed
 
 - **Eletta Explore : l'état passe enfin à `Brewing` pendant l'extraction (#88, #83).**
