@@ -9,7 +9,7 @@
   <a href="https://github.com/sk7n4k3d/delonghi-ha/releases"><img src="https://img.shields.io/github/v/release/sk7n4k3d/delonghi-ha" alt="GitHub Release"></a>
 </p>
 
-Home Assistant custom integration for De'Longhi connected coffee machines (Eletta Explore, Dinamica Plus, Rivelia, etc.) via the De'Longhi Coffee Link cloud API.
+Home Assistant custom integration for Wi-Fi-enabled De'Longhi coffee machines, including the Eletta Explore and PrimaDonna Soul, via the De'Longhi Coffee Link cloud API.
 
 > 🆕 **For Eletta Ultra and PrimaDonna Aromatic machines using My Coffee Lounge** (Daedalus stack), see the companion repo
 > [`sk7n4k3d/delonghi-daedalus-ha`](https://github.com/sk7n4k3d/delonghi-daedalus-ha) — different cloud
@@ -90,14 +90,15 @@ Home Assistant custom integration for De'Longhi connected coffee machines (Elett
 
 ## Supported Machines
 
-Any De'Longhi WiFi-connected coffee machine that works with the **De'Longhi Coffee Link** app, including:
+This integration connects to Wi-Fi-enabled machines through the **De'Longhi Coffee Link** cloud (Ayla Networks).
 
 - **Eletta Explore (ECAM450.xx)** — primary development and testing machine
 - **PrimaDonna Soul (ECAM610.xx)** — confirmed working by community
-- Dinamica Plus (ECAM370.xx)
+- **Dinamica Plus (ECAM370.xx)** — known to the model table; the note below applies to the Bluetooth-only variant
 - PrimaDonna Class, PrimaDonna Elite, PrimaDonna S
 - Maestosa
-- Other Ayla Networks-connected models
+
+The **Dinamica Plus ECAM370.95.S** pairs with Coffee Link over Bluetooth only. This integration requires a network connection to the machine, so this model is unsupported. [De'Longhi manual, section 6.13](https://www.delonghi.com/en/s/ECAM370.95.S) · [Compatibility report #80](https://github.com/sk7n4k3d/delonghi-ha/issues/80)
 
 Rivelia (EXAM440.xx) and Perfetto (ECAM550.xx) are **not in the known-model table** and remain untested — they may work if they speak the same Ayla/ECAM protocol, but no report confirms it yet.
 
@@ -116,7 +117,7 @@ frames on a `DL-striker-best`, not of changing the action set by analogy.
 | **Protocol** | Cloud (Gigya + Ayla REST) + LAN socket (state + brew since 1.9.0) | LAN (AES-256-CBC direct) |
 | **Latency** | ~2-5s (cloud round-trip) | ~instant (local network) |
 | **Rate limiting** | Possible (Ayla per-IP limits) | None (local) |
-| **WiFi models** | All Coffee Link WiFi models | PrimaDonna Soul confirmed |
+| **WiFi models** | Coffee Link models using the Ayla cloud | PrimaDonna Soul confirmed |
 | **Sensors** | 30+ counters, 19 alarms, maintenance | Status, basic counters |
 | **Brew commands** | 50+ beverages, recipe conversion | Yes | Limited |
 | **Multi-region** | EU, US, CN | EU | N/A |
