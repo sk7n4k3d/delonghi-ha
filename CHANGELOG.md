@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.12] — 2026-11-21
+
+### Fixed
+
+- **Un rafraîchissement raté ne vieillit plus un compteur qui a changé (#94).**
+  Trois corrections venues des relectures de #91 :
+  - une saisie ou une réinitialisation réussie **efface l'historique de
+    masquage** du compteur concerné. Un capteur qui affiche la valeur cloud ne
+    doit plus traîner un warning hérité de l'entrée précédente. Re-saisir la
+    **même** valeur conserve l'historique — ce qu'il mesure est toujours vrai, le
+    nombre n'a pas bougé — mais enregistre une nouvelle date de saisie ;
+  - seul un **full refresh réussi** fait avancer le compteur de masquage. Si un
+    baseline est modifié pendant qu'un refresh est en vol, cet échantillon est
+    jeté : il ne peut pas vieillir une entrée qui n'existait plus quand il a été
+    lu. Implémenté par compteur de génération, pas par verrou ;
+  - une **date de saisie illisible** dans `.storage` apparaît désormais en
+    `unknown` avec un âge `null`, au lieu de fuiter la chaîne brute sur
+    l'entité ou dans la prévisualisation du reset.
+- **Un dump diagnostique qui échoue ne coûte plus le refresh (#94, garde ajoutée
+  en revue).** Depuis le changement ci-dessus, l'horloge du full refresh se
+  commit à la fin du bloc : une exception qui remontait du dump laissait le
+  chemin lourd dû, et le poll suivant (60 s) le rejouait intégralement — Home
+  Assistant n'applique **aucun backoff** de son côté sauf si l'exception porte
+  un `retry_after` explicite (vérifié dans `update_coordinator.py` en 2026.10.4).
+  Le dump est une aide à l'observation : il ne peut plus faire échouer ce qui
+  l'a produit. Test à l'appui, vérifié par mutation (rouge sans la garde).
+
 ## [1.9.11] — 2026-11-21
 
 ### Added
