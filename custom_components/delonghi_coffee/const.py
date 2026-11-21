@@ -133,6 +133,13 @@ POWER_CONFIRM_CLOCK_SKEW: Final = 120  # Seconds of tolerated clock skew
 POWER_CONFIRM_FAST_POLL_DURATION: Final = 150.0  # Seconds of fast polling during the ladder
 POWER_CONFIRM_FAST_POLL_INTERVAL: Final = 5.0  # Poll interval during the ladder
 
+# Issue #84 — brew verify-and-retry. Ayla 201 only proves the cloud accepted
+# the frame; after idle the machine sometimes swallows the first brew exactly
+# like the #47 power case. Watch the raw monitor for this long after a send;
+# if not one byte moved, the command never landed — resend it once.
+BREW_ACK_TIMEOUT: Final = 15.0  # Seconds to wait for any monitor movement
+BREW_ACK_POLL: Final = 3.0  # Seconds between monitor comparisons
+
 # Grace window after an HA-side profile selection during which the cloud
 # active_profile echo is ignored (the machine's own property update lags
 # the command). Outside it, a differing cloud value is a touchscreen
