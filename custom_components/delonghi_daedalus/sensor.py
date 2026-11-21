@@ -27,6 +27,7 @@ from .coordinator import DaedalusCoordinator
 from .entity import DaedalusCloudEntity, DaedalusEntity, telemetry_model_code
 
 _MAX_RECIPE_SENSORS = 256
+_ELETTA_ULTRA_MODELS = frozenset({"ECAM47075", "ECAM47075TXB"})
 # Verified on an Eletta Ultra ECAM470.75.TXB by the reporter of issue #8.
 _ELETTA_ULTRA_RECIPE_NAMES = {
     7: "recipe_cappuccino_brew_count",
@@ -43,8 +44,7 @@ _PRIMADONNA_AROMATIC_RECIPE_NAMES = {
     15: "recipe_cappuccino_mix_brew_count",
 }
 _RECIPE_NAMES_BY_MODEL = {
-    "ECAM47075": _ELETTA_ULTRA_RECIPE_NAMES,
-    "ECAM47075TXB": _ELETTA_ULTRA_RECIPE_NAMES,
+    **dict.fromkeys(_ELETTA_ULTRA_MODELS, _ELETTA_ULTRA_RECIPE_NAMES),
     "ECAM63070": _PRIMADONNA_AROMATIC_RECIPE_NAMES,
 }
 
