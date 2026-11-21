@@ -33,6 +33,7 @@ switch back to cloud.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -45,6 +46,18 @@ _LOGGER = get_logger(__name__)
 # Storage version: bump when the schema changes. Stored under
 # .storage/delonghi_coffee_baseline_<DSN>.
 STORAGE_VERSION = 1
+
+# Per-key capture dates live in this metadata key of the same payload instead
+# of a STORAGE_VERSION bump: HA's Store refuses a file whose version it does
+# not recognise, which would silently drop every baseline users already set
+# (the 1476-cup entry behind issue #90 among them). The value is a dict, and
+# async_load only keeps int/float entries, so an older build still reads a
+# new file and simply ignores the dates.
+_SET_AT_KEY = "_set_at"
+
+# Sentinel surfaced to the UI when a baseline predates per-key dating (or its
+# date failed to parse). "unknown" is deliberately not treated as fresh.
+UNKNOWN_DATE = "unknown"
 
 
 class LocalBaselineStore:
@@ -62,6 +75,7 @@ class LocalBaselineStore:
         self._dsn = dsn
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"delonghi_coffee_baseline_{dsn}")
         self._values: dict[str, int] = {}
+        self._set_at: dict[str, str] = {}
         self._loaded = False
 
     async def async_load(self) -> None:
@@ -70,22 +84,61 @@ class LocalBaselineStore:
             return
         data = await self._store.async_load()
         if isinstance(data, dict):
+            # Capture dates first: they sit in a dict under _SET_AT_KEY, so
+            # the int-only filter below never mistakes them for a counter.
+            raw_dates = data.get(_SET_AT_KEY)
+            self._set_at = {}
+            if isinstance(raw_dates, dict):
+                self._set_at = {k: v for k, v in raw_dates.items() if isinstance(k, str) and isinstance(v, str)}
             # Filter to int-only values; we never store anything else.
             self._values = {k: int(v) for k, v in data.items() if isinstance(v, (int, float))}
+            undated = sorted(k for k in self._values if k not in self._set_at)
             _LOGGER.info(
-                "LocalBaselineStore[%s] loaded %d entries: %s",
+                "LocalBaselineStore[%s] loaded %d entries: %s%s",
                 self._dsn,
                 len(self._values),
                 sorted(self._values.keys()),
+                f" — no capture date for {undated}" if undated else "",
             )
         self._loaded = True
 
     async def async_save(self) -> None:
-        await self._store.async_save(self._values)
+        payload: dict[str, Any] = dict(self._values)
+        if self._set_at:
+            payload[_SET_AT_KEY] = dict(self._set_at)
+        await self._store.async_save(payload)
 
     def get(self, counter_key: str) -> int | None:
         """Return baseline for a counter key, or None if not set."""
         return self._values.get(counter_key)
+
+    def get_set_at(self, counter_key: str) -> str:
+        """When this baseline was entered, ISO 8601, or ``UNKNOWN_DATE``.
+
+        A baseline written before per-key dating existed has no date. That is
+        reported as unknown, never as fresh — a number of unknown age is the
+        exact failure mode issue #90 is about.
+        """
+        return self._set_at.get(counter_key, UNKNOWN_DATE)
+
+    def age_days(self, counter_key: str) -> int | None:
+        """Days since the baseline was entered, or None when undatable."""
+        raw = self._set_at.get(counter_key)
+        if not raw:
+            return None
+        try:
+            stamp = datetime.fromisoformat(raw)
+        except ValueError:
+            _LOGGER.debug(
+                "LocalBaselineStore[%s] unparsable capture date for %s: %r",
+                self._dsn,
+                counter_key,
+                raw,
+            )
+            return None
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        return max(0, (datetime.now(UTC) - stamp).days)
 
     def all_keys(self) -> list[str]:
         return list(self._values.keys())
@@ -110,14 +163,42 @@ class LocalBaselineStore:
         if not accepted:
             return
         self._values.update(accepted)
+        # Every accepted key gets a fresh capture date: the number was just
+        # read off the screen, so its age is known from now on.
+        stamp = datetime.now(UTC).isoformat(timespec="seconds")
+        for key in accepted:
+            self._set_at[key] = stamp
         await self.async_save()
         _LOGGER.info("LocalBaselineStore[%s] updated: %s", self._dsn, accepted)
 
-    async def async_clear(self) -> None:
-        """Drop all baselines and remove the storage file."""
-        self._values = {}
-        await self._store.async_remove()
-        _LOGGER.info("LocalBaselineStore[%s] cleared", self._dsn)
+    async def async_clear(self, keys: list[str] | None = None) -> list[str]:
+        """Drop baselines and return the keys actually removed.
+
+        With no argument every baseline goes and the storage file is removed
+        (the original behaviour). With a key list only those entries go, so a
+        wrong single value can be fixed without discarding the rest.
+        """
+        if keys is None:
+            removed = sorted(self._values)
+            self._values = {}
+            self._set_at = {}
+            await self._store.async_remove()
+            _LOGGER.info("LocalBaselineStore[%s] cleared", self._dsn)
+            return removed
+
+        removed = [k for k in keys if k in self._values]
+        for key in removed:
+            self._values.pop(key, None)
+            self._set_at.pop(key, None)
+        if not removed:
+            return []
+        if self._values:
+            await self.async_save()
+        else:
+            # Last entry gone — leave no empty file behind.
+            await self._store.async_remove()
+        _LOGGER.info("LocalBaselineStore[%s] cleared %s", self._dsn, removed)
+        return removed
 
     def merge(self, counter_key: str, cloud_value: int | float | None) -> int | float | None:
         """Return the value a sensor should expose.

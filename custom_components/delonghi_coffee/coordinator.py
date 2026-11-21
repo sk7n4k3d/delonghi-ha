@@ -137,6 +137,10 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_keepalive: float = 0
         self._keepalive_failures: int = 0
         self._cached_counters: dict[str, Any] = {}
+        # Consecutive full refreshes during which the cloud stayed under a
+        # local baseline, per counter key (issue #90). Keys that catch up, or
+        # whose baseline was removed, simply disappear from this dict.
+        self._baseline_mask_streak: dict[str, int] = {}
         self._cached_profiles: dict[str, Any] = {}
         self._cached_beans: list[dict[str, Any]] = []
         self._cached_bean_system_par: dict[str, Any] = {}
@@ -553,6 +557,32 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return self._auto_profile
         return None
 
+    def _track_baseline_masking(self) -> None:
+        """Count full refreshes where the cloud stays under a local baseline.
+
+        Being under a baseline is normal at first — the baseline is a manual
+        entry read off the touchscreen, so it starts ahead of a cloud the
+        firmware stopped updating. What matters is that it never catches up:
+        that is when the sensor is showing a number nobody is measuring
+        (issue #90). Only full refreshes parse counters, so one tick here is
+        one ``FULL_REFRESH_INTERVAL``.
+
+        A key drops out of the dict as soon as the cloud reaches the baseline
+        or the baseline is removed, which resets its streak to zero.
+        """
+        fresh: dict[str, int] = {}
+        for key in self.local_baseline.all_keys():
+            baseline = self.local_baseline.get(key)
+            if baseline is None:
+                continue
+            cloud = self._cached_counters.get(key)
+            # Non-numeric cloud values (parse_counters keeps raw strings)
+            # cannot be compared — treat them as masked, same as merge().
+            masked = not isinstance(cloud, (int, float)) or isinstance(cloud, bool) or cloud < baseline
+            if masked:
+                fresh[key] = self._baseline_mask_streak.get(key, 0) + 1
+        self._baseline_mask_streak = fresh
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from API."""
         try:
@@ -732,6 +762,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 # Parse everything from the single fetch
                 self._cached_counters = self.api.parse_counters(all_props)
+                self._track_baseline_masking()
 
                 if not self.beverages:
                     self.beverages = self.api.parse_available_beverages(all_props)
@@ -892,6 +923,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "monitor_ts": status.get("monitor_ts"),
                 "profile": status.get("profile", 0),
                 "counters": self._cached_counters,
+                "baseline_masking": dict(self._baseline_mask_streak),
                 "beverages": self.beverages,
                 "active_profile": published_active,
                 "profiles": self._cached_profiles.get("profiles", {}),

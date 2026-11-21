@@ -343,4 +343,15 @@ reset_local_baseline:
   description: >
     Drop every locally-stored baseline override and revert sensors to whatever
     the cloud reports. Useful if the firmware finally catches up or you set a
-    wrong value.
+    wrong value. Calling this without confirm=true does nothing: it answers with
+    the list of baselines that would be dropped, so the first call is a preview.
+  fields:
+    confirm:
+      name: Confirm
+      description: >
+        Set to true to actually drop the baselines. Without it the call only
+        reports what is currently stored — sensors keep showing
+        max(cloud, baseline) until you confirm.
+      required: true
+      selector:
+        boolean:

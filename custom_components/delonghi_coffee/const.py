@@ -70,6 +70,15 @@ ACTIVE_SCAN_INTERVAL_SECONDS: Final = 10
 # Full refresh interval — counters, profiles, beans (heavy, includes ping)
 FULL_REFRESH_INTERVAL: Final = 600  # 10 minutes
 
+# How many consecutive full refreshes the cloud may stay under a local
+# baseline before the sensor says so out loud (issue #90). Three is ~30 min:
+# one or two refreshes under a baseline is normal (the baseline is a manual
+# entry, so it starts ahead of the cloud by design), while the firmware freeze
+# this masks is permanent — so a slow-to-clear transient is worth filtering
+# and 30 min of detection latency costs nothing. Same "3 in a row" threshold
+# the MQTT keepalive ramp already uses in coordinator._async_update_data.
+BASELINE_MASK_ALERT_REFRESHES: Final = 3
+
 # ContentStack retry ceiling — when the CMS is unreachable (DNS filter,
 # offline), the coordinator backs off exponentially from
 # FULL_REFRESH_INTERVAL up to this ceiling before re-attempting the
