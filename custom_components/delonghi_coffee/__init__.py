@@ -317,8 +317,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 inert.append({"counter": key, "entered": value, "cloud": cloud})
                 _LOGGER.warning(
                     "set_baseline_from_screen: %s=%s is at or under the cloud value %s, so "
-                    "max(cloud, baseline) will ignore it. If that is the wrong counter, "
-                    "clear it with reset_local_baseline.",
+                    "max(cloud, baseline) will ignore it. Wrong counter? Enter the right "
+                    "one; reset_local_baseline clears every stored baseline at once, not "
+                    "just this one.",
                     key,
                     value,
                     cloud,
