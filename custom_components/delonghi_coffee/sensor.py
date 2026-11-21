@@ -164,6 +164,11 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
     ) -> None:
         super().__init__(coordinator)
         self._dsn = dsn
+        # Deliberately an equality on one OEM id, not a prefix match. Both
+        # DL-striker-cb and DL-striker-best are marketed as Eletta Explore
+        # (const.py maps both), but _ELETTA_ESPRESSO_ACTIONS was captured on
+        # DL-striker-cb only. An unverified sibling keeps the plain cloud state
+        # rather than a guessed inference: widen it on a capture, not by analogy.
         self._eletta_brew_display = oem_model == "DL-striker-cb"
         self._attr_unique_id = f"{dsn}_status"
         self._attr_has_entity_name = True

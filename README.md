@@ -101,6 +101,13 @@ Any De'Longhi WiFi-connected coffee machine that works with the **De'Longhi Coff
 
 Rivelia (EXAM440.xx) and Perfetto (ECAM550.xx) are **not in the known-model table** and remain untested — they may work if they speak the same Ayla/ECAM protocol, but no report confirms it yet.
 
+The live **Brewing** state shown in Home Assistant for the Eletta Explore is inferred from cloud
+monitor actions, and that inference is scoped to the `DL-striker-cb` OEM model — the one frames
+were captured on. `DL-striker-best` is the same marketed machine under a second OEM id, but no
+capture exists for it, so it keeps the plain cloud state and may show `Ready` while a shot is
+running. Brewing itself is unaffected on either id. Widening the scope is a matter of capturing
+frames on a `DL-striker-best`, not of changing the action set by analogy.
+
 ## Comparison with Other Integrations
 
 | | **delonghi-ha** (this) | **[cremalink-ha](https://github.com/miditkl/cremalink-ha)** |
