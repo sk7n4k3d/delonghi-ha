@@ -997,6 +997,30 @@ class TestDiagnosticMode:
             _run(coord._async_update_data())
         m.assert_not_called()
 
+    def test_diagnostic_dump_failure_does_not_cost_the_refresh(self):
+        """A dump is an aid, not a dependency.
+
+        Since #94 the full-refresh clock is committed at the end of the refresh,
+        so a raise from the dump would leave the heavy path due and re-run it on
+        the next 60 s poll — Home Assistant adds no backoff unless the failure
+        carries an explicit retry_after. The refresh must publish anyway, keep
+        the last good dump, and mark the heavy path done.
+        """
+        coord, _, api = _make_coord()
+        coord._contentstack_loaded = True
+        coord._last_keepalive = monotonic()
+        coord.diagnostic_mode = True
+        coord._last_all_props = {"d270_serialnumber": {"value": "ECAM"}}
+        due = -FULL_REFRESH_INTERVAL - 1
+        coord._last_full_refresh = due
+        with patch.object(coord_mod, "get_diagnostic_dump", side_effect=KeyError("boom")):
+            result = _run(coord._async_update_data())
+        assert result["diagnostic"] == {}
+        assert coord._last_full_refresh > due
+        # And the next poll is a light one: the heavy path is not re-armed.
+        with patch.object(coord_mod, "get_diagnostic_dump", side_effect=KeyError("boom")):
+            _run(coord._async_update_data())
+
 
 # ────────────────────────── error paths ──────────────────────────────
 

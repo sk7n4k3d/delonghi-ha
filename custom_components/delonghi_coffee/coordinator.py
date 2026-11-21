@@ -896,9 +896,17 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if alarm_word & (1 << bit):
                         self.seen_alarm_bits.add(bit)
 
-            # Build diagnostic dump if enabled
+            # Build diagnostic dump if enabled. A dump is an observation aid: it
+            # must never cost the refresh that produced it. Since #94 the
+            # full-refresh clock is committed at the end of this block, so a
+            # raise here would leave the heavy path due and re-run it on the
+            # next poll — and Home Assistant applies no backoff of its own
+            # unless the failure carries an explicit retry_after.
             if self.diagnostic_mode and self._last_all_props:
-                self._last_diagnostic = get_diagnostic_dump(self._last_all_props, counters, status)
+                try:
+                    self._last_diagnostic = get_diagnostic_dump(self._last_all_props, counters, status)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.debug("Diagnostic dump failed; refresh continues", exc_info=True)
 
             # Commit the automatic target only now that the whole refresh has
             # succeeded (numanx11 #79 r3): a poll that raised earlier leaves the
