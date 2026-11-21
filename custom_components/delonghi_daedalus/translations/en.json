@@ -249,6 +249,9 @@
       "recipe_cafe_con_leche_brew_count": {
         "name": "Café con Leche brew count"
       },
+      "recipe_mild_filter_brew_count": {
+        "name": "Mild Filter brew count"
+      },
       "recipe_caffe_crema_brew_count": {
         "name": "Caffè Crema brew count"
       },

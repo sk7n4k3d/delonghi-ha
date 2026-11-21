@@ -12,10 +12,26 @@ With read-only cloud telemetry enabled, Home Assistant can show how many times y
 
 ## Reading the counters
 
-On the Eletta Ultra ECAM470.75.TXB, the owner verified the names Cappuccino, Latte Macchiato, Café con Leche, Caffè Crema, Black Eye and Iced Latte Macchiato. Home Assistant uses these labels when it recognizes the product model. For other models, unmapped drinks, or older installations reporting only a numeric display-board identifier, the sensor shows the recipe ID, such as **Recipe 42 brew count**. [Eletta Ultra observations](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8)
+Home Assistant uses verified drink names when it recognizes the product model. For other models, unmapped drinks, or older installations reporting only a numeric display-board identifier, the sensor shows the recipe ID, such as **Recipe 42 brew count**. See [verified recipe IDs by model](#verified-recipe-ids-by-model).
 
 You can rename a sensor on its entity page. Its identity uses the machine and recipe ID, so adding a verified display name in a later release preserves the entity and its history.
 
 The hot and cold totals come directly from the machine. A reported zero appears as **0**. If a previously reported counter disappears from the statistics, its sensor becomes **Unavailable** until a valid count returns. A lifetime count can include preparations made before Home Assistant was installed.
 
 Home Assistant registers up to 256 distinct recipe counters per machine. Previously registered recipes keep their place, including recipes you have renamed or disabled.
+
+## Verified recipe IDs by model
+
+| Product model | Recipe ID | Drink |
+| --- | ---: | --- |
+| Eletta Ultra ECAM470.75.TXB | 7 | Cappuccino |
+| Eletta Ultra ECAM470.75.TXB | 8 | Latte Macchiato |
+| Eletta Ultra ECAM470.75.TXB | 29 | Café con Leche |
+| Eletta Ultra ECAM470.75.TXB | 32 | Mild Filter |
+| Eletta Ultra ECAM470.75.TXB | 33 | Caffè Crema |
+| Eletta Ultra ECAM470.75.TXB | 35 | Black Eye |
+| Eletta Ultra ECAM470.75.TXB | 52 | Iced Latte Macchiato |
+
+To help verify another Eletta Ultra drink, claim an unmapped drink in the issue. Compare the counts in `BrewingStatisticsTotals` → `Recipes` before and after one normal brew. Report the product model, drink name, and recipe ID whose count increased by one. [Eletta Ultra recipe mapping discussion](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8#issuecomment-7051487885)
+
+Add verified recipe names for another product model in a separate map alongside the Eletta Ultra map in the Daedalus sensor platform. Match the map to the product model code and test that the names only appear for that model. [Daedalus sensor platform](../custom_components/delonghi_daedalus/sensor.py)

@@ -35,6 +35,7 @@ _ELETTA_ULTRA_RECIPE_NAMES = {
     7: "recipe_cappuccino_brew_count",
     8: "recipe_latte_macchiato_brew_count",
     29: "recipe_cafe_con_leche_brew_count",
+    32: "recipe_mild_filter_brew_count",
     33: "recipe_caffe_crema_brew_count",
     35: "recipe_black_eye_brew_count",
     52: "recipe_iced_latte_macchiato_brew_count",
