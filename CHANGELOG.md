@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+### Added
+
+- **Eletta Ultra : le compteur *Filter Coffee* a un nom (#86).** Sur une Eletta
+  Ultra **ECAM47070** sous Daedalus v0.5.2, une seule boisson *Filter Coffee* fait
+  passer le total de 82 à 83 et ne fait bouger **que** le compteur de recette **3**
+  (0 → 1) — vérification directe du rapporteur. La recette 3 reçoit donc
+  `recipe_filter_coffee_brew_count`, exactement comme la recette 32 avait reçu
+  *Mild Filter*. Libellés EN, FR et RO ajoutés, et le nom reste **borné au modèle** :
+  une autre machine garde le libellé générique `recipe_3_brew_count`.
+
 ## [1.9.12] — 2026-11-21
 
 ### Fixed

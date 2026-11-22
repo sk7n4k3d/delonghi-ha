@@ -252,6 +252,9 @@
       "recipe_cappuccino_mix_brew_count": {
         "name": "Număr de preparări de Cappuccino Mix"
       },
+      "recipe_filter_coffee_brew_count": {
+        "name": "Număr de preparări de Filter Coffee"
+      },
       "recipe_cappuccino_brew_count": {
         "name": "Număr de preparări de cappuccino"
       },
