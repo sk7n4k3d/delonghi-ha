@@ -15,6 +15,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
   *Mild Filter*. Libellés EN, FR et RO ajoutés, et le nom reste **borné au modèle** :
   une autre machine garde le libellé générique `recipe_3_brew_count`.
 
+- **PrimaDonna Aromatic ECAM63070 labels recipe 8 as Latte Macchiato.** One
+  preparation increased only recipe 8 and the machine's overall brew count by one.
+  Existing recipe 8 entities retain their IDs and history.
+
 ## [1.9.12] — 2026-11-21
 
 ### Fixed

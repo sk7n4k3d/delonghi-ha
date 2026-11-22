@@ -796,6 +796,32 @@ def test_aromatic_recipe_labels_require_verified_product_code(model, capabilitie
             assert recipe._attr_translation_placeholders == {"recipe_id": str(recipe_id)}
 
 
+@pytest.mark.parametrize(
+    ("model", "translation_key"),
+    [
+        ("ECAM63070", "recipe_latte_macchiato_brew_count"),
+        ("ECAM630.70", "recipe_latte_macchiato_brew_count"),
+        ("ECAM470.75.TXB", "recipe_latte_macchiato_brew_count"),
+        ("ECAM630.75", "recipe_brew_count"),
+        ("206.3", "recipe_brew_count"),
+    ],
+)
+def test_recipe_8_latte_macchiato_name_is_model_scoped(model, translation_key):
+    coord = _FakeCoordinator(_cloud(recipe_brew_counts={8: 6}), model=model)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
+
+    assert recipe._attr_translation_key == translation_key
+    assert recipe._attr_unique_id == "SN-TEST_recipe_8_brew_count"
+    assert recipe.suggested_object_id == "recipe_8_brew_count"
+    assert recipe.native_value == 6
+
+    coord.update(_cloud(recipe_brew_counts={8: 7}))
+    assert [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)] == [recipe]
+    assert recipe.native_value == 7
+
+
 def test_aromatic_label_keeps_earlier_recipe_registry_identity(monkeypatch):
     generic = sp.DaedalusRecipeBrewCountSensor(_FakeCoordinator(_CLOUD), recipe_id=15)
     assert generic._attr_translation_key == "recipe_brew_count"

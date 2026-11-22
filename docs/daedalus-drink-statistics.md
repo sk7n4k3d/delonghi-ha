@@ -32,13 +32,14 @@ Home Assistant registers up to 256 distinct recipe counters per machine. Previou
 | Eletta Ultra ECAM470.75.TXB | 35 | Black Eye |
 | Eletta Ultra ECAM470.75.TXB | 52 | Iced Latte Macchiato |
 | PrimaDonna Aromatic ECAM630.70 | 1 | Espresso |
+| PrimaDonna Aromatic ECAM630.70 | 8 | Latte Macchiato |
 | PrimaDonna Aromatic ECAM630.70 | 15 | Cappuccino Mix |
 
-On the PrimaDonna Aromatic, one preparation of each drink above increased its recipe
-counter by one; the Cappuccino Mix test also increased the machine’s hot brew total by
-one.
+On the PrimaDonna Aromatic, one preparation of each listed drink increased its recipe
+counter by one. The Latte Macchiato preparation also increased the machine’s brew
+total by one. The Cappuccino Mix preparation increased the hot brew total by one.
 
-The labels above also apply when Home Assistant shows **ECAM47070**. The owner of the verified ECAM470.75.TXB unit reported this product code after reconfiguring and confirmed that one Cappuccino advanced recipe 7 by one. [Owner’s observation](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8#issuecomment-7060227554)
+The Eletta Ultra labels in the table also apply when Home Assistant shows **ECAM47070**. The owner of the verified ECAM470.75.TXB unit reported this product code after reconfiguring and confirmed that one Cappuccino advanced recipe 7 by one. [Owner’s observation](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8#issuecomment-7060227554)
 
 To help verify another Eletta Ultra drink, claim an unmapped drink in the issue. Compare the counts in `BrewingStatisticsTotals` → `Recipes` before and after one normal brew. Report the product model, drink name, and recipe ID whose count increased by one. [Eletta Ultra recipe mapping discussion](https://github.com/sk7n4k3d/delonghi-daedalus-ha/issues/8#issuecomment-7051487885)
 
