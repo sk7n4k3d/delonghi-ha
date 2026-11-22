@@ -29,7 +29,10 @@ from .entity import DaedalusCloudEntity, DaedalusEntity, telemetry_model_code
 _MAX_RECIPE_SENSORS = 256
 _ELETTA_ULTRA_MODELS = frozenset({"ECAM47070", "ECAM47075", "ECAM47075TXB"})
 # Verified on an Eletta Ultra ECAM470.75.TXB by the reporter of issue #8.
+# Recipe 3 verified on an Eletta Ultra ECAM47070 by the reporter of #86: one Filter
+# Coffee on Daedalus v0.5.2 moved the total (82 to 83) and recipe 3 alone (0 to 1).
 _ELETTA_ULTRA_RECIPE_NAMES = {
+    3: "recipe_filter_coffee_brew_count",
     7: "recipe_cappuccino_brew_count",
     8: "recipe_latte_macchiato_brew_count",
     29: "recipe_cafe_con_leche_brew_count",

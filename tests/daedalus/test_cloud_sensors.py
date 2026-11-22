@@ -582,6 +582,30 @@ def test_recipe_32_name_is_model_scoped_and_identity_is_numeric(model, translati
     assert recipe.native_value == 1
 
 
+@pytest.mark.parametrize(
+    ("model", "translation_key"),
+    [
+        ("ECAM47070", "recipe_filter_coffee_brew_count"),
+        ("ECAM470.75.TXB", "recipe_filter_coffee_brew_count"),
+        ("ECAM63070", "recipe_brew_count"),
+    ],
+)
+def test_recipe_3_filter_coffee_name_is_model_scoped(model, translation_key):
+    coord = _FakeCoordinator(_cloud(recipe_brew_counts={3: 0}), model=model)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
+
+    assert recipe._attr_translation_key == translation_key
+    assert recipe._attr_unique_id == "SN-TEST_recipe_3_brew_count"
+    assert recipe.suggested_object_id == "recipe_3_brew_count"
+    assert recipe.native_value == 0
+
+    coord.update(_cloud(recipe_brew_counts={3: 1}))
+    assert [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)] == [recipe]
+    assert recipe.native_value == 1
+
+
 @pytest.mark.parametrize("directory_code", ["ECAM470.75.TXB", "ECAM47075", "ECAM47075TXB", "ECAM47070", "ECAM470.70"])
 def test_verified_directory_product_codes_reach_recipe_names(directory_code):
     (machine,) = _directory_machines([{"serialNumber": "SN-TEST", "machineModel": directory_code}])

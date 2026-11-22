@@ -252,6 +252,9 @@
       "recipe_cappuccino_mix_brew_count": {
         "name": "Cappuccino Mix brew count"
       },
+      "recipe_filter_coffee_brew_count": {
+        "name": "Filter Coffee brew count"
+      },
       "recipe_cappuccino_brew_count": {
         "name": "Cappuccino brew count"
       },
