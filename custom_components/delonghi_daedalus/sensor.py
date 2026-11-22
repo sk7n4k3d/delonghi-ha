@@ -45,6 +45,7 @@ _ELETTA_ULTRA_RECIPE_NAMES = {
 # Verified on a PrimaDonna Aromatic ECAM630.70.
 _PRIMADONNA_AROMATIC_RECIPE_NAMES = {
     1: "recipe_espresso_brew_count",
+    8: "recipe_latte_macchiato_brew_count",
     15: "recipe_cappuccino_mix_brew_count",
 }
 _RECIPE_NAMES_BY_MODEL = {
