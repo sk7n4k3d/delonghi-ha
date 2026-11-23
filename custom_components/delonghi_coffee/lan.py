@@ -362,11 +362,11 @@ class LanServerConfig:
     minutes is conservative; real devices are within a few seconds.
 
     Non-wallclock firmwares (PrimaDonna Soul "millcore", issue #10) ship
-    ``time_1`` as a free-running monotonic counter — uptime in nanoseconds
-    by observation, ≈1.4e14 after a couple of days. We can't compare those
-    to wall-clock so the skew check is bypassed when ``time_1`` exceeds
-    :data:`NON_WALLCLOCK_TIME1_THRESHOLD`; the anti-replay ratchet on
-    ``_last_handshake_time1`` still rejects rollback attempts in that mode.
+    ``time_1`` values that are not UNIX seconds. Some can combine uptime and
+    truncated wall-clock digits, so the numeric value may decrease at digit
+    boundaries or after reboot. The skew check is bypassed above
+    :data:`NON_WALLCLOCK_TIME1_THRESHOLD`; exact accepted nonce pairs provide
+    replay protection without assuming those values are monotonic.
     """
 
     dsn: str
@@ -379,11 +379,16 @@ class LanServerConfig:
 
 
 # Any UNIX-second timestamp we'd legitimately see is < 5e9 (year ~2128).
-# Firmwares that ship a non-wallclock time_1 (PD Soul = uptime ns) start
-# vastly higher — 1e14+ within hours of boot. Picking 5e9 as the cutoff
-# leaves a 130-year safety margin for real wall clocks while reliably
-# catching every uptime-style counter we've seen.
+# Firmwares that ship non-wallclock or hybrid time_1 values (uptime and
+# truncated clock digits) produce values far above UNIX seconds. Picking 5e9
+# as the cutoff leaves a 130-year safety margin for real wall clocks while
+# catching the non-wallclock formats observed so far.
 NON_WALLCLOCK_TIME1_THRESHOLD: int = 5_000_000_000
+
+# Remember a bounded sliding window per allowlisted peer. Repeated exact
+# key-exchange pairs are replays; distinct pairs can legitimately have a
+# lower non-wallclock time_1 after a digit-boundary rollover or machine reboot.
+MAX_REMEMBERED_HANDSHAKES_PER_PEER: int = 512
 
 
 class DeLonghiLanServer:
@@ -418,17 +423,18 @@ class DeLonghiLanServer:
         self._runner: Any | None = None
         self._site: Any | None = None
         self._lock = asyncio.Lock()
-        # Anti-replay / anti-clobber state: track the highest handshake
-        # time_1 we've accepted PER PEER so a stale re-play of an earlier
-        # key exchange can't roll the session back to its nonces.
+        # Wall-clock rollback state is per peer; non-wallclock time_1 values
+        # are not numerically monotonic on every firmware (issue #97).
         # H-coffee-4 (audit 2026-05-08): a single global counter let one
         # rogue handshake (from any IP that matched the allowlist, e.g.
         # via ARP spoofing the device) pin the floor at 2^31-1 and
         # permanently reject the legitimate device's smaller time_1
         # until the integration reloaded. Per-peer state localises the
-        # blast radius — a rogue peer's bad floor only locks itself out,
-        # the real device keeps its own ratchet.
+        # blast radius — a rogue peer's wall-clock floor only affects itself.
         self._last_handshake_time1: dict[str, int] = {}
+        # Exact accepted (random_1, time_1) pairs reject captured handshakes
+        # without rejecting fresh handshakes whose non-wallclock time_1 fell.
+        self._seen_handshake_pairs: dict[str, dict[tuple[str, int], None]] = {}
         # Loopback is always trusted so the in-process diagnostic works
         # regardless of what the caller passed in ``allowed_peers``.
         peers = set(config.allowed_peers)
@@ -546,10 +552,8 @@ class DeLonghiLanServer:
         Body shape: ``{"key_exchange": {"random_1": <str>, "time_1": <int>}}``.
         Response: HTTP 202 with ``{"random_2": <str>, "time_2": <int>}``.
 
-        Rejects requests from peers outside the allowlist (when set) and
-        handshakes whose ``time_1`` is older than the last accepted one —
-        an attacker re-playing a captured key_exchange would otherwise
-        reset our session state and orphan the real device.
+        Rejects requests from peers outside the allowlist (when set), stale
+        wall-clock values, and exact replays of an accepted key exchange.
         """
         peer = request.remote or "unknown"
         _LAN_LOGGER.debug("handshake: inbound from peer=%s", peer)
@@ -590,15 +594,19 @@ class DeLonghiLanServer:
             _LAN_LOGGER.warning("handshake: malformed request from %s: %s", peer, err)
             return web.json_response({"error": "bad_request"}, status=400)
 
-        # Anti-replay: the device always advances time_1 on a fresh boot.
-        # A captured handshake from yesterday is either a clock regression
-        # or an adversary rolling us back — reject it. This ratchet runs
-        # regardless of whether time_1 is wall-clock seconds (cremalink)
-        # or a monotonic uptime counter (PD Soul "millcore", issue #10).
+        # Wall-clock timestamps are expected to be monotonic within the skew
+        # window. Non-wallclock values can fall at concatenation digit
+        # boundaries or after reboot, so those use exact-pair de-duplication
+        # below instead of a numeric ratchet (issue #97).
         now = int(time.time())
         peer_norm = peer.split("%", 1)[0]  # strip IPv6 zone for stable key
         peer_floor = self._last_handshake_time1.get(peer_norm, 0)
-        if peer_floor and time_1 < peer_floor:
+        if (
+            time_1 < NON_WALLCLOCK_TIME1_THRESHOLD
+            and peer_floor
+            and peer_floor < NON_WALLCLOCK_TIME1_THRESHOLD
+            and time_1 < peer_floor
+        ):
             _LAN_LOGGER.warning(
                 "handshake: reject peer=%s time_1=%d older than last accepted %d for that peer",
                 peer,
@@ -609,10 +617,8 @@ class DeLonghiLanServer:
 
         # Wall-clock skew check only applies to wall-clock-style time_1.
         # Above the threshold the value is structurally not a UNIX epoch
-        # (cf. NON_WALLCLOCK_TIME1_THRESHOLD docstring); anti-replay above
-        # is the only protection for that path, which is sufficient because
-        # the peer is already in the IP allowlist and the handshake derives
-        # a fresh session key per call.
+        # (cf. NON_WALLCLOCK_TIME1_THRESHOLD docstring); exact pair replay
+        # protection below applies to both timestamp styles.
         if time_1 < NON_WALLCLOCK_TIME1_THRESHOLD:
             if abs(now - time_1) > self._config.handshake_max_skew:
                 _LAN_LOGGER.warning(
@@ -625,8 +631,8 @@ class DeLonghiLanServer:
                 return web.json_response({"error": "clock_skew"}, status=400)
         else:
             _LAN_LOGGER.debug(
-                "handshake: peer=%s time_1=%d looks like a monotonic counter "
-                "(uptime/ns), skipping wall-clock skew check (issue #10)",
+                "handshake: peer=%s time_1=%d looks non-wallclock/hybrid, "
+                "skipping wall-clock skew check",
                 peer,
                 time_1,
             )
@@ -651,6 +657,18 @@ class DeLonghiLanServer:
             return web.json_response({"error": "crypto"}, status=400)
 
         async with self._lock:
+            seen = self._seen_handshake_pairs.setdefault(peer_norm, {})
+            pair = (random_1, time_1)
+            if pair in seen:
+                _LAN_LOGGER.warning(
+                    "handshake: reject exact replay from peer=%s time_1=%d",
+                    peer,
+                    time_1,
+                )
+                return web.json_response({"error": "replay"}, status=400)
+            seen[pair] = None
+            while len(seen) > MAX_REMEMBERED_HANDSHAKES_PER_PEER:
+                del seen[next(iter(seen))]
             self._session = session
             self._seq = 0
             self._last_handshake_time1[peer_norm] = time_1

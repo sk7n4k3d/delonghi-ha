@@ -1132,9 +1132,8 @@ def test_handshake_accepts_primadonna_soul_uptime_time1() -> None:
 
 
 @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
-def test_handshake_uptime_time1_still_enforces_anti_replay() -> None:
-    """A non-wallclock time_1 must still ratchet — earlier values are rejected
-    even when they pass the skew check (because there is no skew check)."""
+def test_handshake_accepts_nonmonotonic_uptime_time1() -> None:
+    """A fresh non-wallclock handshake may have a lower numeric time_1."""
     from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
 
     config = LanServerConfig(
@@ -1149,11 +1148,12 @@ def test_handshake_uptime_time1_still_enforces_anti_replay() -> None:
         first = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=200_000_000_000_000)))
         assert first.status == 202
 
-        # An earlier uptime value (older boot snapshot, captured replay) → 400.
-        replay = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=199_999_999_999_999)))
-        assert replay.status == 400
+        # Distinct random_1 means this is a new handshake; the counter may
+        # have reset or rolled over, so numerical rollback alone is not replay.
+        reset = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=123_451_795_413)))
+        assert reset.status == 202
 
-        # A later uptime value advances the ratchet.
+        # A later value remains accepted as well.
         progress = await server._handle_handshake(_MockRequest(_make_handshake_body(time_1=200_000_000_000_001)))
         assert progress.status == 202
 
@@ -1186,17 +1186,14 @@ def test_handshake_still_rejects_wallclock_skew_replay() -> None:
 
 @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
 def test_handshake_replay_floor_is_per_peer_not_global() -> None:
-    """H-coffee-4: ``_last_handshake_time1`` is keyed by peer.
+    """H-coffee-4: wall-clock rollback state remains keyed by peer.
 
     Earlier behaviour stored a single global integer. A rogue peer
-    inside the allowlist (e.g. via ARP spoofing the device IP, or via
-    a misconfigured 2nd HA install on the LAN) could send a handshake
-    with ``time_1 = 2**31 - 1`` and pin the floor at int max — the
-    legitimate device's smaller ``time_1`` was then permanently rejected
-    as 'stale' until the integration reloaded.
+    inside the allowlist could establish a later but still in-skew wall
+    clock value and reject another peer's legitimate earlier timestamp.
 
-    Fix: track the floor per peer. A rogue peer's bad floor only locks
-    out itself; the real device keeps its own ratchet.
+    The floor is tracked per peer so the rogue timestamp cannot block the
+    real device.
     """
     from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
 
@@ -1211,33 +1208,35 @@ def test_handshake_replay_floor_is_per_peer_not_global() -> None:
     server = DeLonghiLanServer(config)
 
     async def run() -> None:
-        # Rogue peer pins its own floor sky-high. Use the non-wallclock
-        # range (≥ 5e9) so the wall-clock skew check is skipped — same
-        # path PrimaDonna Soul firmware lands on (uptime-style time_1).
-        rogue_body = _make_handshake_body(time_1=200_000_000_000_000)
+        import time as _time
+
+        now = int(_time.time())
+        # The rogue peer's timestamp is 100 seconds ahead, still within the
+        # configured 30-minute skew window, so it establishes a floor.
+        rogue_body = _make_handshake_body(time_1=now + 100)
         resp_rogue = await server._handle_handshake(_MockRequest(rogue_body, remote="192.168.1.99"))
         assert resp_rogue.status == 202
 
-        # The legitimate device sends its own (smaller) uptime-style
+        # The legitimate device sends its own (smaller) wall-clock
         # time_1 and is accepted — its floor is independent of the rogue
-        # peer's. Pre-fix: rogue floor of 2e14 would block this 1e14.
-        device_body = _make_handshake_body(time_1=100_000_000_000_000)
+        # peer's. Both values remain within the configured clock-skew window.
+        device_body = _make_handshake_body(time_1=now)
         resp_device = await server._handle_handshake(_MockRequest(device_body, remote="192.168.1.42"))
         assert resp_device.status == 202, f"Per-peer ratchet broken: device rejected at status={resp_device.status}"
 
-        # Both ratchets are recorded.
+        # Both per-peer timestamps are recorded.
         assert "192.168.1.99" in server._last_handshake_time1
         assert "192.168.1.42" in server._last_handshake_time1
         # And they are independent values.
-        assert server._last_handshake_time1["192.168.1.99"] == 200_000_000_000_000
-        assert server._last_handshake_time1["192.168.1.42"] == 100_000_000_000_000
+        assert server._last_handshake_time1["192.168.1.99"] == now + 100
+        assert server._last_handshake_time1["192.168.1.42"] == now
 
     asyncio.run(run())
 
 
 @pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
 def test_handshake_replay_within_same_peer_still_rejected() -> None:
-    """Per-peer ratchet must still reject a replay against THE SAME peer."""
+    """The exact accepted key-exchange pair is rejected if replayed."""
     from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
 
     config = LanServerConfig(
@@ -1250,15 +1249,52 @@ def test_handshake_replay_within_same_peer_still_rejected() -> None:
     server = DeLonghiLanServer(config)
 
     async def run() -> None:
+        captured = _make_handshake_body(time_1=200_000_000_000_000)
         first = await server._handle_handshake(
-            _MockRequest(_make_handshake_body(time_1=200_000_000_000_000), remote="192.168.1.42")
+            _MockRequest(captured, remote="192.168.1.42")
         )
         assert first.status == 202
 
-        # Replay with smaller time_1 from the SAME peer must reject.
+        # Both nonce and time are byte-for-byte the same as the accepted pair.
         replay = await server._handle_handshake(
-            _MockRequest(_make_handshake_body(time_1=199_999_999_999_999), remote="192.168.1.42")
+            _MockRequest(captured, remote="192.168.1.42")
         )
         assert replay.status == 400
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(not _HAS_AIOHTTP, reason="aiohttp not installed")
+def test_handshake_accepts_time1_digit_boundary_sequence_issue_97() -> None:
+    """The reported uptime+Unix concatenation rollover is not a replay."""
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    server = DeLonghiLanServer(
+        LanServerConfig(
+            dsn="DSN-ISSUE-97",
+            lan_key="0123456789abcdef0123456789abcdef",
+            advertised_ip="127.0.0.1",
+            bind_host="127.0.0.1",
+            allowed_peers=frozenset({"192.168.1.42"}),
+        )
+    )
+
+    async def run() -> None:
+        for time_1 in (
+            997_548_051_795_412,
+            100_374_862_179_541,
+            111_955_261_179_542,
+        ):
+            response = await server._handle_handshake(
+                _MockRequest(_make_handshake_body(time_1=time_1), remote="192.168.1.42")
+            )
+            assert response.status == 202, f"time_1={time_1} rejected: {response.status}"
+
+        # The following value models a reboot: the uptime prefix is small,
+        # while the wall-clock prefix has advanced.
+        rebooted = await server._handle_handshake(
+            _MockRequest(_make_handshake_body(time_1=123_451_795_413), remote="192.168.1.42")
+        )
+        assert rebooted.status == 202
 
     asyncio.run(run())
