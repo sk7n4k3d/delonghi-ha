@@ -631,8 +631,7 @@ class DeLonghiLanServer:
                 return web.json_response({"error": "clock_skew"}, status=400)
         else:
             _LAN_LOGGER.debug(
-                "handshake: peer=%s time_1=%d looks non-wallclock/hybrid, "
-                "skipping wall-clock skew check",
+                "handshake: peer=%s time_1=%d looks non-wallclock/hybrid, skipping wall-clock skew check",
                 peer,
                 time_1,
             )

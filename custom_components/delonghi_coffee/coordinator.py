@@ -1233,9 +1233,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("lan_session_alive probe failed", exc_info=True)
             return False
 
-    async def send_command_lan(
-        self, ecam_bytes: bytes, *, return_fetch_event: bool = False
-    ) -> bool | asyncio.Event:
+    async def send_command_lan(self, ecam_bytes: bytes, *, return_fetch_event: bool = False) -> bool | asyncio.Event:
         """Enqueue an ECAM command for delivery on the next device LAN poll.
 
         Returns True when the LAN session is active and the command was

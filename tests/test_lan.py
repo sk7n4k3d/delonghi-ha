@@ -1250,15 +1250,11 @@ def test_handshake_replay_within_same_peer_still_rejected() -> None:
 
     async def run() -> None:
         captured = _make_handshake_body(time_1=200_000_000_000_000)
-        first = await server._handle_handshake(
-            _MockRequest(captured, remote="192.168.1.42")
-        )
+        first = await server._handle_handshake(_MockRequest(captured, remote="192.168.1.42"))
         assert first.status == 202
 
         # Both nonce and time are byte-for-byte the same as the accepted pair.
-        replay = await server._handle_handshake(
-            _MockRequest(captured, remote="192.168.1.42")
-        )
+        replay = await server._handle_handshake(_MockRequest(captured, remote="192.168.1.42"))
         assert replay.status == 400
 
     asyncio.run(run())
