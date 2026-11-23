@@ -413,7 +413,7 @@ class DeLonghiLanServer:
         # is_session_alive).
         self._last_activity: float | None = None
         self._seq = 0
-        self._pending: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._pending: asyncio.Queue[tuple[dict[str, Any], asyncio.Event]] = asyncio.Queue()
         self._app: Any | None = None
         self._runner: Any | None = None
         self._site: Any | None = None
@@ -495,9 +495,11 @@ class DeLonghiLanServer:
     def port(self) -> int:
         return self._config.port
 
-    async def enqueue_command(self, data: dict[str, Any]) -> None:
-        """Queue an ECAM command body (dict) to be served on the next poll."""
-        await self._pending.put(data)
+    async def enqueue_command(self, data: dict[str, Any]) -> asyncio.Event:
+        """Queue a command and return an event set when the machine fetches it."""
+        fetched = asyncio.Event()
+        await self._pending.put((data, fetched))
+        return fetched
 
     async def start(self) -> None:
         """Bind and start the embedded server."""
@@ -695,15 +697,16 @@ class DeLonghiLanServer:
                 return web.json_response({"enc": "", "sign": "", "seq": self._seq})
             self._last_activity = time.monotonic()
             try:
-                data = self._pending.get_nowait()
+                queued = self._pending.get_nowait()
             except asyncio.QueueEmpty:
-                data = None
+                queued = None
             self._seq += 1
             current_seq = self._seq
 
-            if data is None:
+            if queued is None:
                 payload = build_heartbeat_payload(current_seq)
             else:
+                data, fetched = queued
                 payload = build_command_payload(current_seq, data)
 
             try:
@@ -711,6 +714,9 @@ class DeLonghiLanServer:
             except Exception as err:  # noqa: BLE001 — never 500 the device
                 _LOGGER.error("LAN command poll: encrypt failed: %s", err)
                 return web.json_response({"enc": "", "sign": "", "seq": current_seq})
+
+            if queued is not None:
+                fetched.set()
 
         return web.json_response({"enc": enc, "sign": sign, "seq": current_seq})
 

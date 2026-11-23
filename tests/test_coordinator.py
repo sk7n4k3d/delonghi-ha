@@ -1634,7 +1634,9 @@ class TestBrewDelivery:
         coord.api.parse_monitor_value = DeLonghiApi.parse_monitor_value
         coord._lan_properties = {"d302_monitor": LAN_READY}
         assert _run(coord.async_brew("espresso", 2)) is True
-        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0")
+        coord.send_command_lan.assert_awaited_once_with(
+            b"\x0d\x0f\x83\xf0", return_fetch_event=True
+        )
         api.send_command.assert_not_called()
 
     def test_cloud_fallback_when_lan_unavailable(self):
@@ -1656,7 +1658,7 @@ class TestBrewDelivery:
 
     def test_send_brew_command_lan_true_short_circuits(self):
         coord, api = self._brew_coord(True)
-        assert _run(coord.async_send_brew_command(b"\x01")) is True
+        assert _run(coord.async_send_brew_command(b"\x01"))[0] is True
         api.send_command.assert_not_called()
 
 
@@ -1682,6 +1684,19 @@ class TestBrewAck:
     def test_static_monitor_resends_once(self):
         coord, api = self._ack_coord()
         _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0"))
+        api.send_command.assert_called_once_with("DSN-1", b"\x0d\x0f\x83\xf0")
+
+    def test_lan_command_not_fetched_does_not_resend(self):
+        coord, api = self._ack_coord()
+        fetched = asyncio.Event()
+        _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0", fetched))
+        api.send_command.assert_not_called()
+
+    def test_fetched_lan_command_can_retry_when_monitor_stays_static(self):
+        coord, api = self._ack_coord()
+        fetched = asyncio.Event()
+        fetched.set()
+        _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0", fetched))
         api.send_command.assert_called_once_with("DSN-1", b"\x0d\x0f\x83\xf0")
 
     def test_moving_monitor_no_resend(self):
@@ -1710,7 +1725,9 @@ class TestBrewAck:
         coord, api = self._ack_coord()
         coord.send_command_lan = AsyncMock(return_value=True)
         _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0"))
-        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0")
+        coord.send_command_lan.assert_awaited_once_with(
+            b"\x0d\x0f\x83\xf0", return_fetch_event=True
+        )
         api.send_command.assert_not_called()
 
     def test_resend_error_is_swallowed(self):
@@ -1722,7 +1739,7 @@ class TestBrewAck:
         coord, api = self._ack_coord()
         coord._schedule_brew_ack = MagicMock()
         assert _run(coord.async_brew("espresso", 2)) is True
-        coord._schedule_brew_ack.assert_called_once_with(b"\x0d\x0f\x83\xf0")
+        coord._schedule_brew_ack.assert_called_once_with(b"\x0d\x0f\x83\xf0", None)
 
     def test_failed_send_does_not_arm_verifier(self):
         coord, api = self._ack_coord()

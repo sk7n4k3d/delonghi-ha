@@ -426,7 +426,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # ── brew delivery (issue #50) ──────────────────────────────────────
 
-    async def async_send_brew_command(self, brew_cmd: bytes) -> bool:
+    async def async_send_brew_command(self, brew_cmd: bytes) -> tuple[bool, asyncio.Event | None]:
         """Deliver a brew command on the LAN when the machine polls us.
 
         On DL-millcore (PrimaDonna Soul) the machine ignores the brew pushed
@@ -434,10 +434,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ECAM frame served on its LAN poll, so LAN wins whenever the session
         is alive. Cloud remains the fallback.
         """
-        if await self.send_command_lan(brew_cmd):
+        fetched = await self.send_command_lan(brew_cmd, return_fetch_event=True)
+        if fetched:
             _LOGGER.info("Brew command queued on LAN socket (cloud data_request skipped)")
-            return True
-        return await self.hass.async_add_executor_job(self.api.send_command, self.dsn, brew_cmd)
+            return True, fetched
+        sent = await self.hass.async_add_executor_job(self.api.send_command, self.dsn, brew_cmd)
+        return sent, None
 
     async def async_brew(self, beverage_key: str, profile: int) -> bool:
         """Build a brew command from the machine recipe and deliver it.
@@ -450,12 +452,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         brew_cmd = await self.hass.async_add_executor_job(
             self.api.build_brew_command, self.dsn, beverage_key, profile, status
         )
-        sent = await self.async_send_brew_command(brew_cmd)
+        sent, fetched = await self.async_send_brew_command(brew_cmd)
         if sent:
-            self._schedule_brew_ack(brew_cmd)
+            self._schedule_brew_ack(brew_cmd, fetched)
         return sent
 
-    def _schedule_brew_ack(self, brew_cmd: bytes) -> None:
+    def _schedule_brew_ack(self, brew_cmd: bytes, fetched: asyncio.Event | None = None) -> None:
         """Arm the #84 verify-and-retry watcher for a freshly sent brew.
 
         A new brew cancels a verifier still pending from a previous press,
@@ -464,11 +466,11 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._brew_ack_task is not None and not self._brew_ack_task.done():
             self._brew_ack_task.cancel()
         self._brew_ack_task = self.hass.async_create_background_task(
-            self._async_verify_brew_ack(brew_cmd),
+            self._async_verify_brew_ack(brew_cmd, fetched),
             name=f"delonghi_brew_ack_{self.dsn}",
         )
 
-    async def _async_verify_brew_ack(self, brew_cmd: bytes) -> None:
+    async def _async_verify_brew_ack(self, brew_cmd: bytes, fetched: asyncio.Event | None = None) -> None:
         """Resend a brew once if the machine never acknowledged it (issue #84).
 
         The cloud answers 201 as soon as it accepts the frame, but after
@@ -486,6 +488,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not baseline:
             _LOGGER.debug("Brew ack verify skipped: no monitor baseline to compare against")
             return
+        if fetched is not None:
+            try:
+                await asyncio.wait_for(fetched.wait(), timeout=self._brew_ack_timeout)
+            except TimeoutError:
+                # No machine poll fetched the queued command; re-queueing it
+                # could make a delayed first poll execute the brew twice.
+                return
         # Do not depend on the caller having armed fast polling: the verdict
         # needs the cloud pushes to actually reach self.data.
         self.request_fast_poll(
@@ -1224,7 +1233,9 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("lan_session_alive probe failed", exc_info=True)
             return False
 
-    async def send_command_lan(self, ecam_bytes: bytes) -> bool:
+    async def send_command_lan(
+        self, ecam_bytes: bytes, *, return_fetch_event: bool = False
+    ) -> bool | asyncio.Event:
         """Enqueue an ECAM command for delivery on the next device LAN poll.
 
         Returns True when the LAN session is active and the command was
@@ -1268,13 +1279,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     }
                 )
             payload = {"properties": props}
-            await server.enqueue_command(payload)
+            fetched = await server.enqueue_command(payload)
             _LAN_LOGGER.info(
                 "LAN command queued (both shapes): property=%s ecam=%s",
                 property_name,
                 ecam_bytes.hex(),
             )
-            return True
+            return fetched if return_fetch_event else True
 
         b64 = self.api._build_packet(ecam_bytes, include_app_id=include_app_id)  # noqa: SLF001
 
@@ -1290,14 +1301,14 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
             ]
         }
-        await server.enqueue_command(payload)
+        fetched = await server.enqueue_command(payload)
         _LAN_LOGGER.info(
             "LAN command queued: property=%s ecam=%s (app_id=%s)",
             property_name,
             ecam_bytes.hex(),
             include_app_id,
         )
-        return True
+        return fetched if return_fetch_event else True
 
     @staticmethod
     def _get_local_ip(device_ip: str) -> str | None:
