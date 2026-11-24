@@ -6,12 +6,9 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
-    # Dependabot bumps were skipped (bots skip bots by default) — review them
-    # too: a bad dependency pin is exactly where a second pair of eyes helps.
-    bot_title_patterns:
-      - "chore(deps):"
-      - "build(deps):"
-      - "Update .* requirements"
+    # Bot PRs (Dependabot bumps) are skipped by CodeRabbit and the schema has
+    # no key to opt them in (bot_title_patterns was invalid — removed). To get
+    # a second pair of eyes on a bump, comment "@coderabbitai review" on the PR.
   path_filters:
     - "!**/__pycache__/**"
     - "!**/brand/**"
