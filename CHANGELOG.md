@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 
 ## [Unreleased]
 
+## [1.9.13] — 2026-11-24
+
 ### Added
 
 - **Eletta Ultra : le compteur *Filter Coffee* a un nom (#86).** Sur une Eletta
@@ -18,6 +20,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), version
 - **PrimaDonna Aromatic ECAM63070 labels recipe 8 as Latte Macchiato.** One
   preparation increased only recipe 8 and the machine's overall brew count by one.
   Existing recipe 8 entities retain their IDs and history.
+
+- **Eletta Ultra : le compteur de recette 6 s'appelle *Americano* (#99).** Sur une
+  Eletta Ultra **ECAM47070** sous Daedalus v0.5.2, un *Americano* fait passer le
+  total de 90 à 91 et le compteur de recette **6** de 2 à 3 — vérification directe
+  du rapporteur. Libellés EN, FR et RO ajoutés, nom borné au modèle comme pour #86.
+
+### Fixed
+
+- **Un brew n'est plus renvoyé avant que la machine l'ait récupéré (#98).**
+
+- **Handshake LAN : le ratchet anti-replay accepte les `time_1` non-horloge (#97).**
+  Certains appareils envoient un `time_1` concaténant uptime-ms et secondes Unix
+  tronquées ; le franchissement d'un cap de chiffres de l'uptime faisait chuter la
+  valeur d'un facteur ~10 et le ratchet rejetait les handshakes légitimes
+  (579 rejets signalés, seul un redémarrage débloquait). Le ratchet numérique est
+  conservé pour les `time_1` horloge, remplacé par une déduplication exacte
+  `(random_1, time_1)` par pair sinon ; cloisonnement par pair préservé. Tests sur
+  la séquence exacte du rapporteur, redémarrage et vrai rejeu inclus.
 
 ## [1.9.12] — 2026-11-21
 
