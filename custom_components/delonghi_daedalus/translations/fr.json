@@ -255,6 +255,9 @@
       "recipe_filter_coffee_brew_count": {
         "name": "Nombre de préparations de Filter Coffee"
       },
+      "recipe_americano_brew_count": {
+        "name": "Nombre de préparations d'Americano"
+      },
       "recipe_cappuccino_brew_count": {
         "name": "Nombre de cappuccinos"
       },
