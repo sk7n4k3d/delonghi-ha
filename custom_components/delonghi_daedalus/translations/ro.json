@@ -255,6 +255,9 @@
       "recipe_filter_coffee_brew_count": {
         "name": "Număr de preparări de Filter Coffee"
       },
+      "recipe_americano_brew_count": {
+        "name": "Număr de preparări de Americano"
+      },
       "recipe_cappuccino_brew_count": {
         "name": "Număr de preparări de cappuccino"
       },

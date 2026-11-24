@@ -606,6 +606,23 @@ def test_recipe_3_filter_coffee_name_is_model_scoped(model, translation_key):
     assert recipe.native_value == 1
 
 
+def test_recipe_6_americano_name_on_eletta_ultra():
+    # Verified on an Eletta Ultra ECAM47070 by the reporter of #99: one Americano
+    # on Daedalus v0.5.2 moved the total (90 to 91) and recipe 6 alone (2 to 3).
+    coord = _FakeCoordinator(_cloud(recipe_brew_counts={6: 2}), model="ECAM47070")
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
+
+    assert recipe._attr_translation_key == "recipe_americano_brew_count"
+    assert recipe._attr_unique_id == "SN-TEST_recipe_6_brew_count"
+    assert recipe.suggested_object_id == "recipe_6_brew_count"
+    assert recipe.native_value == 2
+
+    coord.update(_cloud(recipe_brew_counts={6: 3}))
+    assert recipe.native_value == 3
+
+
 @pytest.mark.parametrize("directory_code", ["ECAM470.75.TXB", "ECAM47075", "ECAM47075TXB", "ECAM47070", "ECAM470.70"])
 def test_verified_directory_product_codes_reach_recipe_names(directory_code):
     (machine,) = _directory_machines([{"serialNumber": "SN-TEST", "machineModel": directory_code}])
