@@ -606,6 +606,44 @@ def test_recipe_3_filter_coffee_name_is_model_scoped(model, translation_key):
     assert recipe.native_value == 1
 
 
+@pytest.mark.parametrize(
+    ("model", "translation_key"),
+    [
+        ("ECAM47070", "recipe_flat_white_brew_count"),
+        ("ECAM470.70", "recipe_flat_white_brew_count"),
+        ("ECAM47075", "recipe_brew_count"),
+        ("ECAM63070", "recipe_brew_count"),
+        (None, "recipe_brew_count"),
+    ],
+)
+def test_recipe_10_flat_white_is_scoped_and_keeps_identity(model, translation_key):
+    coord = _FakeCoordinator(_cloud(recipe_brew_counts={10: 0}), model=model)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
+
+    assert recipe._attr_translation_key == translation_key
+    assert recipe._attr_unique_id == "SN-TEST_recipe_10_brew_count"
+    assert recipe.suggested_object_id == "recipe_10_brew_count"
+    assert recipe.native_value == 0
+    coord.update(_cloud(recipe_brew_counts={10: 1}))
+    assert recipe.native_value == 1
+
+
+@pytest.mark.parametrize(
+    ("translation_file", "expected"),
+    [
+        ("strings.json", "Flat White brew count"),
+        ("translations/en.json", "Flat White brew count"),
+        ("translations/fr.json", "Nombre de préparations de Flat White"),
+        ("translations/ro.json", "Număr de preparări de Flat White"),
+    ],
+)
+def test_recipe_10_flat_white_translation(translation_file, expected):
+    translations = json.loads((Path(sp.__file__).parent / translation_file).read_text(encoding="utf-8"))
+    assert translations["entity"]["sensor"]["recipe_flat_white_brew_count"]["name"] == expected
+
+
 def test_recipe_6_americano_name_on_eletta_ultra():
     # Verified on an Eletta Ultra ECAM47070 by the reporter of #99: one Americano
     # on Daedalus v0.5.2 moved the total (90 to 91) and recipe 6 alone (2 to 3).

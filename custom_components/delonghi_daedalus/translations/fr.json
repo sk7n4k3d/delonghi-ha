@@ -258,6 +258,9 @@
       "recipe_americano_brew_count": {
         "name": "Nombre de préparations d'Americano"
       },
+      "recipe_flat_white_brew_count": {
+        "name": "Nombre de préparations de Flat White"
+      },
       "recipe_cappuccino_brew_count": {
         "name": "Nombre de cappuccinos"
       },

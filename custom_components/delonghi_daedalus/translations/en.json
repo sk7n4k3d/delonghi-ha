@@ -258,6 +258,9 @@
       "recipe_americano_brew_count": {
         "name": "Americano brew count"
       },
+      "recipe_flat_white_brew_count": {
+        "name": "Flat White brew count"
+      },
       "recipe_cappuccino_brew_count": {
         "name": "Cappuccino brew count"
       },

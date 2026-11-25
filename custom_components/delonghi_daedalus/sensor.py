@@ -53,6 +53,8 @@ _PRIMADONNA_AROMATIC_RECIPE_NAMES = {
 }
 _RECIPE_NAMES_BY_MODEL = {
     **dict.fromkeys(_ELETTA_ULTRA_MODELS, _ELETTA_ULTRA_RECIPE_NAMES),
+    # ECAM47070 recipe 10 was verified as Flat White by the reporter of #102.
+    "ECAM47070": {**_ELETTA_ULTRA_RECIPE_NAMES, 10: "recipe_flat_white_brew_count"},
     "ECAM63070": _PRIMADONNA_AROMATIC_RECIPE_NAMES,
 }
 
