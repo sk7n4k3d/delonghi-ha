@@ -60,6 +60,7 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 try:  # aiohttp ships with Home Assistant; unit tests may run without it.
@@ -417,6 +418,7 @@ class DeLonghiLanServer:
         # from a device that silently dropped off the LAN (see
         # is_session_alive).
         self._last_activity: float | None = None
+        self.last_activity_utc: str | None = None
         self._seq = 0
         self._pending: asyncio.Queue[tuple[dict[str, Any], asyncio.Event]] = asyncio.Queue()
         self._app: Any | None = None
@@ -672,6 +674,7 @@ class DeLonghiLanServer:
             self._seq = 0
             self._last_handshake_time1[peer_norm] = time_1
             self._last_activity = time.monotonic()
+            self.last_activity_utc = datetime.now(UTC).isoformat()
 
         _LAN_LOGGER.info(
             "handshake ok (dsn=%s peer=%s time_1=%d time_2=%d)",
@@ -713,6 +716,7 @@ class DeLonghiLanServer:
             if session is None:
                 return web.json_response({"enc": "", "sign": "", "seq": self._seq})
             self._last_activity = time.monotonic()
+            self.last_activity_utc = datetime.now(UTC).isoformat()
             try:
                 queued = self._pending.get_nowait()
             except asyncio.QueueEmpty:
@@ -781,6 +785,7 @@ class DeLonghiLanServer:
             # stale (observed on ECAM610.75: pushes every 12s-minutes while
             # command polls aren't observable in logs, audit 2026-10-03).
             self._last_activity = time.monotonic()
+            self.last_activity_utc = datetime.now(UTC).isoformat()
 
         try:
             data = json.loads(plaintext.decode("utf-8"))

@@ -1597,6 +1597,22 @@ class TestLanMonitorOverlay:
         assert pushed["machine_state"] == "Off"
         assert pushed["lan_properties"]["d701_tot_bev_b"] == 42
 
+    def test_monitor_timestamp_only_advances_for_a_valid_applied_push(self):
+        coord, api = _lan_monitor_coord(LAN_READY)
+        api.parse_monitor_value = DeLonghiApi.parse_monitor_value
+        coord.data = {"machine_state": "Off"}
+        coord.async_set_updated_data = MagicMock()
+        assert coord.last_lan_monitor_utc is None
+        _run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": LAN_READY}}))
+        first = coord.last_lan_monitor_utc
+        assert first is not None and first.endswith("+00:00")
+        _run(coord._on_lan_property({"property": {"name": "d701_tot_bev_b", "value": 42}}))
+        _run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": "invalid"}}))
+        assert coord.last_lan_monitor_utc == first
+        coord._lan_server.is_session_alive = MagicMock(return_value=False)
+        _run(coord._on_lan_property({"property": {"name": "d302_monitor", "value": LAN_READY}}))
+        assert coord.last_lan_monitor_utc == first
+
     def test_async_get_status_overlays_lan(self):
         coord, api = _lan_monitor_coord(LAN_READY)
         self._cloud_stale(api)

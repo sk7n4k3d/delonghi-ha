@@ -6,7 +6,7 @@ import asyncio
 import socket
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Any
 
@@ -211,6 +211,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lan_open_pending_since: float = 0.0
         self._lan_no_handshake_warned: bool = False
         self._lan_properties: dict[str, Any] = {}
+        self.last_lan_monitor_utc: str | None = None
         # Fast-poll window: when a brew button is pressed the cloud Ayla
         # 60s polling rate misses the transient Brewing / Pre-brewing /
         # Frothing milk / Rinsing / Steaming states (each lasts ~10-30s).
@@ -1188,6 +1189,16 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 before = merged.get("machine_state")
                 overlay = self._lan_monitor_status()
                 if overlay:
+                    # Only a newly pushed, valid frame can advance this clock;
+                    # a stale cached frame reused by the overlay cannot.
+                    try:
+                        if any(
+                            name in LAN_MONITOR_PROPERTIES and value and self.api.parse_monitor_value(value) == overlay
+                            for name, value in cached
+                        ):
+                            self.last_lan_monitor_utc = datetime.now(UTC).isoformat()
+                    except Exception:  # noqa: BLE001 — diagnostics must not affect monitor handling
+                        _LOGGER.debug("LAN monitor timestamp skipped", exc_info=True)
                     merged = self._apply_lan_monitor_to_data(merged, overlay)
                     # A socket push is the freshest LAN evidence — it becomes
                     # the sticky overlay, so a later poll whose session went

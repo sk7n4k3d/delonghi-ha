@@ -763,6 +763,8 @@ def test_session_fresh_immediately_after_handshake() -> None:
 
     async def run() -> None:
         await server._handle_handshake(_MockRequest(_make_handshake_body()))
+        assert server.last_activity_utc is not None
+        assert server.last_activity_utc.endswith("+00:00")
         assert server.is_session_alive(max_age=30.0) is True
 
     asyncio.run(run())

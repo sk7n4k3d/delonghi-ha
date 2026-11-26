@@ -141,6 +141,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # API rate/total counters — diagnostic, disabled by default (issue #45).
     entities.append(DeLonghiApiUsageSensor(coordinator, dsn, model, device_name, sw_version))
+    entities.append(DeLonghiLanDiagnosticSensor(coordinator, dsn, model, device_name, sw_version))
 
     # Counter sensors — always create all; unsupported ones show as "unavailable"
     for key, meta in COUNTER_SENSORS.items():
@@ -249,6 +250,30 @@ class DeLonghiStatusSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity)
         if catalog:
             attrs["contentstack_drinks"] = len(catalog)
         return attrs
+
+
+class DeLonghiLanDiagnosticSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):
+    """Last applied LAN monitor and last LAN activity, for issue #97."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_has_entity_name = True
+    _attr_name = "LAN monitor diagnostic"
+    _attr_icon = "mdi:lan"
+
+    def __init__(self, coordinator, dsn, model, device_name, sw_version):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{dsn}_lan_monitor_diagnostic"
+        self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
+
+    @property
+    def native_value(self) -> str | None:
+        return self.coordinator.last_lan_monitor_utc
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        server = self.coordinator._lan_server  # noqa: SLF001
+        return {"last_lan_activity": server.last_activity_utc if server is not None else None}
 
 
 class DeLonghiApiUsageSensor(CoordinatorEntity[DeLonghiCoordinator], SensorEntity):

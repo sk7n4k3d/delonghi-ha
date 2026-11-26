@@ -26,6 +26,7 @@ from custom_components.delonghi_coffee.sensor import (
     DeLonghiBeanSensor,
     DeLonghiBlockingAlarmsSensor,
     DeLonghiCounterSensor,
+    DeLonghiLanDiagnosticSensor,
     DeLonghiProfileSensor,
     DeLonghiStatusSensor,
 )
@@ -188,6 +189,18 @@ class TestStatusSensor:
         assert attrs["alarm_count"] == 0
         # No lan_config block → no lan_enabled key
         assert "lan_enabled" not in attrs
+
+    def test_lan_diagnostic_is_disabled_and_separates_monitor_from_activity(self):
+        coord = MagicMock()
+        coord.last_lan_monitor_utc = "2026-11-26T01:00:00+00:00"
+        coord._lan_server.last_activity_utc = "2026-11-26T01:05:00+00:00"
+        sensor = DeLonghiLanDiagnosticSensor(coord, "DSN-X", "Eletta", "Coffee", None)
+        assert sensor._attr_entity_registry_enabled_default is False
+        assert sensor._attr_unique_id == "DSN-X_lan_monitor_diagnostic"
+        assert sensor.native_value == "2026-11-26T01:00:00+00:00"
+        assert sensor.extra_state_attributes["last_lan_activity"] == "2026-11-26T01:05:00+00:00"
+        coord._lan_server = None
+        assert sensor.extra_state_attributes["last_lan_activity"] is None
 
     def test_extra_state_attributes_expose_no_api_counters(self):
         """Issue #45: per-poll counters must not live on the status sensor.
@@ -661,9 +674,9 @@ class TestSetupEntry:
         async_add = MagicMock(side_effect=lambda ents: added.extend(ents))
         asyncio.run(sensor_mod.async_setup_entry(hass, entry, async_add))
 
-        # 5 named sensors (Status, Profile, Bean, BlockingAlarms, ApiUsage)
+        # 6 named sensors (Status, Profile, Bean, BlockingAlarms, ApiUsage, LAN diagnostic)
         # + every counter
-        assert len(added) == 5 + len(COUNTER_SENSORS)
+        assert len(added) == 6 + len(COUNTER_SENSORS)
         kinds = {type(e).__name__ for e in added}
         assert {
             "DeLonghiStatusSensor",
@@ -671,6 +684,7 @@ class TestSetupEntry:
             "DeLonghiBeanSensor",
             "DeLonghiBlockingAlarmsSensor",
             "DeLonghiApiUsageSensor",
+            "DeLonghiLanDiagnosticSensor",
         } <= kinds
         assert sum(1 for e in added if isinstance(e, DeLonghiCounterSensor)) == len(COUNTER_SENSORS)
 
