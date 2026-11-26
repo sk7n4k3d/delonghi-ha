@@ -10,12 +10,9 @@ Owners of other De’Longhi machines have also reported using Italy during setup
 
 ## Install in Home Assistant
 
-Install **De’Longhi My Coffee Lounge** from the [distribution repository](https://github.com/sk7n4k3d/delonghi-daedalus-ha).
+Search for **De'Longhi My Coffee Lounge (Daedalus)** in the built-in **Marketplace** on Home Assistant **2026.11 and later**, or in **HACS** on earlier supported versions. Store shortcuts and manual installation steps are in the [distribution repository's installation guide](https://github.com/sk7n4k3d/delonghi-daedalus-ha#installation).
 
-- On Home Assistant **2026.11 and later**, open **Settings → Marketplace → Add from link** and add the distribution repository. The Marketplace requires a connected GitHub account for custom repositories and prompts you to connect if needed. Open the repository in Marketplace and select **Install**. [Home Assistant Marketplace documentation](https://www.home-assistant.io/integrations/marketplace/#custom-repositories)
-- On earlier versions, open **HACS → Custom repositories**, add the distribution repository as an **Integration**, and download it from HACS.
-
-Restart Home Assistant and open **Settings → Devices & services → Add integration**.
+Follow the Marketplace setup prompt, or restart Home Assistant first if you installed through HACS or manually. To start setup later, open **Settings → Devices & services → Add integration** and select **De'Longhi My Coffee Lounge**.
 
 1. Sign in to the account used in My Coffee Lounge. Enable cloud telemetry to show the operating state, alarms and device capabilities reported by the machine, or to continue without local access.
 2. Select the machine that belongs in Home Assistant. The picker includes machines the account can access. If the directory is temporarily unavailable, the setup flow offers manual entry.
