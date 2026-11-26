@@ -79,6 +79,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 #
 # Both names point at the same logger; _LAN_LOGGER exists so the namespace
 # is obvious to readers.
+from .const import LAN_SESSION_STALE_SECONDS
 from .logger import get_logger
 
 _LOGGER = get_logger(__name__)
@@ -418,6 +419,7 @@ class DeLonghiLanServer:
         # from a device that silently dropped off the LAN (see
         # is_session_alive).
         self._last_activity: float | None = None
+        self._activity_epoch = 0
         self.last_activity_utc: str | None = None
         self._seq = 0
         self._pending: asyncio.Queue[tuple[dict[str, Any], asyncio.Event]] = asyncio.Queue()
@@ -473,6 +475,19 @@ class DeLonghiLanServer:
         self._session = None
         self._seq = 0
         self._last_activity = 0.0
+        self._activity_epoch += 1
+
+    @property
+    def activity_epoch(self) -> int:
+        """Identify interruptions in the LAN session and its activity."""
+        return self._activity_epoch
+
+    def _record_activity(self) -> None:
+        now = time.monotonic()
+        if self._last_activity is not None and now - self._last_activity > LAN_SESSION_STALE_SECONDS:
+            self._activity_epoch += 1
+        self._last_activity = now
+        self.last_activity_utc = datetime.now(UTC).isoformat()
 
     @property
     def has_pending(self) -> bool:
@@ -503,9 +518,10 @@ class DeLonghiLanServer:
     def port(self) -> int:
         return self._config.port
 
-    async def enqueue_command(self, data: dict[str, Any]) -> asyncio.Event:
+    async def enqueue_command(self, data: dict[str, Any], *, fetched: asyncio.Event | None = None) -> asyncio.Event:
         """Queue a command and return an event set when the machine fetches it."""
-        fetched = asyncio.Event()
+        if fetched is None:
+            fetched = asyncio.Event()
         await self._pending.put((data, fetched))
         return fetched
 
@@ -671,10 +687,10 @@ class DeLonghiLanServer:
             while len(seen) > MAX_REMEMBERED_HANDSHAKES_PER_PEER:
                 del seen[next(iter(seen))]
             self._session = session
+            self._activity_epoch += 1
             self._seq = 0
             self._last_handshake_time1[peer_norm] = time_1
-            self._last_activity = time.monotonic()
-            self.last_activity_utc = datetime.now(UTC).isoformat()
+            self._record_activity()
 
         _LAN_LOGGER.info(
             "handshake ok (dsn=%s peer=%s time_1=%d time_2=%d)",
@@ -715,14 +731,19 @@ class DeLonghiLanServer:
             session = self._session
             if session is None:
                 return web.json_response({"enc": "", "sign": "", "seq": self._seq})
-            self._last_activity = time.monotonic()
-            self.last_activity_utc = datetime.now(UTC).isoformat()
+            self._record_activity()
             try:
                 queued = self._pending.get_nowait()
             except asyncio.QueueEmpty:
                 queued = None
             self._seq += 1
             current_seq = self._seq
+
+            if queued is not None:
+                _, fetched = queued
+                valid = getattr(fetched, "should_deliver", None)
+                if valid is not None and not valid():
+                    queued = None
 
             if queued is None:
                 payload = build_heartbeat_payload(current_seq)
@@ -784,8 +805,7 @@ class DeLonghiLanServer:
             # is_session_alive() doesn't declare a live-but-pushing device
             # stale (observed on ECAM610.75: pushes every 12s-minutes while
             # command polls aren't observable in logs, audit 2026-10-03).
-            self._last_activity = time.monotonic()
-            self.last_activity_utc = datetime.now(UTC).isoformat()
+            self._record_activity()
 
         try:
             data = json.loads(plaintext.decode("utf-8"))

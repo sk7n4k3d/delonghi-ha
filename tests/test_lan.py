@@ -1296,3 +1296,42 @@ def test_handshake_accepts_time1_digit_boundary_sequence_issue_97() -> None:
         assert rebooted.status == 202
 
     asyncio.run(run())
+
+
+def test_invalidated_retry_is_not_delivered_on_next_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A queued alternate cannot brew after its safety witness changes."""
+    from custom_components.delonghi_coffee import lan as lan_module
+    from custom_components.delonghi_coffee.coordinator import BrewReceipt
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    server = DeLonghiLanServer(LanServerConfig(dsn="DSN", lan_key=_LAN_KEY, advertised_ip="127.0.0.1"))
+    server._session = _make_session()
+    received = []
+    monkeypatch.setattr(
+        lan_module, "encrypt_app_to_device", lambda _session, payload: (received.append(payload) or "x", "y")
+    )
+
+    async def run():
+        receipt = BrewReceipt(False, lambda _receipt: None, lambda: False)
+        await server.enqueue_command({"properties": [{"property": {"value": "brew"}}]}, fetched=receipt)
+        await server._handle_command_poll(_MockRequest())
+        assert received == [build_heartbeat_payload(1)]
+        assert not receipt.is_set()
+        assert not server.has_pending
+
+    asyncio.run(run())
+
+
+def test_session_activity_epoch_changes_after_stale_gap(monkeypatch: pytest.MonkeyPatch) -> None:
+    from custom_components.delonghi_coffee import lan as lan_module
+    from custom_components.delonghi_coffee.const import LAN_SESSION_STALE_SECONDS
+    from custom_components.delonghi_coffee.lan import DeLonghiLanServer, LanServerConfig
+
+    server = DeLonghiLanServer(LanServerConfig(dsn="DSN", lan_key=_LAN_KEY, advertised_ip="127.0.0.1"))
+    clock = [1000.0]
+    monkeypatch.setattr(lan_module.time, "monotonic", lambda: clock[0])
+    server._record_activity()
+    epoch = server.activity_epoch
+    clock[0] += LAN_SESSION_STALE_SECONDS + 1
+    server._record_activity()
+    assert server.activity_epoch == epoch + 1

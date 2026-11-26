@@ -105,6 +105,39 @@ def _auto_target_from(cloud: Any, monitor: Any) -> int | None:
     return None
 
 
+class BrewReceipt(asyncio.Event):
+    """Capture the observation baseline at the exact LAN command poll."""
+
+    def __init__(self, shape: bool, snapshot: Callable[[BrewReceipt], None], valid: Callable[[], bool] | None = None):
+        super().__init__()
+        self.shape = shape
+        self._snapshot = snapshot
+        self._valid = valid
+        self.polled_at = 0.0
+        self.session: Any = None
+        self.epoch: int | None = None
+        self.monitor_raw: str | None = None
+        self.response: Any = None
+        self.last_ready_at = 0.0
+        self.accepted = False
+        self.ambiguous = False
+        self.retry_queued = False
+
+    def should_deliver(self) -> bool:
+        try:
+            return self._valid is None or self._valid()
+        except Exception:  # noqa: BLE001
+            return False
+
+    def set(self) -> None:
+        if not self.is_set():
+            try:
+                self._snapshot(self)
+            except Exception:  # noqa: BLE001
+                self.ambiguous = True
+        super().set()
+
+
 class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator to fetch data from De'Longhi machine.
 
@@ -166,6 +199,12 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._brew_ack_task: asyncio.Task | None = None
         self._brew_ack_timeout: float = BREW_ACK_TIMEOUT
         self._brew_ack_poll: float = BREW_ACK_POLL
+        self._shape_ack_timeout: float = 45.0
+        self._shape_ack_poll: float = 1.0
+        self._active_shape_receipt: BrewReceipt | None = None
+        stored_shapes = config_entry.data.get("lan_brew_shapes", {}) if config_entry else {}
+        stored_shape = stored_shapes.get(dsn) if isinstance(stored_shapes, dict) else None
+        self._lan_brew_shape = stored_shape if isinstance(stored_shape, bool) else False
         # Issue #78 / PR #79 review — two separate things, never conflated:
         #
         # ``selected_profile`` is the user's EXPLICIT choice only: restored from
@@ -435,7 +474,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ECAM frame served on its LAN poll, so LAN wins whenever the session
         is alive. Cloud remains the fallback.
         """
-        fetched = await self.send_command_lan(brew_cmd, return_fetch_event=True)
+        fetched = await self.send_command_lan(brew_cmd, return_fetch_event=True, brew=True)
         if fetched:
             _LOGGER.info("Brew command queued on LAN socket (cloud data_request skipped)")
             return True, fetched
@@ -466,8 +505,13 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if self._brew_ack_task is not None and not self._brew_ack_task.done():
             self._brew_ack_task.cancel()
+        verifier = (
+            self._async_verify_lan_shape(brew_cmd, fetched)
+            if isinstance(fetched, BrewReceipt)
+            else self._async_verify_brew_ack(brew_cmd, fetched)
+        )
         self._brew_ack_task = self.hass.async_create_background_task(
-            self._async_verify_brew_ack(brew_cmd, fetched),
+            verifier,
             name=f"delonghi_brew_ack_{self.dsn}",
         )
 
@@ -515,6 +559,117 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.async_send_brew_command(brew_cmd)
         except (DeLonghiApiError, DeLonghiAuthError) as err:
             _LOGGER.warning("Brew resend failed: %s", sanitize(err))
+
+    def _snapshot_brew_receipt(self, receipt: BrewReceipt) -> None:
+        server = self._lan_server
+        receipt.polled_at = monotonic()
+        receipt.session = server.session if server is not None else None
+        receipt.epoch = server.activity_epoch if server is not None else None
+        status = self._lan_monitor_status()
+        receipt.monitor_raw = status.get("monitor_raw") if status else None
+        receipt.response = self._lan_properties.get("data_response")
+        receipt.ambiguous = (
+            receipt.session is None
+            or not status
+            or status.get("machine_state") != "Ready"
+            or not receipt.monitor_raw
+            or receipt.response is None
+        )
+        self._active_shape_receipt = receipt
+
+    def _observe_brew_receipt(self, name: str, value: Any) -> None:
+        receipt = self._active_shape_receipt
+        if receipt is None or not receipt.is_set():
+            return
+        if monotonic() - receipt.polled_at > self._shape_ack_timeout:
+            receipt.ambiguous = True
+            return
+        if name in {"data_response", "app_data_response"}:
+            if value is None or value == receipt.response or monotonic() - receipt.polled_at > 5:
+                receipt.ambiguous = True
+            else:
+                receipt.accepted = True
+        elif name in LAN_MONITOR_PROPERTIES:
+            try:
+                status = self.api.parse_monitor_value(value) if value else None
+            except Exception:  # noqa: BLE001
+                status = None
+            if not isinstance(status, dict) or not status.get("monitor_raw"):
+                receipt.ambiguous = True
+            elif status.get("machine_state") != "Ready":
+                receipt.accepted = True
+            elif status.get("monitor_raw") != receipt.monitor_raw:
+                receipt.ambiguous = True
+            else:
+                receipt.last_ready_at = monotonic()
+        if receipt.accepted and not receipt.ambiguous:
+            self._remember_brew_shape(receipt.shape)
+
+    def _remember_brew_shape(self, shape: bool) -> None:
+        self._lan_brew_shape = shape
+        entry = getattr(self, "config_entry", None)
+        if entry is None:
+            return
+        shapes = entry.data.get("lan_brew_shapes", {})
+        shapes = dict(shapes) if isinstance(shapes, dict) else {}
+        if shapes.get(self.dsn) is shape:
+            return
+        shapes[self.dsn] = shape
+        try:
+            self.hass.config_entries.async_update_entry(entry, data={**entry.data, "lan_brew_shapes": shapes})
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("Could not persist LAN brew shape", exc_info=True)
+
+    def _shape_retry_allowed(self, receipt: BrewReceipt) -> bool:
+        server = self._lan_server
+        if receipt.accepted or receipt.ambiguous or not receipt.is_set() or server is None:
+            return False
+        data = getattr(self, "data", None) or {}
+        if data.get("machine_state") not in (None, "Ready"):
+            return False
+        if data.get("monitor_raw") not in (None, receipt.monitor_raw):
+            return False
+        if (
+            server.session is not receipt.session
+            or server.activity_epoch != receipt.epoch
+            or not self.lan_session_alive()
+        ):
+            return False
+        status = self._lan_monitor_status()
+        return bool(
+            status
+            and status.get("machine_state") == "Ready"
+            and status.get("monitor_raw") == receipt.monitor_raw
+            and receipt.last_ready_at > receipt.polled_at
+            and monotonic() - receipt.last_ready_at <= 15
+        )
+
+    async def _async_verify_lan_shape(self, brew_cmd: bytes, receipt: BrewReceipt) -> None:
+        try:
+            await asyncio.wait_for(receipt.wait(), timeout=self._shape_ack_timeout)
+        except TimeoutError:
+            return
+        deadline = receipt.polled_at + self._shape_ack_timeout
+        while monotonic() < deadline:
+            data = getattr(self, "data", None) or {}
+            if data.get("machine_state") not in (None, "Ready") or data.get("monitor_raw") not in (
+                None,
+                receipt.monitor_raw,
+            ):
+                receipt.ambiguous = True
+            if receipt.accepted or receipt.ambiguous or not self.lan_session_alive():
+                return
+            await asyncio.sleep(min(self._shape_ack_poll, max(0, deadline - monotonic())))
+        if receipt.retry_queued or not self._shape_retry_allowed(receipt):
+            return
+        receipt.retry_queued = True
+        await self.send_command_lan(
+            brew_cmd,
+            return_fetch_event=True,
+            brew=True,
+            shape=not receipt.shape,
+            retry_guard=lambda: self._shape_retry_allowed(receipt),
+        )
 
     def mark_profile_selection(self, pid: int) -> None:
         """Record an HA-side profile selection (called by select.py).
@@ -1172,6 +1327,7 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 cached.append((p["name"], p.get("value")))
 
         for name, value in cached:
+            self._observe_brew_receipt(name, value)
             self._lan_properties[name] = value
             _LAN_LOGGER.info("LAN property: %s = %s", name, value)
 
@@ -1244,7 +1400,15 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("lan_session_alive probe failed", exc_info=True)
             return False
 
-    async def send_command_lan(self, ecam_bytes: bytes, *, return_fetch_event: bool = False) -> bool | asyncio.Event:
+    async def send_command_lan(
+        self,
+        ecam_bytes: bytes,
+        *,
+        return_fetch_event: bool = False,
+        brew: bool = False,
+        shape: bool | None = None,
+        retry_guard: Callable[[], bool] | None = None,
+    ) -> bool | asyncio.Event:
         """Enqueue an ECAM command for delivery on the next device LAN poll.
 
         Returns True when the LAN session is active and the command was
@@ -1265,14 +1429,25 @@ class DeLonghiCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return False
 
+        if self._active_shape_receipt is not None and retry_guard is None:
+            self._active_shape_receipt.ambiguous = True
         include_app_id = self.api._cmd_property != "data_request"  # noqa: SLF001
         property_name = self.api._cmd_property or "app_data_request"  # noqa: SLF001
 
-        # data_request family (PD Soul / millcore): two firmware variants
-        # observed in the wild act on OPPOSITE packet shapes (issues #10 vs
-        # #34) and the machine polls its command queue infrequently — we
-        # enqueue BOTH shapes so whichever firmware polls gets the one it
-        # understands. Each firmware's strict ECAM parser ignores the other.
+        # A brew is non-idempotent: some firmware executes both shapes.
+        # Other commands retain the compatibility pair used since #10/#34.
+        if self.api._cmd_property == "data_request" and brew:  # noqa: SLF001
+            selected = self._lan_brew_shape if shape is None else shape
+            receipt = BrewReceipt(selected, self._snapshot_brew_receipt, retry_guard)
+            b64 = self.api._build_packet(ecam_bytes, include_app_id=selected)  # noqa: SLF001
+            payload = {
+                "properties": [
+                    {"property": {"base_type": "string", "dsn": self.dsn, "name": property_name, "value": b64}}
+                ]
+            }
+            await server.enqueue_command(payload, fetched=receipt)
+            return receipt if return_fetch_event else True
+
         if self.api._cmd_property == "data_request":  # noqa: SLF001
             props = []
             for app_id_flag in (False, True):

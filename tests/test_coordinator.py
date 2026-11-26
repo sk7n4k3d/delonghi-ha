@@ -1650,7 +1650,7 @@ class TestBrewDelivery:
         coord.api.parse_monitor_value = DeLonghiApi.parse_monitor_value
         coord._lan_properties = {"d302_monitor": LAN_READY}
         assert _run(coord.async_brew("espresso", 2)) is True
-        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0", return_fetch_event=True)
+        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0", return_fetch_event=True, brew=True)
         api.send_command.assert_not_called()
 
     def test_cloud_fallback_when_lan_unavailable(self):
@@ -1739,7 +1739,7 @@ class TestBrewAck:
         coord, api = self._ack_coord()
         coord.send_command_lan = AsyncMock(return_value=True)
         _run(coord._async_verify_brew_ack(b"\x0d\x0f\x83\xf0"))
-        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0", return_fetch_event=True)
+        coord.send_command_lan.assert_awaited_once_with(b"\x0d\x0f\x83\xf0", return_fetch_event=True, brew=True)
         api.send_command.assert_not_called()
 
     def test_resend_error_is_swallowed(self):
