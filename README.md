@@ -12,10 +12,16 @@
 Home Assistant custom integration for Wi-Fi-enabled De'Longhi coffee machines, including the Eletta Explore and PrimaDonna Soul, via the De'Longhi Coffee Link cloud API.
 
 > 🆕 **For Eletta Ultra and PrimaDonna Aromatic machines using My Coffee Lounge** (Daedalus stack), see the companion repo
-> [`sk7n4k3d/delonghi-daedalus-ha`](https://github.com/sk7n4k3d/delonghi-daedalus-ha) — different cloud
-> stack (Gigya + AWS IoT instead of Ayla), shipped as a separate HACS repository because the two
-> stacks share nothing at the wire-protocol level. Source code lives in this monorepo under
-> `custom_components/delonghi_daedalus/`; the other repo is a packaging mirror.
+> [`sk7n4k3d/delonghi-daedalus-ha`](https://github.com/sk7n4k3d/delonghi-daedalus-ha).
+> Search for **De'Longhi My Coffee Lounge (Daedalus)** in the default catalog of Home Assistant's
+> built-in Marketplace (2026.11 and later) or HACS (earlier versions).
+>
+> [![Open Daedalus in Marketplace][daedalus-marketplace-badge]][daedalus-marketplace]
+>
+> [Open Daedalus in HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=sk7n4k3d&repository=delonghi-daedalus-ha&category=integration)
+>
+> Daedalus uses a separate protocol based on Gigya and AWS IoT. Its source code lives in this
+> monorepo under `custom_components/delonghi_daedalus/`, and the companion repo packages its releases.
 >
 > Daedalus ≥ 0.4.0 optional **cloud telemetry** (read-only, opt-in) maps the known AWS shadow
 > fields to named entities (EN/FR/RO) — alarms surface as `binary_sensor` (`problem`). Field mapping
@@ -514,3 +520,6 @@ automation:
 ## License
 
 MIT
+
+[daedalus-marketplace-badge]: https://my.home-assistant.io/badges/marketplace_repository.svg
+[daedalus-marketplace]: https://my.home-assistant.io/redirect/marketplace_repository/?owner=sk7n4k3d&repository=delonghi-daedalus-ha&category=integration
