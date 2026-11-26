@@ -282,6 +282,9 @@
       "recipe_iced_cappuccino_brew_count": {
         "name": "Nombre de cappuccinos glacés"
       },
+      "recipe_caffelatte_brew_count": {
+        "name": "Nombre de caffelattés"
+      },
       "recipe_iced_latte_macchiato_brew_count": {
         "name": "Nombre de latte macchiatos glacés"
       },

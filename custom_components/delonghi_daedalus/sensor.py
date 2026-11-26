@@ -56,8 +56,11 @@ _RECIPE_NAMES_BY_MODEL = {
     # ECAM47070 recipe 10 was verified as Flat White by the reporter of #102.
     # Issue #104: Iced Cappuccino moved recipe 51 from 2 to 3, total drinks
     # from 96 to 97, and cold drinks from 11 to 12 on ECAM47070.
+    # Issue #105: Caffelatte moved recipe 9 from 0 to 1, total brews from 98 to
+    # 99, and hot brews from 86 to 87 on ECAM47070.
     "ECAM47070": {
         **_ELETTA_ULTRA_RECIPE_NAMES,
+        9: "recipe_caffelatte_brew_count",
         10: "recipe_flat_white_brew_count",
         51: "recipe_iced_cappuccino_brew_count",
     },

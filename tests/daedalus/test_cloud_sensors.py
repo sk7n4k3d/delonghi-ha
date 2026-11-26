@@ -668,6 +668,29 @@ def test_recipe_51_iced_cappuccino_is_scoped_and_keeps_identity(model, translati
 
 
 @pytest.mark.parametrize(
+    ("model", "translation_key"),
+    [
+        ("ECAM47070", "recipe_caffelatte_brew_count"),
+        ("ECAM470.70", "recipe_caffelatte_brew_count"),
+        ("ECAM47075", "recipe_brew_count"),
+        ("ECAM63070", "recipe_brew_count"),
+        (None, "recipe_brew_count"),
+    ],
+)
+def test_recipe_9_caffelatte_is_scoped_and_keeps_identity(model, translation_key):
+    coord = _FakeCoordinator(_cloud(recipe_brew_counts={9: 0}), model=model)
+    added: list = []
+    asyncio.run(sp.async_setup_entry(_hass(coord), _entry(), added.extend))
+    (recipe,) = [entity for entity in added if isinstance(entity, sp.DaedalusRecipeBrewCountSensor)]
+    assert recipe._attr_translation_key == translation_key
+    assert recipe._attr_unique_id == "SN-TEST_recipe_9_brew_count"
+    assert recipe.suggested_object_id == "recipe_9_brew_count"
+    assert recipe.native_value == 0
+    coord.update(_cloud(recipe_brew_counts={9: 1}))
+    assert recipe.native_value == 1
+
+
+@pytest.mark.parametrize(
     ("translation_file", "expected"),
     [
         ("strings.json", "Iced Cappuccino brew count"),
