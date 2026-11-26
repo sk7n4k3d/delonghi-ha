@@ -279,6 +279,9 @@
       "recipe_black_eye_brew_count": {
         "name": "Număr de preparări de Black Eye"
       },
+      "recipe_iced_cappuccino_brew_count": {
+        "name": "Număr de preparări de cappuccino cu gheață"
+      },
       "recipe_iced_latte_macchiato_brew_count": {
         "name": "Număr de preparări de Latte Macchiato cu gheață"
       },

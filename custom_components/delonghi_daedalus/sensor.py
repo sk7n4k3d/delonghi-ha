@@ -54,7 +54,13 @@ _PRIMADONNA_AROMATIC_RECIPE_NAMES = {
 _RECIPE_NAMES_BY_MODEL = {
     **dict.fromkeys(_ELETTA_ULTRA_MODELS, _ELETTA_ULTRA_RECIPE_NAMES),
     # ECAM47070 recipe 10 was verified as Flat White by the reporter of #102.
-    "ECAM47070": {**_ELETTA_ULTRA_RECIPE_NAMES, 10: "recipe_flat_white_brew_count"},
+    # Issue #104: Iced Cappuccino moved recipe 51 from 2 to 3, total drinks
+    # from 96 to 97, and cold drinks from 11 to 12 on ECAM47070.
+    "ECAM47070": {
+        **_ELETTA_ULTRA_RECIPE_NAMES,
+        10: "recipe_flat_white_brew_count",
+        51: "recipe_iced_cappuccino_brew_count",
+    },
     "ECAM63070": _PRIMADONNA_AROMATIC_RECIPE_NAMES,
 }
 

@@ -279,6 +279,9 @@
       "recipe_black_eye_brew_count": {
         "name": "Nombre de Black Eye"
       },
+      "recipe_iced_cappuccino_brew_count": {
+        "name": "Nombre de cappuccinos glacés"
+      },
       "recipe_iced_latte_macchiato_brew_count": {
         "name": "Nombre de latte macchiatos glacés"
       },
