@@ -37,9 +37,9 @@ def _make_counter_sensor(coord, key: str) -> DeLonghiCounterSensor:
     return DeLonghiCounterSensor(coord, "DSN123", "Eletta", "Machine", None, key, meta)
 
 
-def _make_alarm_sensor(coord, bit: int, inverted: bool = False) -> DeLonghiAlarmSensor:
+def _make_alarm_sensor(coord, bit: int, inverted: bool = False, model: str = "Model") -> DeLonghiAlarmSensor:
     meta = {"icon": "mdi:alert", "inverted": inverted}
-    return DeLonghiAlarmSensor(coord, "DSN123", "Model", "Machine", None, bit, meta)
+    return DeLonghiAlarmSensor(coord, "DSN123", model, "Machine", None, bit, meta)
 
 
 class TestCounterSensorAvailable:
@@ -906,3 +906,36 @@ class TestCounterSensorBaselineWithStringCloudValue:
         with caplog.at_level(_logging.WARNING, logger="custom_components.delonghi_coffee.sensor"):
             assert sensor.native_value is None
         assert not [r for r in caplog.records if "non-numeric" in r.getMessage()]
+
+
+class TestAlarmQuietBits:
+    """Issue #108: striker bit 16 is a transient rinse flag, not "Cleaning Needed".
+
+    The entity must be registered disabled by default on Eletta Explore only;
+    every other model/bit keeps the enabled default, and the state logic is
+    untouched (an enabled entity still reports the raw bit).
+    """
+
+    def _coord(self, alarm_word: int):
+        coord = MagicMock()
+        coord.data = {"alarm_word": alarm_word}
+        coord.seen_alarm_bits = set()
+        coord.available = True
+        return coord
+
+    def test_eletta_explore_bit16_disabled_by_default(self):
+        sensor = _make_alarm_sensor(self._coord(0), bit=16, model="Eletta Explore")
+        assert getattr(sensor, "_attr_entity_registry_enabled_default", True) is False
+
+    def test_eletta_explore_other_bits_stay_enabled(self):
+        sensor = _make_alarm_sensor(self._coord(0), bit=2, model="Eletta Explore")
+        assert getattr(sensor, "_attr_entity_registry_enabled_default", True) is not False
+
+    def test_other_models_bit16_stays_enabled(self):
+        sensor = _make_alarm_sensor(self._coord(0), bit=16, model="PrimaDonna Soul")
+        assert getattr(sensor, "_attr_entity_registry_enabled_default", True) is not False
+
+    def test_state_logic_unchanged_when_enabled(self):
+        """A user who re-enables the entity still sees the raw bit."""
+        sensor = _make_alarm_sensor(self._coord(1 << 16), bit=16, model="Eletta Explore")
+        assert sensor.is_on is True

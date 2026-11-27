@@ -391,6 +391,16 @@ BLOCKING_ALARM_BITS: Final[frozenset[int]] = frozenset(
     bit for bit, meta in ALARMS.items() if meta.get("blocking") is True
 )
 
+# Bits whose generic ALARMS name does not hold on certain models (issue #108).
+# On the Eletta Explore (DL-striker-*), bit 16 lights right after the power-on
+# rinse and clears in the same second as bit 0 (Water Tank Empty) when the tank
+# is reinserted — a transient rinse/priming flag, not a brew-group cleaning
+# request; the machine's own screen never shows a cleaning prompt (15 periods
+# over 7 days reported). The true striker label is undocumented, so rather than
+# rename the bit with a guess, its entity is registered DISABLED by default on
+# these models — users who want the raw bit can enable it.
+ALARM_QUIET_BITS: Final[dict[str, frozenset[int]]] = {"Eletta Explore": frozenset({16})}
+
 # Machine state values (from MonitorDataV2.f() -> byte[9])
 # OEM model → friendly name mapping (from MachinesModels.json in Coffee Link APK)
 MODEL_NAMES: Final[dict[str, str]] = {

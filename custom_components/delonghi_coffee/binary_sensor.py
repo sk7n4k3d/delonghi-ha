@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ALARMS, DOMAIN
+from .const import ALARM_QUIET_BITS, ALARMS, DOMAIN
 from .coordinator import DeLonghiCoordinator
 from .logger import get_logger
 from .sensor import _device_info
@@ -60,6 +60,11 @@ class DeLonghiAlarmSensor(CoordinatorEntity[DeLonghiCoordinator], BinarySensorEn
         self._attr_has_entity_name = True
         self._attr_translation_key = f"alarm_{alarm_bit}"
         self._attr_icon = meta["icon"]
+        # Issue #108: on some models a bit carries a different, transient meaning
+        # (striker bit 16 = rinse/priming flag, not "Cleaning Needed"). Register
+        # such entities disabled by default instead of labelling them wrongly.
+        if alarm_bit in ALARM_QUIET_BITS.get(model, frozenset()):
+            self._attr_entity_registry_enabled_default = False
         self._attr_device_info = _device_info(dsn, model, device_name, sw_version)
 
     @property
